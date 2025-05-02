@@ -447,7 +447,7 @@ int32_t llm_chat_apply_template(
         if (add_ass) {
             ss << "<|assistant|>";
         }
-    } else if (tmpl == LLM_CHAT_TEMPLATE_CHATGLM_4 || tmpl == LLM_CHAT_TEMPLATE_GLMEDGE) {
+    } else if (tmpl == LLM_CHAT_TEMPLATE_CHATGLM_4) {
         ss << "[gMASK]" << "<sop>";
         for (auto message : chat) {
             std::string role(message->role);
@@ -455,6 +455,14 @@ int32_t llm_chat_apply_template(
         }
         if (add_ass) {
             ss << "<|assistant|>\n";
+        }
+    } else if (tmpl == LLM_CHAT_TEMPLATE_GLMEDGE) {
+        for (auto message : chat) {
+            std::string role(message->role);
+            ss << "<|" << role << "|>" << "\n" << message->content;
+        }
+        if (add_ass) {
+            ss << "<|assistant|>";
         }
     } else if (tmpl == LLM_CHAT_TEMPLATE_MINICPM) {
         // MiniCPM-3B-OpenHermes-2.5-v2-GGUF
