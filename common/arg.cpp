@@ -40,7 +40,7 @@ using json = nlohmann::ordered_json;
 
 std::initializer_list<enum llama_example> mmproj_examples = {
     LLAMA_EXAMPLE_LLAVA,
-    // TODO: add LLAMA_EXAMPLE_SERVER when it's ready
+    LLAMA_EXAMPLE_SERVER,
 };
 
 static std::string read_file(const std::string & fname) {
