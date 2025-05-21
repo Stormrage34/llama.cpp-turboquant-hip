@@ -3707,6 +3707,7 @@ int main(int argc, char ** argv) {
             "/health",
             "/models",
             "/v1/models",
+            "/api/tags"
         };
 
         // If API key is not set, skip validation
@@ -3745,7 +3746,7 @@ int main(int argc, char ** argv) {
             if (req.path == "/" || tmp.back() == "html") {
                 res.set_content(reinterpret_cast<const char*>(loading_html), loading_html_len, "text/html; charset=utf-8");
                 res.status = 503;
-            } else if (req.path == "/models" || req.path == "/v1/models") {
+            } else if (req.path == "/models" || req.path == "/v1/models" || req.path == "/api/tags") {
                 // allow the models endpoint to be accessed during loading
                 return true;
             } else {
@@ -4083,6 +4084,19 @@ int main(int argc, char ** argv) {
                     { "llama.context_length", ctx_server.slots.back().n_ctx, },
                 }
             },
+            {"modelfile", ""},
+            {"parameters", ""},
+            {"template", common_chat_templates_source(ctx_server.chat_templates.get())},
+            {"details", {
+                {"parent_model", ""},
+                {"format", "gguf"},
+                {"family", ""},
+                {"families", {""}},
+                {"parameter_size", ""},
+                {"quantization_level", ""}
+            }},
+            {"model_info", ""},
+            {"capabilities", {"completion"}}
         };
 
         res_ok(res, data);
@@ -4408,6 +4422,28 @@ int main(int argc, char ** argv) {
         }
 
         json models = {
+            {"models", {
+                {
+                    {"name", params.model_alias.empty() ? params.model.path : params.model_alias},
+                    {"model", params.model_alias.empty() ? params.model.path : params.model_alias},
+                    {"modified_at", ""},
+                    {"size", ""},
+                    {"digest", ""}, // dummy value, llama.cpp does not support managing model file's hash
+                    {"type", "model"},
+                    {"description", ""},
+                    {"tags", {""}},
+                    {"capabilities", {"completion"}},
+                    {"parameters", ""},
+                    {"details", {
+                        {"parent_model", ""},
+                        {"format", "gguf"},
+                        {"family", ""},
+                        {"families", {""}},
+                        {"parameter_size", ""},
+                        {"quantization_level", ""}
+                    }}
+                }
+            }},
             {"object", "list"},
             {"data", {
                 {
@@ -4417,7 +4453,7 @@ int main(int argc, char ** argv) {
                     {"owned_by", "llamacpp"},
                     {"meta",     model_meta},
                 },
-             }}
+            }}
         };
 
         res_ok(res, models);
@@ -4745,11 +4781,13 @@ int main(int argc, char ** argv) {
     svr->Post("/api/show",            handle_api_show);
     svr->Get ("/models",              handle_models); // public endpoint (no API key check)
     svr->Get ("/v1/models",           handle_models); // public endpoint (no API key check)
+    svr->Get ("/api/tags",            handle_models); // ollama specific endpoint. public endpoint (no API key check)
     svr->Post("/completion",          handle_completions); // legacy
     svr->Post("/completions",         handle_completions);
     svr->Post("/v1/completions",      handle_completions_oai);
     svr->Post("/chat/completions",    handle_chat_completions);
     svr->Post("/v1/chat/completions", handle_chat_completions);
+    svr->Post("/api/chat",            handle_chat_completions); // ollama specific endpoint
     svr->Post("/infill",              handle_infill);
     svr->Post("/embedding",           handle_embeddings); // legacy
     svr->Post("/embeddings",          handle_embeddings);
