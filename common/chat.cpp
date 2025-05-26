@@ -31,6 +31,11 @@ static std::string string_diff(const std::string & last, const std::string & cur
         return current;
     }
     if (!string_starts_with(current, last)) {
+        if (string_starts_with(last, current)) {
+            // This happens if the last generation ended on a partial stop word (not erased),
+            // and the current ended on a stop word (erased).
+            return "";
+        }
         throw std::runtime_error("Invalid diff: '" + last + "' not found at start of '" + current + "'");
     }
     return current.substr(last.size());
