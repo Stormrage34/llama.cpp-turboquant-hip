@@ -106,9 +106,9 @@ std::vector<common_chat_msg_diff> common_chat_msg_diff::compute_diffs(const comm
         if (!args_diff.empty() || pref.id != newf.id) {
             auto & diff = diffs.emplace_back();
             diff.tool_call_index = idx;
-            diff.tool_call_delta.name = newf.name;
             if (pref.id != newf.id) {
                 diff.tool_call_delta.id = newf.id;
+                diff.tool_call_delta.name = newf.name;
             }
             diff.tool_call_delta.arguments = args_diff;
         }
@@ -392,22 +392,19 @@ template <> json common_chat_msg_diff_to_json_oaicompat(const common_chat_msg_di
         delta["content"] = diff.content_delta;
     }
     if (diff.tool_call_index != std::string::npos) {
+        json tool_call;
+        tool_call["index"] = diff.tool_call_index;
+        if (!diff.tool_call_delta.id.empty()) {
+            tool_call["id"] = diff.tool_call_delta.id;
+            tool_call["type"] = "function";
+        }
         json function = json::object();
         if (!diff.tool_call_delta.name.empty()) {
             function["name"] = diff.tool_call_delta.name;
         }
-        if (!diff.tool_call_delta.id.empty()) {
-            function["id"] = diff.tool_call_delta.id;
-        }
-        if (!diff.tool_call_delta.arguments.empty()) {
-            function["arguments"] = diff.tool_call_delta.arguments;
-        }
-        delta["tool_calls"] = json::array({
-            json {
-                {"index", diff.tool_call_index},
-                {"function", function}
-            }
-        });
+        function["arguments"] = diff.tool_call_delta.arguments;
+        tool_call["function"] = function;
+        delta["tool_calls"] = json::array({tool_call});
     }
     return delta;
 }

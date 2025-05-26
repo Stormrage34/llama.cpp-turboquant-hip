@@ -1356,8 +1356,7 @@ static void test_msg_diffs_compute() {
 
         common_chat_msg_diff diff12;
         diff12.tool_call_index = 0;
-        diff12.tool_call_delta.name = "special_function";
-        // Note: id doesnt change here.
+        // Note: neither id nor name change here.
         diff12.tool_call_delta.arguments = "g1\": 1}";
 
         assert_equals(
