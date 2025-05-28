@@ -264,13 +264,19 @@ static size_t validate_utf8(const std::string& text) {
 static llama_tokens format_rerank(const struct llama_vocab * vocab, const llama_tokens & query, const llama_tokens & doc) {
     llama_tokens result;
 
+    // Get EOS token - use SEP token as fallback if EOS is not available
+    llama_token eos_token = llama_vocab_eos(vocab);
+    if (eos_token == LLAMA_TOKEN_NULL) {
+        eos_token = llama_vocab_sep(vocab);
+    }
+
     result.reserve(doc.size() + query.size() + 4);
     result.push_back(llama_vocab_bos(vocab));
     result.insert(result.end(), query.begin(), query.end());
-    result.push_back(llama_vocab_eos(vocab));
+    result.push_back(eos_token);
     result.push_back(llama_vocab_sep(vocab));
     result.insert(result.end(), doc.begin(), doc.end());
-    result.push_back(llama_vocab_eos(vocab));
+    result.push_back(eos_token);
 
     return result;
 }
