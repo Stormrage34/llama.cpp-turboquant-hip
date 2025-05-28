@@ -1841,7 +1841,8 @@ class StableLMModel(TextModel):
     "MistralForCausalLM",
     "MixtralForCausalLM",
     "VLlama3ForCausalLM",
-    "LlavaForConditionalGeneration")
+    "LlavaForConditionalGeneration",
+    "LlamaModel")
 class LlamaModel(TextModel):
     model_arch = gguf.MODEL_ARCH.LLAMA
     undo_permute = True
@@ -1921,6 +1922,8 @@ class LlamaModel(TextModel):
 
         if is_vision_tensor:
             return [] # skip vision tensors
+        elif self.hf_arch == "LlamaModel":
+            name = "model." + name
         elif name.startswith("model.text_model"):
             name = name.replace("text_model.", "") # for SmolVLM
         elif name.startswith("language_model."):
