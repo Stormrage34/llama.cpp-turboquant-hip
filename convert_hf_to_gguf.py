@@ -523,15 +523,15 @@ class TextModel(ModelBase):
             self.gguf_writer.add_context_length(n_ctx)
             logger.info(f"gguf: context length = {n_ctx}")
 
-        if (n_embd := self.find_hparam(["hidden_size", "n_embd"], optional=True)) is not None:
+        if (n_embd := self.find_hparam(["hidden_size", "n_embd", "dim"], optional=True)) is not None:
             self.gguf_writer.add_embedding_length(n_embd)
             logger.info(f"gguf: embedding length = {n_embd}")
 
-        if (n_ff := self.find_hparam(["intermediate_size", "n_inner"], optional=True)) is not None:
+        if (n_ff := self.find_hparam(["intermediate_size", "n_inner", "hidden_dim"], optional=True)) is not None:
             self.gguf_writer.add_feed_forward_length(n_ff)
             logger.info(f"gguf: feed forward length = {n_ff}")
 
-        if (n_head := self.find_hparam(["num_attention_heads", "n_head"], optional=True)) is not None:
+        if (n_head := self.find_hparam(["num_attention_heads", "n_head", "n_heads"], optional=True)) is not None:
             self.gguf_writer.add_head_count(n_head)
             logger.info(f"gguf: head count = {n_head}")
 
@@ -3905,6 +3905,26 @@ class BertModel(TextModel):
 
         self.gguf_writer.add_add_bos_token(True)
         self.gguf_writer.add_add_eos_token(True)
+
+
+@ModelBase.register("DistilBertModel", "DistilBertForMaskedLM", "DistilBertForSequenceClassification")
+class DistilBertModel(BertModel):
+    model_arch = gguf.MODEL_ARCH.BERT
+
+    def set_gguf_parameters(self):
+        self.gguf_writer.add_layer_norm_eps(1e-12)
+        logger.info("gguf: layer norm epsilon = 1e-12")
+        super().set_gguf_parameters()
+
+    def modify_tensors(self, data_torch: Tensor, name: str, bid: int | None) -> Iterable[tuple[str, Tensor]]:
+        if name.startswith("distilbert."):
+            name = name[11:]
+
+        # These layers act as MLM head, so we don't need them
+        if name.startswith("vocab_"):
+            return []
+
+        return super().modify_tensors(data_torch, name, bid)
 
 
 @ModelBase.register("RobertaModel", "RobertaForSequenceClassification")
