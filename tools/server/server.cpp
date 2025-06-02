@@ -2016,6 +2016,11 @@ struct server_context {
                 params_base.n_cache_reuse = 0;
                 SRV_WRN("%s\n", "cache_reuse is not supported by this context, it will be disabled");
             }
+
+            if (!params_base.speculative.model.path.empty()) {
+                SRV_ERR("%s\n", "err: speculative decode is not supported by this context");
+                return false;
+            }
         }
 
         return true;
@@ -3203,9 +3208,7 @@ struct server_context {
                                 }
                             } else {
                                 // if we don't cache the prompt, we have to remove the entire KV cache
-                                llama_kv_self_seq_rm(ctx, slot.id, 0, -1);
                                 slot.n_past = 0;
-                                slot.cache_tokens.clear(); // TODO: not needed, will be cleared later via "keep_first()"
                             }
 
                             if (slot.n_past > 0 && slot.n_past < (int) slot.cache_tokens.size()) {
@@ -3220,7 +3223,6 @@ struct server_context {
                                     SLT_WRN(slot, "n_past = %d, cache_tokens.size() = %d, seq_id = %d, pos_min = %d, n_swa = %d\n", slot.n_past, (int) slot.cache_tokens.size(), slot.id, pos_min, n_swa);
                                     SLT_WRN(slot, "forcing full prompt re-processing due to lack of cache data (likely due to SWA, see %s)\n",
                                             "https://github.com/ggml-org/llama.cpp/pull/13194#issuecomment-2868343055");
-                                    llama_kv_self_seq_rm(ctx, slot.id, 0, -1);
                                     slot.n_past = 0;
                                 }
                             }
