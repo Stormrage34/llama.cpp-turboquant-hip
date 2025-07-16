@@ -177,7 +177,8 @@ struct common_params_sampling {
     std::vector<common_grammar_trigger> grammar_triggers; // optional triggers (for lazy grammars)
     std::set<llama_token>               preserved_tokens;
 
-    std::vector<llama_logit_bias> logit_bias; // logit biases to apply
+    std::vector<llama_logit_bias> logit_bias;     // logit biases to apply
+    std::vector<llama_logit_bias> logit_bias_eog; // pre-calculated logit biases for EOG tokens
 
     // print the parameters into a string
     std::string print() const;

@@ -473,12 +473,9 @@ struct server_task {
 
             params.sampling.ignore_eos = json_value(data, "ignore_eos", params_base.sampling.ignore_eos);
             if (params.sampling.ignore_eos) {
-                for (llama_token i = 0; i < llama_vocab_n_tokens(vocab); i++) {
-                    if (llama_vocab_is_eog(vocab, i)) {
-                        //SRV_DBG("%s: added %s logit bias = %f\n", __func__, common_token_to_piece(ctx, i).c_str(), -INFINITY);
-                        params.sampling.logit_bias.push_back({i, -INFINITY});
-                    }
-                }
+                params.sampling.logit_bias.insert(
+                        params.sampling.logit_bias.end(),
+                        defaults.sampling.logit_bias_eog.begin(), defaults.sampling.logit_bias_eog.end());
             }
         }
 
@@ -1906,7 +1903,6 @@ struct server_context {
 
     bool clean_kv_cache = true;
     bool add_bos_token  = true;
-    bool has_eos_token  = false;
 
     int32_t n_ctx; // total context for all clients / slots
 
@@ -1965,7 +1961,6 @@ struct server_context {
         n_ctx = llama_n_ctx(ctx);
 
         add_bos_token = llama_vocab_get_add_bos(vocab);
-        has_eos_token = llama_vocab_eos(vocab) != LLAMA_TOKEN_NULL;
 
         if (!params_base.speculative.model.path.empty() || !params_base.speculative.model.hf_repo.empty()) {
             SRV_INF("loading draft model '%s'\n", params_base.speculative.model.path.c_str());
