@@ -72,7 +72,6 @@ Legend:
 |                      REPEAT_BACK | ❌ | ✅ | ✅ | ❌ | ❌ | ✅ |
 |                         RMS_NORM | ❌ | ✅ | ✅ | 🟡 | ✅ | ✅ |
 |                    RMS_NORM_BACK | ❌ | ✅ | ✅ | ❌ | ❌ | ✅ |
-|                     RMS_NORM_MUL | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 |                 RMS_NORM_MUL_ADD | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
 |                             ROLL | ❌ | ✅ | ❌ | ❌ | ❌ | ✅ |
 |                             ROPE | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
