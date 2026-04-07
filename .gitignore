@@ -145,3 +145,6 @@ poetry.toml
 /.windsurf/
 # emscripten
 a.out.*
+llama.cpp-*
+tail
+wget-log

@@ -7,6 +7,10 @@
 #include "sampling.h"
 #include "unicode.h"
 
+extern "C" {
+#include "../src/triattention.h"
+}
+
 #include <algorithm>
 #include <cinttypes>
 #include <climits>
@@ -1132,7 +1136,7 @@ static void common_init_sampler_from_model(
 
 struct common_init_result::impl {
     impl() = default;
-    ~impl() = default;
+    ~impl();
 
     // note: the order in which model, context, etc. are declared matters because their destructors will be called bottom-to-top
 
@@ -1143,6 +1147,9 @@ struct common_init_result::impl {
 
     std::vector<common_sampler_ptr> samplers;
     std::vector<llama_sampler_seq_config> samplers_seq_config;
+
+    // TriAttention KV cache pruning stats (NULL if disabled)
+    struct tria_stats * tria = nullptr;
 };
 
 common_init_result::common_init_result(common_params & params) :
@@ -1243,6 +1250,22 @@ common_init_result::common_init_result(common_params & params) :
     }
 
     pimpl->context.reset(lctx);
+
+    // Load TriAttention stats if configured
+    if (!params.triattention_stats_path.empty()) {
+        pimpl->tria = tria_load(params.triattention_stats_path.c_str());
+        if (pimpl->tria) {
+            LOG_INF("%s: loaded TriAttention stats from %s (%u layers, %u heads)\n",
+                    __func__, params.triattention_stats_path.c_str(),
+                    pimpl->tria->num_layers, pimpl->tria->num_heads);
+            LOG_INF("%s: TriAttention budget=%d%% window=%d interval=%d\n",
+                    __func__, params.triattention_budget_pct,
+                    params.triattention_window, params.triattention_interval);
+        } else {
+            LOG_ERR("%s: failed to load TriAttention stats from %s\n",
+                    __func__, params.triattention_stats_path.c_str());
+        }
+    }
 }
 
 llama_model * common_init_result::model() {
@@ -1251,6 +1274,14 @@ llama_model * common_init_result::model() {
 
 llama_context * common_init_result::context() {
     return pimpl->context.get();
+}
+
+struct tria_stats * common_init_result::triattention() {
+    return pimpl->tria;
+}
+
+common_init_result::impl::~impl() {
+    tria_free(tria);
 }
 
 common_sampler * common_init_result::sampler(llama_seq_id seq_id) {
