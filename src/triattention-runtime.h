@@ -40,15 +40,12 @@ void tria_runtime_free(struct tria_runtime * rt);
 
 /*
  * Check if we should score, and if so, do it.
- *
- * k_data[il]     — raw K cache data pointer per layer (CPU, dequantized, f32)
- * n_kv           — number of KV entries currently in cache
- * n_embd_k_gqa   — K embedding size (n_kv_heads * head_dim)
- *
- * Returns: number of tokens pruned (0 if no scoring happened)
+ * ctx — llama context (for KV cache access)
+ * n_kv — approximate number of tokens in cache
  */
 int tria_maybe_score(
     struct tria_runtime * rt,
+    void * ctx,  /* llama_context*, passed as void* to avoid C++ header dep */
     int n_kv
 );
 
