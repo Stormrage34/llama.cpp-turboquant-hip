@@ -275,9 +275,11 @@ llama_context::llama_context(
     // init the memory module
     if (!hparams.vocab_only) {
         llama_memory_params params_mem = {
-            /*.type_k   =*/ params.type_k,
-            /*.type_v   =*/ params.type_v,
-            /*.swa_full =*/ params.swa_full,
+            /*.type_k     =*/ params.type_k,
+            /*.type_v     =*/ params.type_v,
+            /*.type_k_swa =*/ params.type_k_swa == GGML_TYPE_COUNT ? params.type_k : params.type_k_swa,
+            /*.type_v_swa =*/ params.type_v_swa == GGML_TYPE_COUNT ? params.type_v : params.type_v_swa,
+            /*.swa_full   =*/ params.swa_full,
         };
 
         memory.reset(model.create_memory(params_mem, cparams));
@@ -2908,6 +2910,8 @@ llama_context_params llama_context_default_params() {
         /*.cb_eval_user_data           =*/ nullptr,
         /*.type_k                      =*/ GGML_TYPE_F16,
         /*.type_v                      =*/ GGML_TYPE_F16,
+        /*.type_k_swa                  =*/ GGML_TYPE_COUNT,
+        /*.type_v_swa                  =*/ GGML_TYPE_COUNT,
         /*.abort_callback              =*/ nullptr,
         /*.abort_callback_data         =*/ nullptr,
         /*.embeddings                  =*/ false,

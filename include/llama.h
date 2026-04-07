@@ -359,6 +359,9 @@ extern "C" {
         enum ggml_type type_k; // data type for K cache [EXPERIMENTAL]
         enum ggml_type type_v; // data type for V cache [EXPERIMENTAL]
 
+        enum ggml_type type_k_swa; // data type for K cache of SWA layers (GGML_TYPE_COUNT = use type_k)
+        enum ggml_type type_v_swa; // data type for V cache of SWA layers (GGML_TYPE_COUNT = use type_v)
+
         // Abort callback
         // if it returns true, execution of llama_decode() will be aborted
         // currently works only with CPU execution

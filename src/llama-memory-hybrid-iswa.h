@@ -28,6 +28,9 @@ public:
                  uint32_t   kv_size,
                  uint32_t   n_ubatch,
                  uint32_t   n_pad,
+                            /* attn swa override */
+                ggml_type   type_k_swa,
+                ggml_type   type_v_swa,
                             /* recurrent */
                 ggml_type   type_r,
                 ggml_type   type_s,
