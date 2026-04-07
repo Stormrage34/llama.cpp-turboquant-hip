@@ -8,6 +8,10 @@
 #include "llama.h"
 #include "log.h"
 #include "sampling.h"
+
+extern "C" {
+#include "../../src/triattention-runtime.h"
+}
 #include "speculative.h"
 #include "mtmd.h"
 #include "mtmd-helper.h"
@@ -559,6 +563,8 @@ private:
 
     llama_context * ctx = nullptr;
 
+    // TriAttention runtime (NULL if disabled)
+    struct tria_runtime * tria_rt = nullptr;
     llama_batch batch {};
 
     llama_model_ptr model_dft;
@@ -589,6 +595,9 @@ private:
     bool sleeping = false;
 
     void destroy() {
+        tria_runtime_free(tria_rt);
+        tria_rt = nullptr;
+
         llama_init.reset();
         ctx = nullptr;
         model = nullptr;
@@ -646,6 +655,22 @@ private:
 
         model = llama_init->model();
         ctx   = llama_init->context();
+
+        // Init TriAttention runtime if stats were loaded
+        if (llama_init->triattention()) {
+            tria_rt = tria_runtime_init(
+                llama_init->triattention(),
+                params_base.triattention_budget_pct,
+                params_base.triattention_window,
+                params_base.triattention_interval
+            );
+            if (tria_rt) {
+                SRV_INF("TriAttention runtime initialized (budget=%d%% window=%d interval=%d)\n",
+                        params_base.triattention_budget_pct,
+                        params_base.triattention_window,
+                        params_base.triattention_interval);
+            }
+        }
 
         if (model == nullptr) {
             SRV_ERR("failed to load model, '%s'\n", params_base.model.path.c_str());
@@ -2739,6 +2764,12 @@ private:
             };
 
             const int ret = llama_decode(ctx, batch_view);
+
+            // TriAttention: check if scoring should trigger
+            if (tria_rt && ret == 0) {
+                const int n_kv = (int)llama_memory_seq_pos_max(llama_get_memory(ctx), 0) + 1;
+                tria_maybe_score(tria_rt, n_kv);
+            }
 
             metrics.on_decoded(slots);
 

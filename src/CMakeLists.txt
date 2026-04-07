@@ -34,6 +34,7 @@ add_library(llama
             llama-sampler.cpp
             llama-vocab.cpp
             triattention.c
+            triattention-runtime.c
             unicode-data.cpp
             unicode.cpp
             unicode.h
