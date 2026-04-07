@@ -279,6 +279,16 @@ private:
 
     std::vector<kv_layer> layers;
 
+    // TriAttention: raw K tensor access for scoring
+public:
+    ggml_tensor * get_k_raw(int32_t il) const {
+        for (const auto & l : layers) {
+            if ((int32_t)l.il == il) return l.k;
+        }
+        return nullptr;
+    }
+private:
+
     // TurboQuant rotation matrices (128x128, row-major stored)
     ggml_tensor * turbo_rotation = nullptr;      // R (forward rotation)
     ggml_tensor * turbo_rotation_inv = nullptr;   // R^T = R^{-1} (inverse rotation)

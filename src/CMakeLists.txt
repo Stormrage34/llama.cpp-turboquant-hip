@@ -35,6 +35,7 @@ add_library(llama
             llama-vocab.cpp
             triattention.c
             triattention-runtime.c
+            triattention-bridge.cpp
             unicode-data.cpp
             unicode.cpp
             unicode.h
