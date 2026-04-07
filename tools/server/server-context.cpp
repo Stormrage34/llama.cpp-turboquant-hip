@@ -2766,9 +2766,13 @@ private:
             const int ret = llama_decode(ctx, batch_view);
 
             // TriAttention: check if scoring should trigger
-            if (tria_rt && ret == 0) {
-                const int n_kv = (int)llama_memory_seq_pos_max(llama_get_memory(ctx), 0) + 1;
-                tria_maybe_score(tria_rt, n_kv);
+            if (tria_rt) {
+                // Track cumulative tokens processed
+                static int tria_n_total = 0;
+                if (ret == 0) {
+                    tria_n_total += batch_view.n_tokens;
+                    tria_maybe_score(tria_rt, tria_n_total);
+                }
             }
 
             metrics.on_decoded(slots);

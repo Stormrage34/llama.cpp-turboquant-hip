@@ -49,6 +49,12 @@ int tria_maybe_score(
 ) {
     if (!rt || !rt->stats) return 0;
 
+    /* Debug: log every call */
+    if (n_kv > 0 && (n_kv % 64 == 0)) {
+        fprintf(stderr, "tria_check: n_kv=%d n_scored=%d interval=%d window=%d\n",
+                n_kv, rt->n_scored, rt->interval, rt->window);
+    }
+
     /* Check if we should score */
     if (n_kv - rt->n_scored < rt->interval) return 0;
     if (n_kv <= rt->window) return 0;
