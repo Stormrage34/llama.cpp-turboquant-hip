@@ -552,6 +552,12 @@ struct common_params {
     ggml_type cache_type_k_swa = GGML_TYPE_COUNT; // KV cache data type for K in SWA layers (COUNT = use cache_type_k)
     ggml_type cache_type_v_swa = GGML_TYPE_COUNT; // KV cache data type for V in SWA layers (COUNT = use cache_type_v)
 
+    // TriAttention KV cache pruning
+    std::string triattention_stats_path;           // path to TRIA v2 binary stats file
+    int         triattention_budget_pct  = 0;      // retention budget as % (0 = disabled, e.g. 25 = keep 25%)
+    int         triattention_window      = 512;    // recent window (always kept, never pruned)
+    int         triattention_interval    = 128;    // score/prune every N new tokens
+
     common_conversation_mode conversation_mode = COMMON_CONVERSATION_MODE_AUTO;
 
     // multimodal models (see tools/mtmd)

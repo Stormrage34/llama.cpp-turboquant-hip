@@ -2057,6 +2057,34 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         }
     ).set_env("LLAMA_ARG_CACHE_TYPE_V_SWA"));
     add_opt(common_arg(
+        {"--triattention"}, "PATH",
+        "path to TRIA calibration stats file for KV cache pruning (disabled by default)",
+        [](common_params & params, const std::string & value) {
+            params.triattention_stats_path = value;
+        }
+    ));
+    add_opt(common_arg(
+        {"--tri-budget"}, "N",
+        string_format("TriAttention retention budget as %% of cache (default: %d, 0 = disabled)", params.triattention_budget_pct),
+        [](common_params & params, int value) {
+            params.triattention_budget_pct = value;
+        }
+    ));
+    add_opt(common_arg(
+        {"--tri-window"}, "N",
+        string_format("TriAttention recent window size — always kept (default: %d)", params.triattention_window),
+        [](common_params & params, int value) {
+            params.triattention_window = value;
+        }
+    ));
+    add_opt(common_arg(
+        {"--tri-interval"}, "N",
+        string_format("TriAttention scoring interval in tokens (default: %d)", params.triattention_interval),
+        [](common_params & params, int value) {
+            params.triattention_interval = value;
+        }
+    ));
+    add_opt(common_arg(
         {"--hellaswag"},
         "compute HellaSwag score over random tasks from datafile supplied with -f",
         [](common_params & params) {
