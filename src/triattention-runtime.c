@@ -23,6 +23,7 @@ struct llama_kv_layer {
 
 /* Forward declaration — we'll get K tensor via a helper */
 extern struct ggml_tensor * tria_get_k_tensor(void * ctx, int layer_idx);
+extern int tria_get_n_kv(void * ctx);
 
 struct tria_runtime * tria_runtime_init(
     struct tria_stats * stats,
@@ -61,10 +62,12 @@ void tria_runtime_free(struct tria_runtime * rt) {
 
 int tria_maybe_score(
     struct tria_runtime * rt,
-    void * ctx,
-    int n_kv
+    void * ctx
 ) {
-    if (!rt || !rt->stats) return 0;
+    if (!rt || !rt->stats || !ctx) return 0;
+
+    int n_kv = tria_get_n_kv(ctx);
+    if (n_kv <= 0) return 0;
 
     /* Debug: log every 64 tokens */
     if (n_kv > 0 && (n_kv % 64 == 0)) {
