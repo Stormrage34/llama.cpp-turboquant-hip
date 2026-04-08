@@ -2766,13 +2766,6 @@ private:
 
             const int ret = llama_decode(ctx, batch_view);
 
-            // TriAttention: check if scoring should trigger
-            if (tria_rt) {
-                if (ret == 0) {
-                    tria_maybe_score(tria_rt, (void *)ctx);
-                }
-            }
-
             metrics.on_decoded(slots);
 
             if (ret != 0) {

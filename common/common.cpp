@@ -9,6 +9,7 @@
 
 extern "C" {
 #include "../src/triattention.h"
+#include "../src/triattention-runtime.h"
 }
 
 #include <algorithm>
@@ -1261,6 +1262,14 @@ common_init_result::common_init_result(common_params & params) :
             LOG_INF("%s: TriAttention budget=%d%% window=%d interval=%d\n",
                     __func__, params.triattention_budget_pct,
                     params.triattention_window, params.triattention_interval);
+
+            // Init runtime and set global pointer for mask injection
+            g_tria_rt = tria_runtime_init(
+                pimpl->tria,
+                params.triattention_budget_pct,
+                params.triattention_window,
+                params.triattention_interval
+            );
         } else {
             LOG_ERR("%s: failed to load TriAttention stats from %s\n",
                     __func__, params.triattention_stats_path.c_str());
