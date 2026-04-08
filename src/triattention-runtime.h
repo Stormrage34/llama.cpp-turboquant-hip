@@ -31,6 +31,7 @@ struct tria_runtime {
     float  *global_scores;  /* [n_scored], allocated on first score */
     int     global_n;       /* length of global_scores */
     int     global_budget;  /* how many tokens to keep globally */
+    int     compaction_active; /* 1 after physical compaction disables mask injection */
 };
 
 /*
@@ -39,6 +40,10 @@ struct tria_runtime {
  * Read by graph building code to apply eviction mask.
  */
 extern struct tria_runtime * g_tria_rt;
+
+/* Bridge helpers implemented in triattention-bridge.cpp. */
+struct ggml_tensor * tria_get_k_tensor(void * ctx, int layer_idx);
+int tria_get_n_kv(void * ctx);
 
 /* Create runtime. Returns NULL if stats is NULL or budget_pct == 0. */
 struct tria_runtime * tria_runtime_init(
@@ -71,6 +76,12 @@ int tria_get_evict_mask(
     const struct tria_runtime * rt,
     int n_kv,
     int8_t * evict_mask  /* out: [n_kv], 1=evicted 0=kept */
+);
+
+/* Physically compact the KV cache using the latest global_scores/global_budget. */
+int tria_compact_kv(
+    struct tria_runtime * rt,
+    void * ctx  /* llama_context* */
 );
 
 #ifdef __cplusplus

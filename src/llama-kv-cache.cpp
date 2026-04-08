@@ -1270,6 +1270,88 @@ uint32_t llama_kv_cache::get_size() const {
     return cells.size();
 }
 
+uint32_t llama_kv_cache::get_used_n_kv() const {
+    uint32_t used = 0;
+
+    for (uint32_t s = 0; s < n_stream; ++s) {
+        used = std::max<uint32_t>(used, v_cells[s].used_max_p1());
+    }
+
+    return used;
+}
+
+bool llama_kv_cache::triattention_compact(const std::vector<uint32_t> & keep_positions) {
+    if (n_stream != 1) {
+        LLAMA_LOG_WARN("%s: TriAttention compaction only supports a unified single-stream KV cache\n", __func__);
+        return false;
+    }
+
+    if (keep_positions.empty()) {
+        return false;
+    }
+
+    auto & cells = v_cells[0];
+    const uint32_t n_kv_old = cells.used_max_p1();
+    const uint32_t n_kv_new = keep_positions.size();
+
+    if (n_kv_new > n_kv_old || n_kv_old > cells.size()) {
+        return false;
+    }
+
+    for (uint32_t src : keep_positions) {
+        if (src >= n_kv_old || cells.is_empty(src)) {
+            LLAMA_LOG_WARN("%s: invalid TriAttention source row %u (n_kv_old=%u)\n", __func__, src, n_kv_old);
+            return false;
+        }
+    }
+
+    const auto compact_rows = [&](ggml_tensor * tensor) {
+        if (tensor == nullptr) {
+            return;
+        }
+
+        const size_t row_bytes = tensor->nb[1];
+        std::vector<uint8_t> row(row_bytes);
+
+        for (uint32_t dst = 0; dst < n_kv_new; ++dst) {
+            const uint32_t src = keep_positions[dst];
+            if (src == dst) {
+                continue;
+            }
+
+            ggml_backend_tensor_get(tensor, row.data(), src * row_bytes, row_bytes);
+            ggml_backend_tensor_set(tensor, row.data(), dst * row_bytes, row_bytes);
+        }
+    };
+
+    for (const auto & layer : layers) {
+        compact_rows(layer.k);
+        compact_rows(layer.v);
+    }
+
+    llama_kv_cells compacted;
+    compacted.resize(cells.size());
+
+    for (uint32_t dst = 0; dst < n_kv_new; ++dst) {
+        const uint32_t src = keep_positions[dst];
+        compacted.pos_set(dst, cells.pos_get(src));
+        compacted.ext_set(dst, cells.ext_get(src));
+
+        for (int32_t seq_id = 0; seq_id < LLAMA_MAX_SEQ; ++seq_id) {
+            if (cells.seq_has(src, seq_id)) {
+                compacted.seq_add(dst, seq_id);
+            }
+        }
+    }
+
+    cells = std::move(compacted);
+    v_heads[0] = n_kv_new < cells.size() ? n_kv_new : 0;
+
+    LLAMA_LOG_INFO("%s: TriAttention compacted KV cache from %u to %u rows\n", __func__, n_kv_old, n_kv_new);
+
+    return true;
+}
+
 uint32_t llama_kv_cache::get_n_stream() const {
     return n_stream;
 }
@@ -1859,7 +1941,7 @@ void llama_kv_cache::set_input_kq_mask(ggml_tensor * dst, const llama_ubatch * u
     }
 
     /* TriAttention: apply eviction mask after standard mask fill */
-    if (g_tria_rt && g_tria_rt->n_scored > 0 && n_kv > 0) {
+    if (g_tria_rt && !g_tria_rt->compaction_active && g_tria_rt->n_scored > 0 && n_kv > 0) {
         static thread_local int8_t * evict = nullptr;
         static thread_local int64_t evict_cap = 0;
         if (n_kv > evict_cap) {

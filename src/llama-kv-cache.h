@@ -282,6 +282,9 @@ public:
         }
         return nullptr;
     }
+
+    uint32_t get_used_n_kv() const;
+    bool triattention_compact(const std::vector<uint32_t> & keep_positions);
 private:
 
     // TurboQuant rotation matrices (128x128, row-major stored)

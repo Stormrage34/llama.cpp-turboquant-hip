@@ -26,6 +26,7 @@ struct llama_kv_layer {
 /* Forward declaration — we'll get K tensor via a helper */
 extern struct ggml_tensor * tria_get_k_tensor(void * ctx, int layer_idx);
 extern int tria_get_n_kv(void * ctx);
+extern int tria_compact_kv(struct tria_runtime * rt, void * ctx);
 
 struct tria_runtime * tria_runtime_init(
     struct tria_stats * stats,
@@ -59,6 +60,7 @@ void tria_runtime_free(struct tria_runtime * rt) {
         free(rt->retained);
     }
     free(rt->retained_count);
+    free(rt->global_scores);
     free(rt);
 }
 
@@ -80,6 +82,7 @@ int tria_maybe_score(
     /* Reset if cache was cleared (perplexity resets between chunks) */
     if (n_kv < rt->n_scored) {
         rt->n_scored = 0;
+        rt->compaction_active = 0;
     }
 
     /* Check if we should score */
@@ -118,6 +121,7 @@ int tria_maybe_score(
     }
     for (int i = 0; i < n_old; i++) rt->global_scores[i] = -1e30f;
     rt->global_budget = budget;
+    rt->compaction_active = 0;
 
     if (!k_f32 || !scores || !key_pos || !rt->global_scores) {
         free(k_f32); free(scores); free(key_pos);
@@ -154,8 +158,6 @@ int tria_maybe_score(
         }
 
         /* Score each KV head */
-        int layer_budget = tria_layer_budget(rt->stats, li, budget);
-
         for (int kvi = 0; kvi < nkv; kvi++) {
             /* Extract this KV head's data: k_f32 is [n_old, n_embd_k_gqa] */
             /* KV head kvi occupies columns [kvi*hd .. (kvi+1)*hd) */
@@ -206,6 +208,15 @@ int tria_maybe_score(
     free(scores);
     free(key_pos);
 
+    {
+        const int compacted = tria_compact_kv(rt, ctx);
+        if (compacted > 0) {
+            rt->compaction_active = 1;
+            rt->n_scored = tria_get_n_kv(ctx);
+            return compacted;
+        }
+    }
+
     rt->n_scored = n_kv;
     return total_pruned;
 }
@@ -216,6 +227,7 @@ int tria_get_evict_mask(
     int8_t * evict_mask
 ) {
     if (!rt || rt->n_scored == 0 || !evict_mask) return 0;
+    if (rt->compaction_active) return 0;
     if (!rt->global_scores || rt->global_budget <= 0) return 0;
 
     int n_old = rt->n_scored - rt->window;
