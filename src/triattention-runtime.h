@@ -44,6 +44,8 @@ extern struct tria_runtime * g_tria_rt;
 /* Bridge helpers implemented in triattention-bridge.cpp. */
 struct ggml_tensor * tria_get_k_tensor(void * ctx, int layer_idx);
 int tria_get_n_kv(void * ctx);
+int tria_get_used_n_kv(void * ctx);
+int tria_get_kv_positions(void * ctx, int * positions, int max_positions);
 
 /* Create runtime. Returns NULL if stats is NULL or budget_pct == 0. */
 struct tria_runtime * tria_runtime_init(

@@ -284,6 +284,7 @@ public:
     }
 
     uint32_t get_used_n_kv() const;
+    bool get_cell_positions(std::vector<llama_pos> & positions) const;
     bool triattention_compact(const std::vector<uint32_t> & keep_positions);
 private:
 

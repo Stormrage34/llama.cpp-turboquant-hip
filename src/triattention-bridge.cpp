@@ -31,7 +31,44 @@ int tria_get_n_kv(void * ctx_void) {
     auto * kv = dynamic_cast<llama_kv_cache *>(mem);
     if (!kv) return 0;
 
+    llama_pos pmax = kv->seq_pos_max(0);
+    return (pmax >= 0) ? (int) (pmax + 1) : 0;
+}
+
+int tria_get_used_n_kv(void * ctx_void) {
+    auto * ctx = (llama_context *)ctx_void;
+    auto * mem = llama_get_memory(ctx);
+    if (!mem) return 0;
+
+    auto * kv = dynamic_cast<llama_kv_cache *>(mem);
+    if (!kv) return 0;
+
     return (int) kv->get_used_n_kv();
+}
+
+int tria_get_kv_positions(void * ctx_void, int * positions, int max_positions) {
+    auto * ctx = (llama_context *)ctx_void;
+    if (!ctx || !positions || max_positions <= 0) {
+        return 0;
+    }
+
+    auto * mem = llama_get_memory(ctx);
+    if (!mem) return 0;
+
+    auto * kv = dynamic_cast<llama_kv_cache *>(mem);
+    if (!kv) return 0;
+
+    std::vector<llama_pos> kv_positions;
+    if (!kv->get_cell_positions(kv_positions)) {
+        return 0;
+    }
+
+    const int n = std::min<int>((int) kv_positions.size(), max_positions);
+    for (int i = 0; i < n; ++i) {
+        positions[i] = (int) kv_positions[i];
+    }
+
+    return n;
 }
 
 int tria_compact_kv(struct tria_runtime * rt, void * ctx_void) {

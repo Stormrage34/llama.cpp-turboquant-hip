@@ -26,6 +26,8 @@ struct llama_kv_layer {
 /* Forward declaration — we'll get K tensor via a helper */
 extern struct ggml_tensor * tria_get_k_tensor(void * ctx, int layer_idx);
 extern int tria_get_n_kv(void * ctx);
+extern int tria_get_used_n_kv(void * ctx);
+extern int tria_get_kv_positions(void * ctx, int * positions, int max_positions);
 extern int tria_compact_kv(struct tria_runtime * rt, void * ctx);
 
 struct tria_runtime * tria_runtime_init(
@@ -71,13 +73,8 @@ int tria_maybe_score(
     if (!rt || !rt->stats || !ctx) return 0;
 
     int n_kv = tria_get_n_kv(ctx);
-    if (n_kv <= 0) return 0;
-
-    /* Debug: log every 64 tokens */
-    if (n_kv > 0 && (n_kv % 64 == 0)) {
-        fprintf(stderr, "tria_check: n_kv=%d n_scored=%d interval=%d window=%d\n",
-                n_kv, rt->n_scored, rt->interval, rt->window);
-    }
+    int n_used = tria_get_used_n_kv(ctx);
+    if (n_kv <= 0 || n_used <= 0) return 0;
 
     /* Reset if cache was cleared (perplexity resets between chunks) */
     if (n_kv < rt->n_scored) {
@@ -87,14 +84,14 @@ int tria_maybe_score(
 
     /* Check if we should score */
     if (n_kv - rt->n_scored < rt->interval) return 0;
-    if (n_kv <= rt->window) return 0;
+    if (n_used <= rt->window) return 0;
 
     int nl  = rt->stats->num_layers;
     int nkv = rt->stats->num_kv_heads;
     int fc  = rt->stats->freq_count;
     int hd  = rt->stats->head_dim;
 
-    int n_old = n_kv - rt->window;
+    int n_old = n_used - rt->window;
     if (n_old <= 0) return 0;
 
     int budget = (n_old * rt->budget_pct) / 100;
@@ -129,7 +126,11 @@ int tria_maybe_score(
         return 0;
     }
 
-    for (int i = 0; i < n_old; i++) key_pos[i] = i;
+    if (tria_get_kv_positions(ctx, key_pos, n_old) != n_old) {
+        free(k_f32); free(scores); free(key_pos);
+        rt->n_scored = n_kv;
+        return 0;
+    }
 
     int total_pruned = 0;
 

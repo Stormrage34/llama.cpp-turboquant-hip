@@ -1280,6 +1280,25 @@ uint32_t llama_kv_cache::get_used_n_kv() const {
     return used;
 }
 
+bool llama_kv_cache::get_cell_positions(std::vector<llama_pos> & positions) const {
+    if (n_stream != 1) {
+        return false;
+    }
+
+    const auto & cells = v_cells[0];
+    const uint32_t used = cells.used_max_p1();
+
+    positions.resize(used);
+    for (uint32_t i = 0; i < used; ++i) {
+        if (cells.is_empty(i)) {
+            return false;
+        }
+        positions[i] = cells.pos_get(i);
+    }
+
+    return true;
+}
+
 bool llama_kv_cache::triattention_compact(const std::vector<uint32_t> & keep_positions) {
     if (n_stream != 1) {
         LLAMA_LOG_WARN("%s: TriAttention compaction only supports a unified single-stream KV cache\n", __func__);
