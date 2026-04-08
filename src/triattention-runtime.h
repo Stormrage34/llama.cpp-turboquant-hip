@@ -32,6 +32,7 @@ struct tria_runtime {
     int     global_n;       /* length of global_scores */
     int     global_budget;  /* how many tokens to keep globally */
     int     compaction_active; /* 1 after physical compaction disables mask injection */
+    int     score_pass;     /* counts scoring passes, full rescore every TRIA_FULL_RESCORE_INTERVAL */
 };
 
 /*

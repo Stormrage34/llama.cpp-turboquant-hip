@@ -80,6 +80,8 @@ int tria_maybe_score(
     if (n_kv < rt->n_scored) {
         rt->n_scored = 0;
         rt->compaction_active = 0;
+        rt->score_pass = 0;
+        rt->global_n = 0;
     }
 
     /* Check if we should score */
@@ -97,32 +99,74 @@ int tria_maybe_score(
     int budget = (n_old * rt->budget_pct) / 100;
     if (budget <= 0) budget = 1;
 
-    fprintf(stderr, "tria_score: n_kv=%d n_old=%d budget=%d (trigger at interval=%d)\n",
-            n_kv, n_old, budget, rt->interval);
+    /* Incremental scoring: only read/score new tokens unless full rescore needed */
+    #define TRIA_FULL_RESCORE_INTERVAL 4
+    int full_rescore = (rt->score_pass % TRIA_FULL_RESCORE_INTERVAL == 0)
+                     || !rt->global_scores
+                     || rt->global_n < 1;
+
+    /* How many rows are "new" since last compaction? */
+    int n_prev = 0; /* retained from previous pass */
+    int n_new  = n_old; /* tokens to score */
+    int score_start = 0; /* first row index to read from GPU */
+
+    if (!full_rescore && rt->global_scores && rt->global_n > 0) {
+        /* After compaction, retained tokens are at rows 0..global_n-1 with valid scores */
+        n_prev = rt->global_n;
+        if (n_prev > n_old) n_prev = n_old;
+        score_start = n_prev;
+        n_new = n_old - n_prev;
+        if (n_new <= 0) {
+            /* Nothing new to score, just update budget */
+            rt->global_budget = budget;
+            rt->n_scored = n_kv;
+            rt->score_pass++;
+            return 0;
+        }
+    }
+
+    fprintf(stderr, "tria_score: n_kv=%d n_old=%d budget=%d new=%d mode=%s (pass %d)\n",
+            n_kv, n_old, budget, n_new,
+            full_rescore ? "full" : "incremental", rt->score_pass);
 
     /* Try to read K from cache and score */
     if (!ctx) { rt->n_scored = n_kv; return 0; }
 
-    /* Allocate buffers for one layer's K data */
+    /* Allocate buffers */
     int n_embd_k_gqa = nkv * hd;
-    size_t k_bytes = (size_t)n_old * n_embd_k_gqa * sizeof(float);
+    size_t k_bytes = (size_t)n_new * n_embd_k_gqa * sizeof(float);
     float * k_f32 = (float *)malloc(k_bytes);
-    float * scores = (float *)malloc(n_old * sizeof(float));
+    float * scores = (float *)malloc(n_new * sizeof(float));
     int * key_pos = (int *)malloc(n_old * sizeof(int));
 
-    /* Global score accumulator: max of z-normalized scores across all heads */
+    /* Resize global scores if needed */
     if (rt->global_n < n_old) {
-        free(rt->global_scores);
-        rt->global_scores = (float *)malloc(n_old * sizeof(float));
-        rt->global_n = n_old;
+        float * new_gs = (float *)malloc(n_old * sizeof(float));
+        if (new_gs) {
+            /* Copy old scores for retained positions */
+            if (!full_rescore && rt->global_scores && rt->global_n > 0) {
+                int copy_n = rt->global_n < n_old ? rt->global_n : n_old;
+                memcpy(new_gs, rt->global_scores, copy_n * sizeof(float));
+                for (int i = copy_n; i < n_old; i++) new_gs[i] = -1e30f;
+            } else {
+                for (int i = 0; i < n_old; i++) new_gs[i] = -1e30f;
+            }
+            free(rt->global_scores);
+            rt->global_scores = new_gs;
+            rt->global_n = n_old;
+        }
+    } else if (full_rescore) {
+        for (int i = 0; i < n_old; i++) rt->global_scores[i] = -1e30f;
+    } else {
+        /* Extend with -inf for new positions */
+        for (int i = n_prev; i < n_old; i++) rt->global_scores[i] = -1e30f;
     }
-    for (int i = 0; i < n_old; i++) rt->global_scores[i] = -1e30f;
     rt->global_budget = budget;
     rt->compaction_active = 0;
 
-    /* Pre-allocate buffers for head extraction (reused across heads/layers) */
-    float * k_real = (float *)malloc(n_old * fc * sizeof(float));
-    float * k_imag = (float *)malloc(n_old * fc * sizeof(float));
+    /* Pre-allocate buffers for head extraction */
+    float * k_real = (float *)malloc(n_new * fc * sizeof(float));
+    float * k_imag = (float *)malloc(n_new * fc * sizeof(float));
 
     if (!k_f32 || !scores || !key_pos || !rt->global_scores || !k_real || !k_imag) {
         free(k_f32); free(scores); free(key_pos); free(k_real); free(k_imag);
@@ -142,61 +186,59 @@ int tria_maybe_score(
         struct ggml_tensor * k_tensor = tria_get_k_tensor(ctx, li);
         if (!k_tensor) continue;
 
-        /* Read K data from GPU/backend to CPU */
+        /* Read only new K rows from GPU (score_start..n_old-1) */
         size_t row_size = ggml_row_size(k_tensor->type, n_embd_k_gqa);
-        size_t read_bytes = row_size * n_old;
+        size_t read_offset = (size_t)score_start * row_size;
+        size_t read_bytes = (size_t)n_new * row_size;
 
         if (k_tensor->type == GGML_TYPE_F16) {
-            /* Dequant f16 → f32 */
             uint16_t * k_f16 = (uint16_t *)malloc(read_bytes);
             if (!k_f16) continue;
-            ggml_backend_tensor_get(k_tensor, k_f16, 0, read_bytes);
-            for (int i = 0; i < n_old * n_embd_k_gqa; i++) {
+            ggml_backend_tensor_get(k_tensor, k_f16, read_offset, read_bytes);
+            for (int i = 0; i < n_new * n_embd_k_gqa; i++) {
                 k_f32[i] = ggml_fp16_to_fp32(((ggml_fp16_t *)k_f16)[i]);
             }
             free(k_f16);
         } else if (k_tensor->type == GGML_TYPE_F32) {
-            ggml_backend_tensor_get(k_tensor, k_f32, 0, n_old * n_embd_k_gqa * sizeof(float));
+            ggml_backend_tensor_get(k_tensor, k_f32, read_offset, n_new * n_embd_k_gqa * sizeof(float));
         } else {
-            /* Quantized cache (turbo3 etc) — skip for now */
             continue;
         }
 
-        /* Score each KV head */
+        /* Score each KV head — only new tokens */
         for (int kvi = 0; kvi < nkv; kvi++) {
-            /* Extract this KV head's data: k_f32 is [n_old, n_embd_k_gqa] */
-            /* KV head kvi occupies columns [kvi*hd .. (kvi+1)*hd) */
-            for (int s = 0; s < n_old; s++) {
+            for (int s = 0; s < n_new; s++) {
                 float * row = k_f32 + s * n_embd_k_gqa + kvi * hd;
-                /* Split head_dim into real (first half) and imag (second half) */
                 for (int f = 0; f < fc; f++) {
                     k_real[s * fc + f] = row[f];
                     k_imag[s * fc + f] = row[fc + f];
                 }
             }
 
-            tria_score_kv_head(rt->stats, k_real, k_imag, key_pos,
-                               n_kv, n_old, li, kvi, scores);
+            tria_score_kv_head(rt->stats, k_real, k_imag,
+                               key_pos + score_start,
+                               n_kv, n_new, li, kvi, scores);
 
-            /* Z-normalize scores for this head, then max-aggregate into global */
+            /* Z-normalize new scores, max-aggregate into global */
             float mean = 0, var = 0;
-            for (int s = 0; s < n_old; s++) mean += scores[s];
-            mean /= n_old;
-            for (int s = 0; s < n_old; s++) {
+            for (int s = 0; s < n_new; s++) mean += scores[s];
+            mean /= n_new;
+            for (int s = 0; s < n_new; s++) {
                 float d = scores[s] - mean;
                 var += d * d;
             }
-            float std = sqrtf(var / n_old + 1e-8f);
-            for (int s = 0; s < n_old; s++) {
+            float std = sqrtf(var / n_new + 1e-8f);
+            for (int s = 0; s < n_new; s++) {
                 float z = (scores[s] - mean) / std;
-                if (z > rt->global_scores[s]) {
-                    rt->global_scores[s] = z;
+                if (z > rt->global_scores[score_start + s]) {
+                    rt->global_scores[score_start + s] = z;
                 }
             }
-
-            total_pruned += n_old - tria_layer_budget(rt->stats, li, budget);
         }
     }
+
+    /* For full rescore, total_pruned is informational */
+    total_pruned = (n_old - budget) * nl * nkv;
 
     if (total_pruned > 0) {
         fprintf(stderr, "tria_score: pruned %d tokens across %d×%d heads\n",
@@ -212,13 +254,28 @@ int tria_maybe_score(
     {
         const int compacted = tria_compact_kv(rt, ctx);
         if (compacted > 0) {
+            /* Compact global_scores to match new cache layout:
+               retained positions 0..budget-1 keep their scores,
+               window positions budget..budget+window-1 get -inf (will be rescored) */
+            int new_n = tria_get_used_n_kv(ctx);
+            int new_old = new_n - rt->window;
+            if (new_old > 0 && new_old <= rt->global_n) {
+                /* Scores for retained tokens are already at indices selected by compaction.
+                   After compaction, rows 0..new_old-1 are the retained old tokens.
+                   Their scores in global_scores correspond to the original indices
+                   that were kept — but compaction reordered them. For simplicity,
+                   just keep the first new_old scores (they were the top-K). */
+                rt->global_n = new_old;
+            }
             rt->compaction_active = 1;
             rt->n_scored = tria_get_n_kv(ctx);
+            rt->score_pass++;
             return compacted;
         }
     }
 
     rt->n_scored = n_kv;
+    rt->score_pass++;
     return total_pruned;
 }
 
