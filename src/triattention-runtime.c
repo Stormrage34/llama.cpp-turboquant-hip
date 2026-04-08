@@ -120,14 +120,18 @@ int tria_maybe_score(
     rt->global_budget = budget;
     rt->compaction_active = 0;
 
-    if (!k_f32 || !scores || !key_pos || !rt->global_scores) {
-        free(k_f32); free(scores); free(key_pos);
+    /* Pre-allocate buffers for head extraction (reused across heads/layers) */
+    float * k_real = (float *)malloc(n_old * fc * sizeof(float));
+    float * k_imag = (float *)malloc(n_old * fc * sizeof(float));
+
+    if (!k_f32 || !scores || !key_pos || !rt->global_scores || !k_real || !k_imag) {
+        free(k_f32); free(scores); free(key_pos); free(k_real); free(k_imag);
         rt->n_scored = n_kv;
         return 0;
     }
 
     if (tria_get_kv_positions(ctx, key_pos, n_old) != n_old) {
-        free(k_f32); free(scores); free(key_pos);
+        free(k_f32); free(scores); free(key_pos); free(k_real); free(k_imag);
         rt->n_scored = n_kv;
         return 0;
     }
@@ -162,10 +166,6 @@ int tria_maybe_score(
         for (int kvi = 0; kvi < nkv; kvi++) {
             /* Extract this KV head's data: k_f32 is [n_old, n_embd_k_gqa] */
             /* KV head kvi occupies columns [kvi*hd .. (kvi+1)*hd) */
-            float * k_real = (float *)malloc(n_old * fc * sizeof(float));
-            float * k_imag = (float *)malloc(n_old * fc * sizeof(float));
-            if (!k_real || !k_imag) { free(k_real); free(k_imag); continue; }
-
             for (int s = 0; s < n_old; s++) {
                 float * row = k_f32 + s * n_embd_k_gqa + kvi * hd;
                 /* Split head_dim into real (first half) and imag (second half) */
@@ -195,8 +195,6 @@ int tria_maybe_score(
             }
 
             total_pruned += n_old - tria_layer_budget(rt->stats, li, budget);
-            free(k_real);
-            free(k_imag);
         }
     }
 
@@ -208,6 +206,8 @@ int tria_maybe_score(
     free(k_f32);
     free(scores);
     free(key_pos);
+    free(k_real);
+    free(k_imag);
 
     {
         const int compacted = tria_compact_kv(rt, ctx);
@@ -240,8 +240,7 @@ int tria_get_evict_mask(
         return 1;
     }
 
-    /* Find the budget-th largest score as threshold (partial sort via nth_element idea) */
-    /* Simple approach: find threshold by sorting scores */
+    /* Find the budget-th largest score as threshold via quickselect O(n) */
     static float * sorted = NULL;
     static int sorted_cap = 0;
     if (n_old > sorted_cap) {
@@ -251,17 +250,24 @@ int tria_get_evict_mask(
     }
     memcpy(sorted, rt->global_scores, n_old * sizeof(float));
 
-    /* Partial sort: find the budget-th largest value */
-    /* Use simple selection: find threshold where exactly budget items are >= it */
-    /* Quick approach: sort descending, threshold = sorted[budget-1] */
-    for (int i = 0; i < budget; i++) {
-        int max_idx = i;
-        for (int j = i + 1; j < n_old; j++) {
-            if (sorted[j] > sorted[max_idx]) max_idx = j;
+    /* Quickselect: partition around budget-th largest */
+    int lo = 0, hi = n_old - 1, target = budget - 1;
+    while (lo < hi) {
+        float pivot = sorted[lo + (hi - lo) / 2];
+        int i = lo, j = hi;
+        while (i <= j) {
+            while (sorted[i] > pivot) i++;
+            while (sorted[j] < pivot) j--;
+            if (i <= j) {
+                float tmp = sorted[i]; sorted[i] = sorted[j]; sorted[j] = tmp;
+                i++; j--;
+            }
         }
-        float tmp = sorted[i]; sorted[i] = sorted[max_idx]; sorted[max_idx] = tmp;
+        if (target <= j) hi = j;
+        else if (target >= i) lo = i;
+        else break;
     }
-    float threshold = sorted[budget - 1];
+    float threshold = sorted[target];
 
     /* Build mask: evict if below threshold */
     memset(evict_mask, 0, n_kv);

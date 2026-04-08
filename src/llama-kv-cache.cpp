@@ -1330,17 +1330,24 @@ bool llama_kv_cache::triattention_compact(const std::vector<uint32_t> & keep_pos
         }
 
         const size_t row_bytes = tensor->nb[1];
-        std::vector<uint8_t> row(row_bytes);
 
-        for (uint32_t dst = 0; dst < n_kv_new; ++dst) {
-            const uint32_t src = keep_positions[dst];
-            if (src == dst) {
-                continue;
-            }
-
-            ggml_backend_tensor_get(tensor, row.data(), src * row_bytes, row_bytes);
-            ggml_backend_tensor_set(tensor, row.data(), dst * row_bytes, row_bytes);
+        /* Batch: read all retained rows, then write them contiguously */
+        /* Skip if first N rows are already in place */
+        uint32_t first_move = 0;
+        while (first_move < n_kv_new && keep_positions[first_move] == first_move) {
+            first_move++;
         }
+        if (first_move >= n_kv_new) return;
+
+        const uint32_t n_move = n_kv_new - first_move;
+        std::vector<uint8_t> buf(n_move * row_bytes);
+
+        for (uint32_t i = 0; i < n_move; ++i) {
+            ggml_backend_tensor_get(tensor, buf.data() + i * row_bytes,
+                                    keep_positions[first_move + i] * row_bytes, row_bytes);
+        }
+        ggml_backend_tensor_set(tensor, buf.data(),
+                                first_move * row_bytes, n_move * row_bytes);
     };
 
     for (const auto & layer : layers) {
