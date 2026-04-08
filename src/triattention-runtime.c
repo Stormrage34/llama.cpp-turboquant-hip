@@ -100,7 +100,10 @@ int tria_maybe_score(
     if (budget <= 0) budget = 1;
 
     /* Incremental scoring: only read/score new tokens unless full rescore needed */
-    #define TRIA_FULL_RESCORE_INTERVAL 4
+    /* Incremental scoring disabled pending fix for score reordering after compaction
+       and z-norm drift between incremental/full passes (Codex review P1a/P1b).
+       Force full rescore every pass for now. */
+    #define TRIA_FULL_RESCORE_INTERVAL 1
     int full_rescore = (rt->score_pass % TRIA_FULL_RESCORE_INTERVAL == 0)
                      || !rt->global_scores
                      || rt->global_n < 1;
@@ -154,6 +157,11 @@ int tria_maybe_score(
             free(rt->global_scores);
             rt->global_scores = new_gs;
             rt->global_n = n_old;
+        } else {
+            /* Resize failed — bail out to avoid buffer overrun */
+            free(k_f32); free(scores); free(key_pos);
+            rt->n_scored = n_kv;
+            return 0;
         }
     } else if (full_rescore) {
         for (int i = 0; i < n_old; i++) rt->global_scores[i] = -1e30f;
