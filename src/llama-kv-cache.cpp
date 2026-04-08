@@ -1860,7 +1860,13 @@ void llama_kv_cache::set_input_kq_mask(ggml_tensor * dst, const llama_ubatch * u
 
     /* TriAttention: apply eviction mask after standard mask fill */
     if (g_tria_rt && g_tria_rt->n_scored > 0 && n_kv > 0) {
-        int8_t * evict = (int8_t *)calloc(n_kv, sizeof(int8_t));
+        static thread_local int8_t * evict = nullptr;
+        static thread_local int64_t evict_cap = 0;
+        if (n_kv > evict_cap) {
+            free(evict);
+            evict = (int8_t *)malloc(n_kv);
+            evict_cap = n_kv;
+        }
         if (evict && tria_get_evict_mask(g_tria_rt, n_kv, evict)) {
             for (int64_t s = 0; s < n_stream; s++) {
                 for (int64_t t = 0; t < n_tps; t++) {
@@ -1873,7 +1879,6 @@ void llama_kv_cache::set_input_kq_mask(ggml_tensor * dst, const llama_ubatch * u
                 }
             }
         }
-        free(evict);
     }
 
     //const int64_t t_end = ggml_time_us();
