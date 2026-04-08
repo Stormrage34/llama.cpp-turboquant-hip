@@ -17,6 +17,8 @@ extern "C" {
 #include "triattention-runtime.h"
 }
 
+#include "triattention-hip.h"
+
 static bool ggml_is_power_of_2(int n) {
     return (n & (n - 1)) == 0;
 }
@@ -1336,23 +1338,39 @@ bool llama_kv_cache::triattention_compact(const std::vector<uint32_t> & keep_pos
         }
     }
 
+    uint32_t first_move = 0;
+    while (first_move < n_kv_new && keep_positions[first_move] == first_move) {
+        first_move++;
+    }
+
     const auto compact_rows = [&](ggml_tensor * tensor) {
         if (tensor == nullptr) {
             return;
         }
 
         const size_t row_bytes = tensor->nb[1];
-
-        /* Batch: read all retained rows, then write them contiguously */
-        /* Skip if first N rows are already in place */
-        uint32_t first_move = 0;
-        while (first_move < n_kv_new && keep_positions[first_move] == first_move) {
-            first_move++;
-        }
         if (first_move >= n_kv_new) return;
 
         const uint32_t n_move = n_kv_new - first_move;
-        std::vector<uint8_t> buf(n_move * row_bytes);
+
+#if defined(GGML_USE_HIP)
+        if (tensor->buffer != nullptr && !ggml_backend_buffer_is_host(tensor->buffer) && row_bytes <= UINT32_MAX) {
+            const int rc = tria_hip_compact_rows(
+                    tensor->data,
+                    keep_positions.data(),
+                    n_kv_new,
+                    first_move,
+                    static_cast<uint32_t>(row_bytes));
+            if (rc == 0) {
+                return;
+            }
+
+            LLAMA_LOG_WARN("%s: HIP row compaction failed for tensor '%s' with error %d, falling back to host copy\n",
+                    __func__, tensor->name, rc);
+        }
+#endif
+
+        std::vector<uint8_t> buf(static_cast<size_t>(n_move) * row_bytes);
 
         for (uint32_t i = 0; i < n_move; ++i) {
             ggml_backend_tensor_get(tensor, buf.data() + i * row_bytes,
