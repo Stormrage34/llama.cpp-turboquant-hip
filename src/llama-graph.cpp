@@ -13,6 +13,10 @@
 #include <cassert>
 #include <cmath>
 #include <cstring>
+
+extern "C" {
+#include "triattention-runtime.h"
+}
 #include <numeric>
 #include <sstream>
 #include <unordered_set>
@@ -421,6 +425,21 @@ void llm_graph_input_attn_no_cache::set_input(const llama_ubatch * ubatch) {
         std::fill(data, data + ggml_nelements(self_kq_mask), -INFINITY);
 
         fill_mask(data, 0, LLAMA_SWA_TYPE_NONE);
+
+        /* TriAttention: apply eviction mask */
+        if (g_tria_rt && g_tria_rt->n_scored > 0) {
+            int8_t * evict = (int8_t *)calloc(n_kv, sizeof(int8_t));
+            if (evict && tria_get_evict_mask(g_tria_rt, n_kv, evict)) {
+                for (uint32_t t = 0; t < n_tokens; t++) {
+                    for (uint32_t k = 0; k < n_kv; k++) {
+                        if (evict[k]) {
+                            data[t * n_kv + k] = -INFINITY;
+                        }
+                    }
+                }
+            }
+            free(evict);
+        }
 
         if (debug) {
             print_mask(data, n_tokens, n_kv, 0, LLAMA_SWA_TYPE_NONE);

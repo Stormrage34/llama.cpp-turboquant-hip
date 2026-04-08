@@ -14,6 +14,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+struct tria_runtime * g_tria_rt = NULL;
+
 /* Access KV cache internals — defined in llama-kv-cache.cpp */
 /* We use the raw tensor pointers from llama_memory/kv_cache */
 struct llama_kv_layer {
@@ -198,4 +200,39 @@ int tria_maybe_score(
 
     rt->n_scored = n_kv;
     return total_pruned;
+}
+
+int tria_get_evict_mask(
+    const struct tria_runtime * rt,
+    int n_kv,
+    int8_t * evict_mask
+) {
+    if (!rt || rt->n_scored == 0 || !evict_mask) return 0;
+
+    int nl  = rt->stats->num_layers;
+    int nkv = rt->stats->num_kv_heads;
+    int n_old = rt->n_scored - rt->window;
+    if (n_old <= 0) return 0;
+
+    /* Start: evict everything in the scored region */
+    memset(evict_mask, 1, n_kv);
+
+    /* Recent window + anything beyond scored: never evict */
+    for (int i = n_old; i < n_kv; i++) {
+        evict_mask[i] = 0;
+    }
+
+    /* Union: if ANY layer×head retains a position, keep it */
+    for (int pair = 0; pair < nl * nkv; pair++) {
+        int cnt = rt->retained_count[pair];
+        int *idx = rt->retained[pair];
+        if (!idx) continue;
+        for (int j = 0; j < cnt; j++) {
+            if (idx[j] >= 0 && idx[j] < n_old) {
+                evict_mask[idx[j]] = 0;
+            }
+        }
+    }
+
+    return 1;
 }
