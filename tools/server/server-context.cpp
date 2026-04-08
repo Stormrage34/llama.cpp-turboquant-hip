@@ -665,6 +665,7 @@ private:
                 params_base.triattention_interval
             );
             if (tria_rt) {
+                g_tria_rt = tria_rt;
                 SRV_INF("TriAttention runtime initialized (budget=%d%% window=%d interval=%d)\n",
                         params_base.triattention_budget_pct,
                         params_base.triattention_window,

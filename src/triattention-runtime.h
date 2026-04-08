@@ -28,6 +28,13 @@ struct tria_runtime {
     int    *retained_count; /* [num_layers * num_kv_heads] */
 };
 
+/*
+ * Global runtime pointer for mask injection.
+ * Set by the application after tria_runtime_init.
+ * Read by graph building code to apply eviction mask.
+ */
+extern struct tria_runtime * g_tria_rt;
+
 /* Create runtime. Returns NULL if stats is NULL or budget_pct == 0. */
 struct tria_runtime * tria_runtime_init(
     struct tria_stats * stats,
@@ -46,6 +53,19 @@ void tria_runtime_free(struct tria_runtime * rt);
 int tria_maybe_score(
     struct tria_runtime * rt,
     void * ctx  /* llama_context*, passed as void* to avoid C++ header dep */
+);
+
+/*
+ * Build a global eviction bitmask (union of all layer×head retained sets).
+ * evict_mask[i] = 1 means position i is evicted (should be -inf in attn mask).
+ * Positions >= n_scored or in the recent window are never evicted.
+ * Returns 0 if no scoring has been done yet, 1 if mask was written.
+ * Caller must allocate evict_mask with at least n_kv entries.
+ */
+int tria_get_evict_mask(
+    const struct tria_runtime * rt,
+    int n_kv,
+    int8_t * evict_mask  /* out: [n_kv], 1=evicted 0=kept */
 );
 
 #ifdef __cplusplus
