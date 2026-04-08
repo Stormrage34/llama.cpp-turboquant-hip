@@ -41,12 +41,11 @@ void tria_runtime_free(struct tria_runtime * rt);
 /*
  * Check if we should score, and if so, do it.
  * ctx — llama context (for KV cache access)
- * n_kv — approximate number of tokens in cache
+ * n_kv is read from the KV cache directly.
  */
 int tria_maybe_score(
     struct tria_runtime * rt,
-    void * ctx,  /* llama_context*, passed as void* to avoid C++ header dep */
-    int n_kv
+    void * ctx  /* llama_context*, passed as void* to avoid C++ header dep */
 );
 
 #ifdef __cplusplus

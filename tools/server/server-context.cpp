@@ -2767,11 +2767,8 @@ private:
 
             // TriAttention: check if scoring should trigger
             if (tria_rt) {
-                // Track cumulative tokens processed
-                static int tria_n_total = 0;
                 if (ret == 0) {
-                    tria_n_total += batch_view.n_tokens;
-                    tria_maybe_score(tria_rt, (void *)ctx, tria_n_total);
+                    tria_maybe_score(tria_rt, (void *)ctx);
                 }
             }
 
