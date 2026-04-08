@@ -77,6 +77,11 @@ int tria_maybe_score(
                 n_kv, rt->n_scored, rt->interval, rt->window);
     }
 
+    /* Reset if cache was cleared (perplexity resets between chunks) */
+    if (n_kv < rt->n_scored) {
+        rt->n_scored = 0;
+    }
+
     /* Check if we should score */
     if (n_kv - rt->n_scored < rt->interval) return 0;
     if (n_kv <= rt->window) return 0;
