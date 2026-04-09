@@ -227,7 +227,7 @@ static void set_rows_cuda(
 //   8. Write corrected norm (one thread per sub-block)
 
 template <typename idx_t, int GROUP_SIZE>
-__launch_bounds__(128)  // max of 128 or 64
+__launch_bounds__(256)  // max of 256, 128, or 64
 static __global__ void k_set_rows_turbo3(
         const float * __restrict__ src0,
         const idx_t * __restrict__ src1,
@@ -552,7 +552,7 @@ static void set_rows_cuda_turbo3(
     // Default to 128 if not set (backward compat with head_dim=128 models).
     int group_size = 128;
     memcpy(&group_size, dst->op_params, sizeof(int));
-    if (group_size != 64 && group_size != 128) group_size = 128;
+    if (group_size != 64 && group_size != 128 && group_size != 256) group_size = 128;
     GGML_ASSERT(ne00 % group_size == 0);
 
     const int64_t n_full_groups   = ne00 / group_size;
@@ -571,7 +571,13 @@ static void set_rows_cuda_turbo3(
     // Launch 1: full groups with WHT rotation
     if (n_full_groups > 0) {
         const int64_t ne_total = n_full_groups * ne01 * ne02 * ne03;
-        if (group_size == 128) {
+        if (group_size == 256) {
+            k_set_rows_turbo3<idx_t, 256><<<(int)ne_total, 256, 0, stream>>>(
+                src0_d, src1_d, (block_turbo3_0 *)dst->data,
+                ne00, ne01, ne10, ne11, ne12, ne13,
+                s01, s02, s03, s10, s11, s12,
+                nb1, nb2, nb3);
+        } else if (group_size == 128) {
             k_set_rows_turbo3<idx_t, 128><<<(int)ne_total, 128, 0, stream>>>(
                 src0_d, src1_d, (block_turbo3_0 *)dst->data,
                 ne00, ne01, ne10, ne11, ne12, ne13,
@@ -903,7 +909,7 @@ static void set_rows_cuda_turbo2(
 
     int group_size = 128;
     memcpy(&group_size, dst->op_params, sizeof(int));
-    if (group_size != 64 && group_size != 128) group_size = 128;
+    if (group_size != 64 && group_size != 128 && group_size != 256) group_size = 128;
     GGML_ASSERT(ne00 % group_size == 0);
 
     const int64_t n_full_groups   = ne00 / group_size;
@@ -921,7 +927,13 @@ static void set_rows_cuda_turbo2(
 
     if (n_full_groups > 0) {
         const int64_t ne_total = n_full_groups * ne01 * ne02 * ne03;
-        if (group_size == 128) {
+        if (group_size == 256) {
+            k_set_rows_turbo2<idx_t, 256><<<(int)ne_total, 256, 0, stream>>>(
+                src0_d, src1_d, (block_turbo2_0 *)dst->data,
+                ne00, ne01, ne10, ne11, ne12, ne13,
+                s01, s02, s03, s10, s11, s12,
+                nb1, nb2, nb3);
+        } else if (group_size == 128) {
             k_set_rows_turbo2<idx_t, 128><<<(int)ne_total, 128, 0, stream>>>(
                 src0_d, src1_d, (block_turbo2_0 *)dst->data,
                 ne00, ne01, ne10, ne11, ne12, ne13,
