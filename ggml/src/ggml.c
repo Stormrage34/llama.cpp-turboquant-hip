@@ -6259,7 +6259,8 @@ struct ggml_tensor * ggml_turbo_wht(
 
     // Auto-detect group size from tensor dimension if not specified
     if (group_size == 0) {
-        group_size = (a->ne[0] % 128 == 0) ? 128 : 64;
+        group_size = (a->ne[0] % 128 == 0) ? 128 :
+                     (a->ne[0] % 128 == 0) ? 128 : 64;
     }
     GGML_ASSERT(group_size == 32 || group_size == 64 || group_size == 128 || group_size == 256);
     GGML_ASSERT(a->ne[0] % group_size == 0);
