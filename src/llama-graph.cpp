@@ -1908,7 +1908,7 @@ ggml_tensor * llm_graph_context::build_attn_mha(
             const bool k_is_turbo = (k->type == GGML_TYPE_TURBO3_0 || k->type == GGML_TYPE_TURBO4_0 || k->type == GGML_TYPE_TURBO2_0);
             const ggml_tensor * group_src = k_is_turbo ? k : v;
             const uint32_t hd_k = hparams.n_embd_head_k(il);
-            const int turbo_group = (hd_k >= 512 && group_src->ne[0] % 256 == 0) ? 256 :
+            const int turbo_group = (0 && hd_k >= 512) ? 256 :
                                     (group_src->ne[0] % 128 == 0) ? 128 : 64;
             if (cur->ne[0] % turbo_group == 0) {
                 if (!ggml_is_contiguous(cur)) { cur = ggml_cont(ctx0, cur); }
@@ -1988,7 +1988,7 @@ ggml_tensor * llm_graph_context::build_attn_mha(
             const bool k_is_turbo = (k->type == GGML_TYPE_TURBO3_0 || k->type == GGML_TYPE_TURBO4_0 || k->type == GGML_TYPE_TURBO2_0);
             const ggml_tensor * group_src = k_is_turbo ? k : v;
             const uint32_t hd_k = hparams.n_embd_head_k(il);
-            const int turbo_group = (hd_k >= 512 && group_src->ne[0] % 256 == 0) ? 256 :
+            const int turbo_group = (0 && hd_k >= 512) ? 256 :
                                     (group_src->ne[0] % 128 == 0) ? 128 : 64;
             if (kqv->ne[0] % turbo_group == 0) {
                 if (!ggml_is_contiguous(kqv)) { kqv = ggml_cont(ctx0, kqv); }
