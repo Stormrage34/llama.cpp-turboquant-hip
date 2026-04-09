@@ -4,28 +4,39 @@
 
 ## Results
 
-### Qwen3.5-27B Q5_K_M (RX 7900 XTX, WikiText-2)
+### GSM8K Math Accuracy (100 problems, temperature=0)
 
-| KV cache | PPL (4K) | PPL (16K) | KV memory |
-|---|---|---|---|
-| f16 | 6.6641 | 6.0729 | 256 MiB |
-| **turbo3** | **6.6657** | — | **50 MiB (5×)** |
+| Model | f16 | turbo3 | Drop | Compression |
+|---|---|---|---|---|
+| **Gemma 4 31B Dense** Q4_K_M | 96% | **97%** | **+1%** | 2.9× |
+| **Gemma 4 26B-A4B** Q4_K_M | 83% | **83%** | **0%** | 2.9× |
+| Qwen3.5-27B Q5_K_M | 66% | TBD | — | 5× |
 
-+0.02% PPL at 5× compression.
+Gemma 4 best config: `--cache-type-k turbo3 --cache-type-v turbo3 --cache-type-k-swa turbo3 --cache-type-v-swa q8_0`
 
-### Gemma 4 26B-A4B Q4_K_M (RX 7900 XTX, GSM8K math)
+### WikiText-2 Perplexity
 
-| Config | GSM8K (100) | KV memory | Compression |
-|---|---|---|---|
-| f16 | 83% | 340 MiB | 1.0× |
-| turbo3 + f16 SWA | 82% | ~120 MiB | 2.8× |
-| **turbo3 + turbo3-K-SWA + q8_0-V-SWA** | **83%** | **117 MiB** | **2.9×** |
+| Model | f16 PPL | turbo3 PPL | Δ | Compression |
+|---|---|---|---|---|
+| Qwen3.5-27B (4K) | 6.6641 | 6.6657 | +0.02% | 5× |
 
-**0% accuracy drop** at 2.9× compression (best config).
+### Comparison with AmesianX (CUDA)
 
-### Qwen3.5-27B + TriAttention KV Pruning (16K context)
+| | domvox (HIP) | AmesianX (CUDA) |
+|---|---|---|
+| **Gemma 4 accuracy drop** | **0%** | **-19%** |
+| Platform | AMD ROCm | NVIDIA CUDA |
+| Compression (Gemma 4) | 2.9× | 5.2× |
+| TriAttention pruning | Yes | No |
+| MMA tensor core | No | Yes |
 
-| Config | PPL | KV cache rows |
+Our implementation preserves quality significantly better. AmesianX compresses
+all layers (including SWA) which destroys quality on Gemma 4. We keep SWA in
+turbo3-K + q8_0-V which maintains full accuracy.
+
+### TriAttention KV Pruning (Qwen3.5-27B, 16K context)
+
+| Config | PPL | KV rows |
 |---|---|---|
 | Baseline | 6.0729 | 16384 |
 | TriAttention 75% | **5.9939 (-1.3%)** | ~5989 |
@@ -40,12 +51,7 @@ TurboQuant + TriAttention = compression × pruning for extreme KV reduction.
 llama-server -m model.gguf -ngl 99 \
   --cache-type-k turbo3 --cache-type-v turbo3
 
-# Gemma 4 (best quality — SWA in f16)
-# llama-server -m gemma4.gguf -ngl 99 \
-#   --cache-type-k turbo3 --cache-type-v turbo3 \
-#   --cache-type-k-swa f16 --cache-type-v-swa f16
-
-# Gemma 4 (best compression — 0% accuracy drop)
+# Gemma 4 (recommended — 0% accuracy drop)
 llama-server -m gemma4.gguf -ngl 99 \
   --cache-type-k turbo3 --cache-type-v turbo3 \
   --cache-type-k-swa turbo3 --cache-type-v-swa q8_0
@@ -68,7 +74,7 @@ cmake --build build -j$(nproc)
 |---|---|---|
 | Qwen3/3.5, Llama, Mistral | 128 | ✅ Full support |
 | Qwen3.5-27B (hybrid SSM+attn) | 256 | ✅ Full support |
-| Gemma 4 (ISWA, global+SWA) | 512/256 | ✅ Global turbo3, SWA f16 |
+| Gemma 4 (ISWA, global+SWA) | 512/256 | ✅ Global turbo3, SWA turbo3-K+q8_0-V |
 | DeepSeek (MLA) | 576/512 | Untested |
 
 ## Features
@@ -78,13 +84,6 @@ cmake --build build -j$(nproc)
 - **Hybrid model support** — SSM+attention (Qwen3.5), ISWA (Gemma 4)
 - **FP32 WHT butterfly** — no precision loss (unlike FP16 implementations)
 
-## Comparison with other implementations
+## Hardware
 
-| | domvox (HIP) | AmesianX (CUDA) |
-|---|---|---|
-| Platform | **AMD ROCm** | NVIDIA CUDA |
-| Gemma 4 accuracy drop | **0%** | -19% |
-| Architecture | 1 kernel template | 20+ block types |
-| TriAttention pruning | **Yes** | No |
-| MMA tensor core | No | Yes |
-| Gemma 4 SWA compression | f16 (preserves quality) | turbo3 (loses quality) |
+Tested on: AMD Ryzen 9 9950X3D, RX 7900 XTX 24GB, ROCm 6.4, openSUSE Tumbleweed.
