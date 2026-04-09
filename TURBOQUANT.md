@@ -10,7 +10,7 @@
 |---|---|---|---|---|
 | **Gemma 4 31B Dense** Q4_K_M | 96% | **97%** | **+1%** | 2.9× |
 | **Gemma 4 26B-A4B** Q4_K_M | 83% | **83%** | **0%** | 2.9× |
-| Qwen3.5-27B Q5_K_M | 66% | TBD | — | 5× |
+| Qwen3.5-27B Q5_K_M | 66% | **72%** | **+6%** | 5× |
 
 Gemma 4 best config: `--cache-type-k turbo3 --cache-type-v turbo3 --cache-type-k-swa turbo3 --cache-type-v-swa q8_0`
 
