@@ -18,9 +18,10 @@
 | Config | GSM8K (100) | KV memory | Compression |
 |---|---|---|---|
 | f16 | 83% | 340 MiB | 1.0× |
-| **turbo3 + f16 SWA** | **82%** | **~120 MiB** | **2.8×** |
+| turbo3 + f16 SWA | 82% | ~120 MiB | 2.8× |
+| **turbo3 + turbo3-K-SWA + q8_0-V-SWA** | **83%** | **117 MiB** | **2.9×** |
 
-**-1% accuracy drop** at 2.8× compression.
+**0% accuracy drop** at 2.9× compression (best config).
 
 ### Qwen3.5-27B + TriAttention KV Pruning (16K context)
 
@@ -39,10 +40,15 @@ TurboQuant + TriAttention = compression × pruning for extreme KV reduction.
 llama-server -m model.gguf -ngl 99 \
   --cache-type-k turbo3 --cache-type-v turbo3
 
-# Gemma 4 (keep SWA in f16)
+# Gemma 4 (best quality — SWA in f16)
+# llama-server -m gemma4.gguf -ngl 99 \
+#   --cache-type-k turbo3 --cache-type-v turbo3 \
+#   --cache-type-k-swa f16 --cache-type-v-swa f16
+
+# Gemma 4 (best compression — 0% accuracy drop)
 llama-server -m gemma4.gguf -ngl 99 \
   --cache-type-k turbo3 --cache-type-v turbo3 \
-  --cache-type-k-swa f16 --cache-type-v-swa f16
+  --cache-type-k-swa turbo3 --cache-type-v-swa q8_0
 
 # With TriAttention KV pruning
 llama-perplexity -m model.gguf -ngl 99 \
@@ -77,7 +83,7 @@ cmake --build build -j$(nproc)
 | | domvox (HIP) | AmesianX (CUDA) |
 |---|---|---|
 | Platform | **AMD ROCm** | NVIDIA CUDA |
-| Gemma 4 accuracy drop | **-1%** | -19% |
+| Gemma 4 accuracy drop | **0%** | -19% |
 | Architecture | 1 kernel template | 20+ block types |
 | TriAttention pruning | **Yes** | No |
 | MMA tensor core | No | Yes |
