@@ -6261,7 +6261,7 @@ struct ggml_tensor * ggml_turbo_wht(
     if (group_size == 0) {
         group_size = (a->ne[0] % 128 == 0) ? 128 : 64;
     }
-    GGML_ASSERT(group_size == 32 || group_size == 64 || group_size == 128);
+    GGML_ASSERT(group_size == 32 || group_size == 64 || group_size == 128 || group_size == 256);
     GGML_ASSERT(a->ne[0] % group_size == 0);
 
     struct ggml_tensor * result = ggml_new_tensor(ctx, GGML_TYPE_F32, 4, a->ne);
