@@ -20,6 +20,7 @@ struct tria_runtime {
     int     budget_pct;     /* retention % */
     int     window;         /* recent tokens always kept */
     int     interval;       /* score every N tokens */
+    int     sink;           /* first N tokens always kept (attention sinks) */
     int     n_scored;       /* last position we scored at */
 
     /* Per layer × kv_head: retained index masks */
@@ -53,7 +54,8 @@ struct tria_runtime * tria_runtime_init(
     struct tria_stats * stats,
     int budget_pct,
     int window,
-    int interval
+    int interval,
+    int sink
 );
 
 void tria_runtime_free(struct tria_runtime * rt);

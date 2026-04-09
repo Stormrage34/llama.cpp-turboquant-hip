@@ -34,7 +34,8 @@ struct tria_runtime * tria_runtime_init(
     struct tria_stats * stats,
     int budget_pct,
     int window,
-    int interval
+    int interval,
+    int sink
 ) {
     if (!stats || budget_pct <= 0) return NULL;
 
@@ -43,6 +44,7 @@ struct tria_runtime * tria_runtime_init(
     rt->budget_pct = budget_pct;
     rt->window     = window;
     rt->interval   = interval;
+    rt->sink       = sink;
     rt->n_scored   = 0;
 
     int n_pairs = stats->num_layers * stats->num_kv_heads;
@@ -334,11 +336,14 @@ int tria_get_evict_mask(
     }
     float threshold = sorted[target];
 
-    /* Build mask: evict if below threshold */
+    /* Build mask: evict if below threshold, but never evict sink tokens */
     memset(evict_mask, 0, n_kv);
     int kept = 0;
     for (int i = 0; i < n_old && i < n_kv; i++) {
-        if (rt->global_scores[i] >= threshold && kept < budget) {
+        if (i < rt->sink) {
+            /* Attention sink — always kept */
+            kept++;
+        } else if (rt->global_scores[i] >= threshold && kept < budget) {
             kept++;
         } else {
             evict_mask[i] = 1;

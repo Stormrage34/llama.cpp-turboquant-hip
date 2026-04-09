@@ -557,6 +557,7 @@ struct common_params {
     int         triattention_budget_pct  = 0;      // retention budget as % (0 = disabled, e.g. 25 = keep 25%)
     int         triattention_window      = 512;    // recent window (always kept, never pruned)
     int         triattention_interval    = 128;    // score/prune every N new tokens
+    int         triattention_sink        = 0;      // first N tokens always kept (attention sinks)
 
     common_conversation_mode conversation_mode = COMMON_CONVERSATION_MODE_AUTO;
 

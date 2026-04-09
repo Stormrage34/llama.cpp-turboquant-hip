@@ -1259,16 +1259,18 @@ common_init_result::common_init_result(common_params & params) :
             LOG_INF("%s: loaded TriAttention stats from %s (%u layers, %u heads)\n",
                     __func__, params.triattention_stats_path.c_str(),
                     pimpl->tria->num_layers, pimpl->tria->num_heads);
-            LOG_INF("%s: TriAttention budget=%d%% window=%d interval=%d\n",
+            LOG_INF("%s: TriAttention budget=%d%% window=%d interval=%d sink=%d\n",
                     __func__, params.triattention_budget_pct,
-                    params.triattention_window, params.triattention_interval);
+                    params.triattention_window, params.triattention_interval,
+                    params.triattention_sink);
 
             // Init runtime and set global pointer for mask injection
             g_tria_rt = tria_runtime_init(
                 pimpl->tria,
                 params.triattention_budget_pct,
                 params.triattention_window,
-                params.triattention_interval
+                params.triattention_interval,
+                params.triattention_sink
             );
         } else {
             LOG_ERR("%s: failed to load TriAttention stats from %s\n",

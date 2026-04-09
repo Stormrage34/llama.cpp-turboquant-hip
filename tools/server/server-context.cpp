@@ -662,14 +662,16 @@ private:
                 llama_init->triattention(),
                 params_base.triattention_budget_pct,
                 params_base.triattention_window,
-                params_base.triattention_interval
+                params_base.triattention_interval,
+                params_base.triattention_sink
             );
             if (tria_rt) {
                 g_tria_rt = tria_rt;
-                SRV_INF("TriAttention runtime initialized (budget=%d%% window=%d interval=%d)\n",
+                SRV_INF("TriAttention runtime initialized (budget=%d%% window=%d interval=%d sink=%d)\n",
                         params_base.triattention_budget_pct,
                         params_base.triattention_window,
-                        params_base.triattention_interval);
+                        params_base.triattention_interval,
+                        params_base.triattention_sink);
             }
         }
 
