@@ -4,31 +4,38 @@
 
 #include "llama.h"
 #include "llama-kv-cache.h"
+#include "llama-memory-hybrid.h"
 
 #include <algorithm>
 #include <numeric>
 #include <vector>
 
-extern "C" {
-#include "triattention-runtime.h"
-
-struct ggml_tensor * tria_get_k_tensor(void * ctx_void, int layer_idx) {
+/* Helper: extract llama_kv_cache from either pure KV or hybrid memory */
+static llama_kv_cache * get_kv(void * ctx_void) {
     auto * ctx = (llama_context *)ctx_void;
     auto * mem = llama_get_memory(ctx);
     if (!mem) return nullptr;
 
     auto * kv = dynamic_cast<llama_kv_cache *>(mem);
-    if (!kv) return nullptr;
+    if (kv) return kv;
 
+    auto * hybrid = dynamic_cast<llama_memory_hybrid *>(mem);
+    if (hybrid) return hybrid->get_mem_attn();
+
+    return nullptr;
+}
+
+extern "C" {
+#include "triattention-runtime.h"
+
+struct ggml_tensor * tria_get_k_tensor(void * ctx_void, int layer_idx) {
+    auto * kv = get_kv(ctx_void);
+    if (!kv) return nullptr;
     return kv->get_k_raw(layer_idx);
 }
 
 int tria_get_n_kv(void * ctx_void) {
-    auto * ctx = (llama_context *)ctx_void;
-    auto * mem = llama_get_memory(ctx);
-    if (!mem) return 0;
-
-    auto * kv = dynamic_cast<llama_kv_cache *>(mem);
+    auto * kv = get_kv(ctx_void);
     if (!kv) return 0;
 
     llama_pos pmax = kv->seq_pos_max(0);
@@ -36,11 +43,7 @@ int tria_get_n_kv(void * ctx_void) {
 }
 
 int tria_get_used_n_kv(void * ctx_void) {
-    auto * ctx = (llama_context *)ctx_void;
-    auto * mem = llama_get_memory(ctx);
-    if (!mem) return 0;
-
-    auto * kv = dynamic_cast<llama_kv_cache *>(mem);
+    auto * kv = get_kv(ctx_void);
     if (!kv) return 0;
 
     return (int) kv->get_used_n_kv();
@@ -52,10 +55,7 @@ int tria_get_kv_positions(void * ctx_void, int * positions, int max_positions) {
         return 0;
     }
 
-    auto * mem = llama_get_memory(ctx);
-    if (!mem) return 0;
-
-    auto * kv = dynamic_cast<llama_kv_cache *>(mem);
+    auto * kv = get_kv(ctx_void);
     if (!kv) return 0;
 
     std::vector<llama_pos> kv_positions;
@@ -77,10 +77,7 @@ int tria_compact_kv(struct tria_runtime * rt, void * ctx_void) {
         return 0;
     }
 
-    auto * mem = llama_get_memory(ctx);
-    if (!mem) return 0;
-
-    auto * kv = dynamic_cast<llama_kv_cache *>(mem);
+    auto * kv = get_kv(ctx_void);
     if (!kv) return 0;
 
     const int n_kv = (int) kv->get_used_n_kv();
