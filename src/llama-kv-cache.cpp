@@ -461,9 +461,11 @@ llama_kv_cache::llama_kv_cache(
             for (const auto & l : layers) {
                 f16_size += (size_t) kv_size * (hparams.n_embd_k_gqa(l.il) + hparams.n_embd_v_gqa(l.il)) * sizeof(ggml_fp16_t);
             }
-            const float ratio = f16_size > 0 ? (float) f16_size / (memory_size_k + memory_size_v) : 0;
-            const float saved_mib = (float)(f16_size - memory_size_k - memory_size_v) / (1024.0f * 1024.0f);
-            LLAMA_LOG_INFO("%s: KV compression: %.2fx (saving %.0f MiB vs f16)\n", __func__, ratio, saved_mib);
+            const float ratio = (memory_size_k + memory_size_v) > 0 ? (float) f16_size / (float)(memory_size_k + memory_size_v) : 0;
+            const float saved_mib = ((float)f16_size - (float)(memory_size_k + memory_size_v)) / (1024.0f * 1024.0f);
+            if (ratio > 1.0f) {
+                LLAMA_LOG_INFO("%s: KV compression: %.2fx (saving %.0f MiB vs f16)\n", __func__, ratio, saved_mib);
+            }
         }
     }
 
