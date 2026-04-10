@@ -191,10 +191,10 @@ At 131K context, turbo3 saves 6.4 GiB vs f16. turbo2 saves 6.9 GiB.
 
 ### Combined Compression: TurboQuant + TriAttention
 
+**Note:** This is an arithmetic stack estimate, not a validated end-to-end retrieval claim. TriAttention pruning is experimental — see [TheTom's V3 analysis](https://github.com/TheTom/turboquant_plus/blob/main/docs/papers/triattention-v3.md) for retrieval testing.
+
 | Method | KV Compression | Quality |
 |---|---|---|
 | turbo3 alone | 5.12× | +0.02% PPL |
 | TriAttention 75% alone | 1.33× | -1.3% PPL |
-| **turbo3 + TriAttention 75%** | **~6.8×** | composable |
-
-At 131K context: f16 KV = 8,192 MiB → turbo3 + TriAttention 75% ≈ **1,200 MiB**.
+| **turbo3 + TriAttention 75%** | **~6.8×** | PPL only, NIAH not validated |
