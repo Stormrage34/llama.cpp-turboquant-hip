@@ -172,3 +172,13 @@ All turbo types produce nearly identical token distributions to f16.
 - 3-turn tool chains with intermediate results
 
 turbo3 KV preserves multi-step agentic reasoning.
+
+### KV Cache VRAM Usage (Qwen3.5-27B, 16 KV layers)
+
+| Context | f16 | turbo3 | turbo2 |
+|---|---|---|---|
+| 4K | 256 MiB | 50 MiB | 34 MiB |
+| 32K | 2,048 MiB | 400 MiB | 272 MiB |
+| 131K | 8,192 MiB | 1,600 MiB | 1,088 MiB |
+
+At 131K context, turbo3 saves 6.4 GiB vs f16. turbo2 saves 6.9 GiB.
