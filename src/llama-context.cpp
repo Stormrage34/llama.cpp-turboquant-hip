@@ -276,11 +276,32 @@ llama_context::llama_context(
 
     // init the memory module
     if (!hparams.vocab_only) {
+        ggml_type type_k_swa = params.type_k_swa == GGML_TYPE_COUNT ? params.type_k : params.type_k_swa;
+        ggml_type type_v_swa = params.type_v_swa == GGML_TYPE_COUNT ? params.type_v : params.type_v_swa;
+
+        // Auto-detect: if turbo KV on ISWA model with large head_dim global layers,
+        // suggest q8_0 for SWA V to avoid D=512 FA dequant issues on HIP
+        const bool k_is_turbo = (params.type_k == GGML_TYPE_TURBO3_0 || params.type_k == GGML_TYPE_TURBO4_0 || params.type_k == GGML_TYPE_TURBO2_0);
+        if (k_is_turbo && hparams.is_swa_any() && params.type_v_swa == GGML_TYPE_COUNT) {
+            // Check if any non-SWA layer has head_dim > 256
+            for (uint32_t il = 0; il < hparams.n_layer; il++) {
+                if (hparams.is_swa(il)) continue;
+                if (hparams.n_embd_head_k(il) > 256) {
+                    type_v_swa = GGML_TYPE_Q8_0;
+                    LLAMA_LOG_WARN("%s: ISWA model with head_dim=%u global layers detected. "
+                        "Auto-setting SWA V cache to q8_0 for quality. "
+                        "Override with --cache-type-v-swa if needed.\n",
+                        __func__, hparams.n_embd_head_k(il));
+                    break;
+                }
+            }
+        }
+
         llama_memory_params params_mem = {
             /*.type_k     =*/ params.type_k,
             /*.type_v     =*/ params.type_v,
-            /*.type_k_swa =*/ params.type_k_swa == GGML_TYPE_COUNT ? params.type_k : params.type_k_swa,
-            /*.type_v_swa =*/ params.type_v_swa == GGML_TYPE_COUNT ? params.type_v : params.type_v_swa,
+            /*.type_k_swa =*/ type_k_swa,
+            /*.type_v_swa =*/ type_v_swa,
             /*.swa_full   =*/ params.swa_full,
         };
 
