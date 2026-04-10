@@ -24,8 +24,9 @@ Best Gemma 4 config: `--cache-type-k turbo3 --cache-type-v turbo3 --cache-type-k
 | 4K | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 8K | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 16K | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 32K | ✅ | ✅ | ✅ | ✅ | ✅ |
 
-20/20 passed — no retrieval degradation up to 16K context.
+25/25 passed — no retrieval degradation up to 32K context.
 
 ### Tool Calling (Qwen3.5-27B, turbo3 K+V)
 
