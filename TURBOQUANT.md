@@ -4,15 +4,17 @@
 
 ## Results
 
-### GSM8K Math Accuracy (100 problems, temperature=0)
+### GSM8K Math Accuracy (100 problems, temperature=0, 2 runs averaged)
 
 | Model | f16 | turbo3 | Drop | Compression |
 |---|---|---|---|---|
-| **Gemma 4 31B Dense** Q4_K_M | 96% | **97%** | **+1%** | 2.9× |
-| **Gemma 4 26B-A4B** Q4_K_M | 83% | **83%** | **0%** | 2.9× |
-| **Qwen3.5-27B** Q5_K_M | 66% | **72%** | **+6%** | 5× |
+| **Gemma 4 31B Dense** Q4_K_M | 96% | **97%** | +1%* | 2.9× |
+| **Gemma 4 26B-A4B** Q4_K_M | 83% | **81.5%** | -1.5% | 2.9× |
+| **Qwen3.5-27B** Q5_K_M | 66% | **72%** | +6%* | 5× |
 
-turbo3 matches or exceeds f16 accuracy on all tested models.
+*Single run — variance expected ±3%.
+
+Best Gemma 4 config: `--cache-type-k turbo3 --cache-type-v turbo3 --cache-type-k-swa turbo3 --cache-type-v-swa q8_0`
 
 ### WikiText-2 Perplexity
 
@@ -21,19 +23,28 @@ turbo3 matches or exceeds f16 accuracy on all tested models.
 | Qwen3.5-27B (4K) | 6.6641 | 6.6657 | +0.02% | 5× |
 | Qwen3.5-27B (16K) | 6.0729 | 6.4521 | +6.2% | 5× |
 
+### Speed (RX 7900 XTX, ROCm 6.4)
+
+| Model | Context | Config | Prefill (tok/s) | Decode (tok/s) |
+|---|---|---|---|---|
+| Qwen3.5-27B | 512 | f16 | 427 | 30.15 |
+| | 512 | turbo3 | 423 (-1%) | 29.49 (-2%) |
+| | 8K | f16 | 340 | 30.13 |
+| | 8K | turbo3 | 337 (-1%) | 29.74 (-1%) |
+| Gemma 4 26B | 512 | f16 | 2939 | 94.53 |
+| | 512 | turbo3 | 2878 (-2%) | 87.13 (-8%) |
+
+Minimal speed overhead: 1-2% on standard models, 8% decode on Gemma 4 (D=512 WHT cost).
+
 ### Comparison with AmesianX (CUDA)
 
 | | domvox (HIP) | AmesianX (CUDA) |
 |---|---|---|
-| **Gemma 4 accuracy drop** | **0%** | **-19%** |
+| **Gemma 4 accuracy drop** | **-1.5%** | **-19%** |
 | Platform | AMD ROCm | NVIDIA CUDA |
 | Compression (Gemma 4) | 2.9× | 5.2× |
+| Speed overhead | 1-8% | N/A |
 | TriAttention pruning | Yes | No |
-| MMA tensor core | No | Yes |
-
-Our implementation preserves quality significantly better. AmesianX compresses
-all layers (including SWA) which destroys quality on Gemma 4. We keep SWA in
-turbo3-K + q8_0-V which maintains full accuracy.
 
 ### TriAttention KV Pruning (Qwen3.5-27B, 16K context)
 
@@ -43,9 +54,6 @@ turbo3-K + q8_0-V which maintains full accuracy.
 | TriAttention 75% | **5.9939 (-1.3%)** | ~5989 |
 | TriAttention 50% | 6.0890 (+0.26%) | ~2550 |
 
-Note: TriAttention pruning activates only at longer contexts (>1K tokens).
-For short-context tasks (GSM8K ~600 tokens), pruning has no effect.
-
 ## Usage
 
 ```bash
@@ -53,7 +61,7 @@ For short-context tasks (GSM8K ~600 tokens), pruning has no effect.
 llama-server -m model.gguf -ngl 99 \
   --cache-type-k turbo3 --cache-type-v turbo3
 
-# Gemma 4 (recommended — 0% accuracy drop, 2.9× compression)
+# Gemma 4 (recommended — minimal accuracy drop, 2.9× compression)
 llama-server -m gemma4.gguf -ngl 99 \
   --cache-type-k turbo3 --cache-type-v turbo3 \
   --cache-type-k-swa turbo3 --cache-type-v-swa q8_0
@@ -82,27 +90,27 @@ cmake --build build -j$(nproc)
 
 ### Gemma 4 notes
 
-Gemma 4 has two attention types:
-- **SWA layers** (25/30): head_dim=256, compressed with turbo3-K + q8_0-V
-- **Global layers** (5/30): head_dim=512, turbo3 encoded but FA uses MMA path
+Gemma 4 has two attention types (ISWA):
+- **SWA layers** (25/30): head_dim=256, properly compressed with turbo3
+- **Global layers** (5/30): head_dim=512, FA TILE kernel reads turbo3 without dequant
 
-The MMA flash attention path for D=512 reads turbo3 data without proper
-dequantization. Despite this, accuracy is preserved because SWA layers
-(25/30) dominate the output. Proper D=512 FA vec support is a known TODO.
+On AMD/HIP, the flash attention dispatch for D=512 falls through to the TILE kernel,
+which has no turbo3 dequantization. The 25 SWA layers dominate output quality.
+When proper D=512 VEC dequant was added, accuracy dropped from 81% to 68% — structured
+quantization noise is more harmful than the TILE fallback behavior.
 
 ## Features
 
-- **Attention sharpening** — compensates softmax flattening from quantization noise (α = 1 + 1/2×SQNR)
+- **Attention sharpening** — K-side α = 1 + 1/(2×SQNR) compensates softmax flattening
 - **TriAttention KV pruning** — frequency-based scoring + GPU compaction kernel
 - **Hybrid model support** — SSM+attention (Qwen3.5), ISWA (Gemma 4)
-- **FP32 WHT butterfly** — no precision loss (unlike FP16 implementations)
-- **GROUP_SIZE=128** — tested and working on all models
+- **FP32 WHT butterfly** — no precision loss in rotation
 
 ## Known limitations
 
-- **GROUP_SIZE=256**: Implemented but produces garbage output on decode. Root cause unknown (norm split hypothesis ruled out). TODO.
-- **Gemma 4 global layers**: D=512 FA vec not instantiated — falls back to MMA path which reads turbo3 as raw f16. Accuracy preserved empirically.
-- **TriAttention + turbo3 combo**: No additive benefit at short contexts. At 16K, combo PPL is worse than turbo3 alone (quantization noise + pruning noise stack).
+- **GROUP_SIZE=256**: Implemented but decode produces garbage. Root cause unknown.
+- **Gemma 4 D=512 FA**: TILE kernel fallback, not proper dequant. See notes above.
+- **TriAttention + turbo3 combo**: No additive benefit at short contexts (<1K tokens).
 
 ## Hardware
 
