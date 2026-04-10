@@ -4,17 +4,33 @@
 
 ## Results
 
-### GSM8K Math Accuracy (100 problems, temperature=0, 2 runs averaged)
+### GSM8K Math Accuracy (temperature=0)
 
-| Model | f16 | turbo3 | Drop | Compression |
-|---|---|---|---|---|
-| **Gemma 4 31B Dense** Q4_K_M | 96% | **97%** | +1%* | 2.9× |
-| **Gemma 4 26B-A4B** Q4_K_M | 83% | **81.5%** | -1.5% | 2.9× |
-| **Qwen3.5-27B** Q5_K_M | 66% | **72%** | +6%* | 5× |
+| Model | f16 | turbo3 | Drop | Compression | N |
+|---|---|---|---|---|---|
+| **Qwen3.5-27B** Q5_K_M | 66%* | **72.0%** | +6% | 5× | 1319 |
+| **Gemma 4 26B-A4B** Q4_K_M | 83%* | **81.5%** | -1.5% | 2.9× | 100×2 |
+| **Gemma 4 31B Dense** Q4_K_M | 96%* | **97%** | +1% | 2.9× | 100 |
 
-*Single run — variance expected ±3%.
+*f16 baselines from 100-problem subset. Qwen3.5 turbo3 validated on full 1319 problems.
 
 Best Gemma 4 config: `--cache-type-k turbo3 --cache-type-v turbo3 --cache-type-k-swa turbo3 --cache-type-v-swa q8_0`
+
+### Needle-in-a-Haystack (Qwen3.5-27B, turbo3 K+V)
+
+| Context | d=0.0 | d=0.25 | d=0.5 | d=0.75 | d=1.0 |
+|---|---|---|---|---|---|
+| 2K | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 4K | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 8K | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 16K | ✅ | ✅ | ✅ | ✅ | ✅ |
+
+20/20 passed — no retrieval degradation up to 16K context.
+
+### Tool Calling (Qwen3.5-27B, turbo3 K+V)
+
+15/15 tests passed (100%) — correct tool selection and parameter extraction.
+Tested: get_weather, send_email, search_web, calculate, create_reminder.
 
 ### WikiText-2 Perplexity
 
