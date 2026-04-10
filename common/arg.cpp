@@ -393,6 +393,9 @@ const std::vector<ggml_type> kv_cache_types = {
 };
 
 static ggml_type kv_cache_type_from_str(const std::string & s) {
+    // Convenience aliases
+    if (s == "turbo") return GGML_TYPE_TURBO3_0;  // turbo = turbo3 (best quality/compression)
+
     for (const auto & type : kv_cache_types) {
         if (ggml_type_name(type) == s) {
             return type;
