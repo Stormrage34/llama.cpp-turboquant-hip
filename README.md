@@ -1,3 +1,23 @@
+# llama.cpp + TurboQuant KV Cache Compression (HIP/ROCm)
+
+> **Fork with 3-bit KV cache compression for AMD GPUs.** 5× memory reduction, <0.1% quality cost, 1-2% speed overhead.
+
+```bash
+# Build
+cmake -B build -DGGML_HIP=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j$(nproc)
+
+# Run (just add -ctk turbo -ctv turbo)
+./build/bin/llama-server -m model.gguf -ngl 99 -ctk turbo -ctv turbo
+
+# See all turbo options
+./build/bin/llama-server -ctk info
+```
+
+See [TURBOQUANT.md](TURBOQUANT.md) for full benchmarks, Gemma 4 config, and technical details.
+
+---
+
 # llama.cpp
 
 ![llama](https://user-images.githubusercontent.com/1991296/230134379-7181e485-c521-4d23-a0d6-f7b3b61ba524.png)
