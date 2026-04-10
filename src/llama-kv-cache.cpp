@@ -310,12 +310,22 @@ llama_kv_cache::llama_kv_cache(
                     LLAMA_LOG_INFO("llama_kv_cache: Boundary V mode 7: first2+last2 KV layers V=q8_0, rest V=turbo2 (%u KV layers)\n", n_kv_layers);
                 }
             } else if (adaptive_mode == 8 && v_is_turbo && n_kv_layers >= 8) {
-                // Boundary V for symmetric configs: boundary V=q8_0, rest keeps original V type
+                // Boundary V for symmetric configs: boundary V uses specified type, rest keeps original
+                const char * bv_env = getenv("TURBO_BOUNDARY_V_TYPE");
+                ggml_type boundary_type = GGML_TYPE_Q8_0; // default
+                if (bv_env) {
+                    for (int t = 0; t < GGML_TYPE_COUNT; t++) {
+                        if (ggml_type_name((ggml_type)t) && strcmp(ggml_type_name((ggml_type)t), bv_env) == 0) {
+                            boundary_type = (ggml_type)t;
+                            break;
+                        }
+                    }
+                }
                 const bool is_boundary = (kv_layer_idx < 2 || kv_layer_idx >= n_kv_layers - 2);
-                if (is_boundary) layer_type_v = GGML_TYPE_Q8_0;
+                if (is_boundary) layer_type_v = boundary_type;
                 if (kv_layer_idx == 0) {
-                    LLAMA_LOG_INFO("llama_kv_cache: Boundary V mode 8: first2+last2 KV layers V=q8_0, rest V=%s (%u KV layers)\n",
-                        ggml_type_name(type_v), n_kv_layers);
+                    LLAMA_LOG_INFO("llama_kv_cache: Boundary V mode 8: first2+last2 KV layers V=%s, rest V=%s (%u KV layers)\n",
+                        ggml_type_name(boundary_type), ggml_type_name(type_v), n_kv_layers);
                 }
             }
         }

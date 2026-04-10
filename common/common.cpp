@@ -1531,6 +1531,14 @@ struct llama_context_params common_context_params_to_llama(const common_params &
     cparams.type_k_swa = params.cache_type_k_swa;
     cparams.type_v_swa = params.cache_type_v_swa;
 
+    // Wire CLI --cache-type-v-boundary to the TURBO_LAYER_ADAPTIVE env var mechanism
+    if (params.cache_type_v_boundary != GGML_TYPE_COUNT) {
+        // Mode 8: boundary V uses specified type, rest keeps original V type
+        setenv("TURBO_LAYER_ADAPTIVE", "8", 0); // don't override if already set
+        setenv("TURBO_BOUNDARY_V_TYPE",
+            ggml_type_name(params.cache_type_v_boundary), 1);
+    }
+
     return cparams;
 }
 

@@ -551,6 +551,7 @@ struct common_params {
 
     ggml_type cache_type_k_swa = GGML_TYPE_COUNT; // KV cache data type for K in SWA layers (COUNT = use cache_type_k)
     ggml_type cache_type_v_swa = GGML_TYPE_COUNT; // KV cache data type for V in SWA layers (COUNT = use cache_type_v)
+    ggml_type cache_type_v_boundary = GGML_TYPE_COUNT; // V type for boundary KV layers (COUNT = disabled)
 
     // TriAttention KV cache pruning
     std::string triattention_stats_path;           // path to TRIA v2 binary stats file

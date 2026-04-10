@@ -2057,6 +2057,18 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         }
     ).set_env("LLAMA_ARG_CACHE_TYPE_V_SWA"));
     add_opt(common_arg(
+        {"-ctvb", "--cache-type-v-boundary"}, "TYPE",
+        string_format(
+            "V cache type for first/last 2 KV layers (boundary protection)\n"
+            "improves quality with aggressive V compression (e.g. turbo2)\n"
+            "allowed values: %s",
+            get_all_kv_cache_types().c_str()
+        ),
+        [](common_params & params, const std::string & value) {
+            params.cache_type_v_boundary = kv_cache_type_from_str(value);
+        }
+    ).set_env("LLAMA_ARG_CACHE_TYPE_V_BOUNDARY"));
+    add_opt(common_arg(
         {"--triattention"}, "PATH",
         "path to TRIA calibration stats file for KV cache pruning (disabled by default)",
         [](common_params & params, const std::string & value) {
