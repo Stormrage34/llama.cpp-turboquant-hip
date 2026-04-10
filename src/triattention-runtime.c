@@ -336,18 +336,57 @@ int tria_get_evict_mask(
     }
     float threshold = sorted[target];
 
-    /* Build mask: evict if below threshold, but never evict sink tokens */
+    /* Build mask: V3 hybrid — prefix protection + per-segment eviction quota.
+     * Instead of global sort (which concentrates eviction in one band),
+     * spread eviction evenly across N_SEGMENTS position buckets.
+     * Prefix (sink) tokens and recent window are never evicted.
+     * See: TheTom, "TriAttention V3", 2026. */
     memset(evict_mask, 0, n_kv);
-    int kept = 0;
-    for (int i = 0; i < n_old && i < n_kv; i++) {
-        if (i < rt->sink) {
-            /* Attention sink — always kept */
-            kept++;
-        } else if (rt->global_scores[i] >= threshold && kept < budget) {
-            kept++;
-        } else {
-            evict_mask[i] = 1;
+
+    const int n_segments = 8;
+    int prefix = rt->sink > 0 ? rt->sink : 128; /* V3 default: protect first 128 */
+    if (prefix > n_old) prefix = n_old;
+
+    int evictable = n_old - prefix;
+    int n_to_evict = n_old - budget;
+    if (evictable <= 0 || n_to_evict <= 0) return 1;
+
+    /* Per-segment eviction */
+    int seg_size = evictable / n_segments;
+    if (seg_size < 1) seg_size = 1;
+    int actual_segs = (evictable + seg_size - 1) / seg_size;
+
+    int total_evicted = 0;
+    for (int s = 0; s < actual_segs && total_evicted < n_to_evict; s++) {
+        int seg_start = prefix + s * seg_size;
+        int seg_end   = seg_start + seg_size;
+        if (seg_end > n_old) seg_end = n_old;
+        int seg_len = seg_end - seg_start;
+        if (seg_len <= 0) continue;
+
+        /* This segment's eviction quota (proportional) */
+        int seg_evict = (n_to_evict * seg_len + evictable - 1) / evictable;
+        int remaining = n_to_evict - total_evicted;
+        if (seg_evict > remaining) seg_evict = remaining;
+        if (seg_evict > seg_len)   seg_evict = seg_len;
+        if (seg_evict <= 0) continue;
+
+        /* Sort segment indices by score (ascending = worst first) */
+        int * idx = (int *)malloc(seg_len * sizeof(int));
+        for (int i = 0; i < seg_len; i++) idx[i] = seg_start + i;
+
+        /* Simple selection of seg_evict lowest-scoring positions */
+        for (int e = 0; e < seg_evict; e++) {
+            int min_j = e;
+            for (int j = e + 1; j < seg_len; j++) {
+                if (rt->global_scores[idx[j]] < rt->global_scores[idx[min_j]])
+                    min_j = j;
+            }
+            if (min_j != e) { int tmp = idx[e]; idx[e] = idx[min_j]; idx[min_j] = tmp; }
+            evict_mask[idx[e]] = 1;
+            total_evicted++;
         }
+        free(idx);
     }
 
     return 1;
