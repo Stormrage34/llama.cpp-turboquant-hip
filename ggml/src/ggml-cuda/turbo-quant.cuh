@@ -229,14 +229,14 @@ static void turbo_innerq_finalize(int group_size) {
     // Read accumulators from device
     float sq_accum[INNERQ_MAX_CHANNELS];
     int count = 0;
-    cudaMemcpyFromSymbol(sq_accum, d_innerq_sq_accum, group_size * sizeof(float));
-    cudaMemcpyFromSymbol(&count, d_innerq_count, sizeof(int));
+    (void)cudaMemcpyFromSymbol(sq_accum, d_innerq_sq_accum, group_size * sizeof(float));
+    (void)cudaMemcpyFromSymbol(&count, d_innerq_count, sizeof(int));
 
     if (count <= 0) {
         GGML_LOG_WARN("%s: InnerQ calibration got 0 tokens, disabling\n", __func__);
         innerq_enabled = 0;
         int zero = 0;
-        cudaMemcpyToSymbol(d_innerq_calibrating, &zero, sizeof(int));
+        (void)cudaMemcpyToSymbol(d_innerq_calibrating, &zero, sizeof(int));
         return;
     }
 
@@ -270,7 +270,7 @@ static void turbo_innerq_finalize(int group_size) {
                        __func__, max_ratio);
         innerq_enabled = 0;
         int zero = 0;
-        cudaMemcpyToSymbol(d_innerq_calibrating, &zero, sizeof(int));
+        (void)cudaMemcpyToSymbol(d_innerq_calibrating, &zero, sizeof(int));
         return;
     }
 
@@ -311,7 +311,7 @@ static void turbo_innerq_check_finalize(int group_size, int64_t ne00) {
                            __func__, (long long)ne00, group_size);
             innerq_enabled = 0;
             int zero = 0;
-            cudaMemcpyToSymbol(d_innerq_calibrating, &zero, sizeof(int));
+            (void)cudaMemcpyToSymbol(d_innerq_calibrating, &zero, sizeof(int));
         }
         return;
     }
@@ -319,7 +319,7 @@ static void turbo_innerq_check_finalize(int group_size, int64_t ne00) {
     // Check if calibration is complete
     if (innerq_enabled == 1) {
         int count = 0;
-        cudaMemcpyFromSymbol(&count, d_innerq_count, sizeof(int));
+        (void)cudaMemcpyFromSymbol(&count, d_innerq_count, sizeof(int));
         if (count >= innerq_target_tokens) {
             turbo_innerq_finalize(group_size);
         }
