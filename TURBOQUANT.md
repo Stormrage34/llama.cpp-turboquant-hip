@@ -151,3 +151,13 @@ the KV cache small enough that context isn't reduced.
 ## Hardware
 
 Tested on: AMD Ryzen 9 9950X3D, RX 7900 XTX 24GB, ROCm 6.4, openSUSE Tumbleweed.
+
+### KL-Divergence (Qwen3.5-27B, turbo3 vs f16, 10 prompts)
+
+| Metric | Value |
+|---|---|
+| KL(f16 \|\| turbo3) | 0.021 ± 0.019 |
+| Jensen-Shannon | 0.0019 ± 0.001 |
+| Top-1 token match | 10/10 (100%) |
+
+turbo3 produces nearly identical token distributions to f16.
