@@ -38,6 +38,7 @@ Tested: get_weather, send_email, search_web, calculate, create_reminder.
 |---|---|---|---|---|
 | Qwen3.5-27B (4K) | f16 | 6.6657 | — | 1× |
 | | turbo3 | 6.6657 | +0.02% | 5.12× |
+| | turbo4 | 6.8203 | +2.3% | 3.88× |
 | | turbo2 | 6.9145 | +3.7% | 7.53× |
 | Qwen3.5-27B (16K) | f16 | 6.2752 | — | 1× |
 | | turbo3 | 6.2187 | -0.9% | 5.12× |
@@ -49,6 +50,7 @@ Tested: get_weather, send_email, search_web, calculate, create_reminder.
 | Qwen3.5-27B | 512 | f16 | 427 | 30.15 |
 | | 512 | turbo3 | 423 (-1%) | 29.49 (-2%) |
 | | 512 | turbo2 | 421 (-1%) | 29.80 (-1%) |
+| | 512 | turbo4 | 422 (-1%) | 29.71 (-1%) |
 | | 8K | f16 | 340 | 30.13 |
 | | 8K | turbo3 | 337 (-1%) | 29.74 (-1%) |
 | Gemma 4 26B | 512 | f16 | 2939 | 94.53 |
