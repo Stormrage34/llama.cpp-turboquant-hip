@@ -146,3 +146,13 @@ biased turbo3 dequant. The 25 SWA layers carry the output.
 - `src/llama-kv-cache.cpp` — KV cache encode dispatch (wht_group in op_params)
 - `src/llama-graph.cpp` — V inverse WHT dispatch, attention sharpening
 - `ggml/src/ggml.c:6261` — Q auto-detect group_size
+
+## Active GitHub Threads (CHECK REGULARLY)
+
+- **Discussion #21526** (ggml-org/llama.cpp) — our main TurboQuant HIP thread
+  - **mikiadev** — Strix Halo 128GB, NixOS, ROCm 7.2.1, ready to test. Sent him PPL/VRAM instructions.
+  - **stragulus** — VRAM leak on Ubuntu, FA lazy allocation theory. Not reproduced on openSUSE.
+  - **hvico** — Strix Halo, wants to test
+- **Discussion #20969** — main TurboQuant community thread (TheTom, spiritbuun, AmesianX)
+- **r/ROCm** — our post + Explurt (RX 9700 gfx1201 OOM issue, waiting for mainline logs)
+- **r/LocalLLaMA** — Acrobatic_Bee_6660 comments (TurboQuant context, tool calling)
