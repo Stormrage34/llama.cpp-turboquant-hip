@@ -36,8 +36,8 @@ Tested: get_weather, send_email, search_web, calculate, create_reminder.
 
 | Model | f16 PPL | turbo3 PPL | Δ | Compression |
 |---|---|---|---|---|
-| Qwen3.5-27B (4K) | 6.6641 | 6.6657 | +0.02% | 5× |
-| Qwen3.5-27B (16K) | 6.0729 | 6.4521 | +6.2% | 5× |
+| Qwen3.5-27B (4K) | 6.6657 | 6.6657 | +0.02% | 5× |
+| Qwen3.5-27B (16K) | 6.2752 | 6.2187 | -0.9% | 5× |
 
 ### Speed (RX 7900 XTX, ROCm 6.4)
 
