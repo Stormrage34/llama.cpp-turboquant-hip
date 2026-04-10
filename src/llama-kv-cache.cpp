@@ -85,7 +85,7 @@ static ggml_tensor * ggml_mul_mat_aux(
 #define INNERQ_MAX_CHANNELS 128
 #endif
 
-#if defined(GGML_USE_CUDA) || defined(GGML_USE_HIP)
+#if (defined(GGML_USE_CUDA) || defined(GGML_USE_HIP)) && !defined(GGML_BACKEND_DL)
 #if defined(_WIN32) && !defined(__MINGW32__)
 #  define TURBO_IQ_IMPORT __declspec(dllimport)
 #else
