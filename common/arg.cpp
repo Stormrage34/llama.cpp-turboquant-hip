@@ -399,6 +399,19 @@ static ggml_type kv_cache_type_from_str(const std::string & s) {
     // Convenience aliases
     if (s == "turbo") return GGML_TYPE_TURBO3_0;  // turbo = turbo3 (best quality/compression)
 
+    if (s == "info") {
+        fprintf(stderr, "\nAvailable KV cache types for TurboQuant:\n\n");
+        fprintf(stderr, "  turbo (turbo3)  3-bit  5.12x compression  <0.1%% PPL cost  [recommended]\n");
+        fprintf(stderr, "  turbo4          4-bit  3.88x compression  +2.3%% PPL\n");
+        fprintf(stderr, "  turbo2          2-bit  7.53x compression  +3.7%% PPL\n");
+        fprintf(stderr, "  q8_0            8-bit  1.88x compression  baseline-quality\n");
+        fprintf(stderr, "  f16            16-bit  1x    (no compression)\n");
+        fprintf(stderr, "\nUsage: -ctk turbo -ctv turbo\n");
+        fprintf(stderr, "Gemma 4: add -ctvs q8_0 (auto-detected)\n");
+        fprintf(stderr, "Boundary V: -ctvb q8_0 (protects first/last KV layers)\n\n");
+        exit(0);
+    }
+
     for (const auto & type : kv_cache_types) {
         if (ggml_type_name(type) == s) {
             return type;
