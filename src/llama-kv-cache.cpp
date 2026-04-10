@@ -475,6 +475,12 @@ llama_kv_cache::llama_kv_cache(
             const float saved_mib = ((float)f16_size - (float)(memory_size_k + memory_size_v)) / (1024.0f * 1024.0f);
             if (ratio > 1.0f) {
                 LLAMA_LOG_INFO("%s: KV compression: %.2fx (saving %.0f MiB vs f16)\n", __func__, ratio, saved_mib);
+                // Show equivalent context expansion
+                const uint32_t equiv_ctx = (uint32_t)(kv_size * ratio);
+                if (equiv_ctx > kv_size + 1024) {
+                    LLAMA_LOG_INFO("%s: equivalent to %.0fK context with f16 KV in the same memory\n",
+                        __func__, (float)equiv_ctx / 1024.0f);
+                }
             }
         } else {
             // f16 KV — suggest turbo3
