@@ -72,6 +72,8 @@ Minimal speed overhead: 1-2% on standard models, 8% decode on Gemma 4 (D=512 WHT
 
 ### TriAttention KV Pruning (Qwen3.5-27B, 16K context)
 
+Based on the same pre-RoPE Q/K concentration principle as [TriAttention (Mao et al., NVIDIA/MIT, 2026)](https://arxiv.org/abs/2604.04921). Independent C/HIP implementation with native GPU compaction kernel.
+
 | Config | PPL | KV rows |
 |---|---|---|
 | Baseline | 6.0729 | 16384 |
