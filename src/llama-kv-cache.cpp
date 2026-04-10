@@ -476,6 +476,15 @@ llama_kv_cache::llama_kv_cache(
             if (ratio > 1.0f) {
                 LLAMA_LOG_INFO("%s: KV compression: %.2fx (saving %.0f MiB vs f16)\n", __func__, ratio, saved_mib);
             }
+        } else {
+            // f16 KV — suggest turbo3
+            const size_t f16_size = memory_size_k + memory_size_v;
+            const float turbo3_est = (float)f16_size / 5.12f;
+            const float save_est = ((float)f16_size - turbo3_est) / (1024.0f * 1024.0f);
+            if (save_est > 10.0f) {
+                LLAMA_LOG_INFO("%s: tip: --cache-type-k turbo3 --cache-type-v turbo3 would save ~%.0f MiB (5x compression, <0.1%% PPL cost)\n",
+                    __func__, save_est);
+            }
         }
     }
 
