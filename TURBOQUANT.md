@@ -84,6 +84,18 @@ Based on the same pre-RoPE Q/K concentration principle as [TriAttention (Mao et 
 | TriAttention 75% | **5.9939 (-1.3%)** | ~5989 |
 | TriAttention 50% | 6.0890 (+0.26%) | ~2550 |
 
+### NIAH: turbo3 + TriAttention combo (Qwen3-8B Q4_K_M)
+
+| Config | NIAH pass rate | Effective KV reduction |
+|---|---|---|
+| turbo3 only (ref) | 28/28 (100%) to 64K | 5.12× |
+| turbo3 + TriAtt 75% (≤12K) | 20/20 (100%) | ~6.8× |
+| turbo3 + TriAtt 75% (≤30K) | 21/25 (84%) | ~6.8× |
+| turbo3 + TriAtt 50% (≤24K) | 16/20 (80%) | ~10.2× |
+
+75% retention is reliable for retrieval up to 12K context. At longer contexts,
+sporadic non-deterministic failures appear. 50% is not recommended for retrieval-critical tasks.
+
 ## Usage
 
 ```bash
@@ -191,10 +203,10 @@ At 131K context, turbo3 saves 6.4 GiB vs f16. turbo2 saves 6.9 GiB.
 
 ### Combined Compression: TurboQuant + TriAttention
 
-**Note:** This is an arithmetic stack estimate, not a validated end-to-end retrieval claim. TriAttention pruning is experimental — see [TheTom's V3 analysis](https://github.com/TheTom/turboquant_plus/blob/main/docs/papers/triattention-v3.md) for retrieval testing.
-
 | Method | KV Compression | Quality |
 |---|---|---|
-| turbo3 alone | 5.12× | +0.02% PPL |
+| turbo3 alone | 5.12× | +0.02% PPL, NIAH 28/28 to 64K |
 | TriAttention 75% alone | 1.33× | -1.3% PPL |
-| **turbo3 + TriAttention 75%** | **~6.8×** | PPL only, NIAH not validated |
+| **turbo3 + TriAttention 75%** | **~6.8×** | NIAH 20/20 to 12K (Qwen3-8B), 21/25 to 30K |
+
+Combo NIAH validated on Qwen3-8B Q4_K_M (2026-04-11). Not yet tested on Qwen3.5-27B hybrid.
