@@ -6,13 +6,14 @@
 
 ### GSM8K Math Accuracy (temperature=0)
 
-| Model | f16 | turbo3 | Drop | Compression | N |
-|---|---|---|---|---|---|
-| **Qwen3.5-27B** Q5_K_M | **71.9%** | **72.0%** | **+0.1%** | 5× | 1319 |
-| **Gemma 4 26B-A4B** Q4_K_M | 83%* | **80.3%** | -3.2% | 2.9× | 100×3 |
-| **Gemma 4 31B Dense** Q4_K_M | 96%* | **97%** | +1% | 2.9× | 100 |
+| Model | f16 | turbo3 | turbo3+TriAtt 75% | N |
+|---|---|---|---|---|
+| **Qwen3.5-27B** Q5_K_M | **71.9%** | **72.0%** | **72.0%** | 1319 |
+| **Gemma 4 26B-A4B** Q4_K_M | 83%* | **80.3%** | — | 100×3 |
+| **Gemma 4 31B Dense** Q4_K_M | 96%* | **97%** | — | 100 |
 
-Qwen3.5-27B: both f16 and turbo3 validated on full 1319 problems. *Gemma 4 baselines from 100-problem subsets.
+Qwen3.5-27B: all three configs validated on full 1319 problems. TriAttention pruning adds zero reasoning degradation.
+*Gemma 4 baselines from 100-problem subsets.
 
 Best Gemma 4 config: `--cache-type-k turbo3 --cache-type-v turbo3 --cache-type-k-swa turbo3 --cache-type-v-swa q8_0`
 
@@ -209,6 +210,6 @@ At 131K context, turbo3 saves 6.4 GiB vs f16. turbo2 saves 6.9 GiB.
 |---|---|---|
 | turbo3 alone | 5.12× | +0.02% PPL, NIAH 28/28 to 64K |
 | TriAttention 75% alone | 1.33× | -1.3% PPL |
-| **turbo3 + TriAttention 75%** | **~6.8×** | Single-needle NIAH 20/20 to 12K (27B + 8B), 23/25 to 30K (27B) |
+| **turbo3 + TriAttention 75%** | **~6.8×** | GSM8K 72.0% (=f16), NIAH 20/20 to 12K, 23/25 to 30K (27B) |
 
-Combo validated on Qwen3.5-27B Q5_K_M (hybrid SSM+attn) and Qwen3-8B Q4_K_M (2026-04-11).
+Combo validated on Qwen3.5-27B Q5_K_M (hybrid SSM+attn) and Qwen3-8B Q4_K_M. GSM8K validated on full 1319 problems (2026-04-11).
