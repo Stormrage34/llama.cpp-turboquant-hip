@@ -8,11 +8,11 @@
 
 | Model | f16 | turbo3 | Drop | Compression | N |
 |---|---|---|---|---|---|
-| **Qwen3.5-27B** Q5_K_M | 66%* | **72.0%** | +6% | 5× | 1319 |
+| **Qwen3.5-27B** Q5_K_M | **71.9%** | **72.0%** | **+0.1%** | 5× | 1319 |
 | **Gemma 4 26B-A4B** Q4_K_M | 83%* | **80.3%** | -3.2% | 2.9× | 100×3 |
 | **Gemma 4 31B Dense** Q4_K_M | 96%* | **97%** | +1% | 2.9× | 100 |
 
-*f16 baselines from 100-problem subset. Qwen3.5 turbo3 validated on full 1319 problems.
+Qwen3.5-27B: both f16 and turbo3 validated on full 1319 problems. *Gemma 4 baselines from 100-problem subsets.
 
 Best Gemma 4 config: `--cache-type-k turbo3 --cache-type-v turbo3 --cache-type-k-swa turbo3 --cache-type-v-swa q8_0`
 
