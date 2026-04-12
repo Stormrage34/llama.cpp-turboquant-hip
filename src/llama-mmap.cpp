@@ -434,7 +434,7 @@ struct llama_mmap::impl {
 #ifdef _POSIX_MAPPED_FILES
     std::vector<std::pair<size_t, size_t>> mapped_fragments;
 
-    impl(struct llama_file * file, size_t prefetch, bool numa) {
+    impl(struct llama_file * file, size_t prefetch, bool numa, bool hugetlb) {
         size = file->size();
         int fd = file->file_id();
         int flags = MAP_SHARED;
@@ -525,8 +525,9 @@ struct llama_mmap::impl {
 #elif defined(_WIN32)
     HANDLE hMapping = nullptr;
 
-    impl(struct llama_file * file, size_t prefetch, bool numa) {
+    impl(struct llama_file * file, size_t prefetch, bool numa, bool hugetlb) {
         GGML_UNUSED(numa);
+        GGML_UNUSED(hugetlb);
 
         size = file->size();
 
@@ -589,10 +590,11 @@ struct llama_mmap::impl {
         }
     }
 #else
-    impl(struct llama_file * file, size_t prefetch, bool numa) {
+    impl(struct llama_file * file, size_t prefetch, bool numa, bool hugetlb) {
         GGML_UNUSED(file);
         GGML_UNUSED(prefetch);
         GGML_UNUSED(numa);
+        GGML_UNUSED(hugetlb);
 
         throw std::runtime_error("mmap not supported");
     }
@@ -607,13 +609,19 @@ struct llama_mmap::impl {
 
     void * addr;
     size_t size;
+    // Hugetlb: physical mapping length (file size rounded up to 2 MiB) used
+    // by munmap; `size` continues to report the underlying file length.
+    size_t mmap_size = 0;
+    bool   is_hugetlb_ = false;
 };
 
-llama_mmap::llama_mmap(struct llama_file * file, size_t prefetch, bool numa) : pimpl(std::make_unique<impl>(file, prefetch, numa)) {}
+llama_mmap::llama_mmap(struct llama_file * file, size_t prefetch, bool numa, bool hugetlb) : pimpl(std::make_unique<impl>(file, prefetch, numa, hugetlb)) {}
 llama_mmap::~llama_mmap() = default;
 
 size_t llama_mmap::size() const { return pimpl->size; }
+size_t llama_mmap::mmap_size() const { return pimpl->mmap_size ? pimpl->mmap_size : pimpl->size; }
 void * llama_mmap::addr() const { return pimpl->addr; }
+bool   llama_mmap::is_hugetlb() const { return pimpl->is_hugetlb_; }
 
 void llama_mmap::unmap_fragment(size_t first, size_t last) { pimpl->unmap_fragment(first, last); }
 
