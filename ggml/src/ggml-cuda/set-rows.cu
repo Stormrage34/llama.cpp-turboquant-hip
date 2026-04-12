@@ -610,7 +610,7 @@ static void set_rows_cuda_turbo3(
 // Same structure as turbo3 but 2-bit quantization only (no signs byte).
 
 template <typename idx_t, int GROUP_SIZE>
-__launch_bounds__(128)
+__launch_bounds__(256)  // max of 256, 128, or 64
 static __global__ void k_set_rows_turbo2(
         const float * __restrict__ src0,
         const idx_t * __restrict__ src1,
