@@ -89,23 +89,40 @@ int tria_compact_kv(struct tria_runtime * rt, void * ctx_void) {
     int budget = rt->global_budget;
     budget = std::max(1, std::min(budget, n_old));
 
-    std::vector<uint32_t> ranked(n_old);
-    std::iota(ranked.begin(), ranked.end(), 0u);
+    /* Protect sink/prefix tokens from compaction (Codex review) */
+    int prefix = rt->sink > 0 ? rt->sink : 128;
+    if (prefix > n_old) prefix = n_old;
 
-    std::stable_sort(ranked.begin(), ranked.end(), [&](uint32_t a, uint32_t b) {
-        if (rt->global_scores[a] == rt->global_scores[b]) {
-            return a < b;
-        }
-        return rt->global_scores[a] > rt->global_scores[b];
-    });
-
-    ranked.resize(budget);
-    std::sort(ranked.begin(), ranked.end());
-
+    /* Build keep set: always keep prefix, then top-scoring from rest */
     std::vector<uint32_t> keep_positions;
     keep_positions.reserve(budget + rt->window);
-    keep_positions.insert(keep_positions.end(), ranked.begin(), ranked.end());
 
+    /* Always keep prefix tokens */
+    for (int i = 0; i < prefix && i < budget; i++) {
+        keep_positions.push_back((uint32_t)i);
+    }
+
+    /* Fill remaining budget from non-prefix tokens by score */
+    int remaining_budget = budget - (int)keep_positions.size();
+    if (remaining_budget > 0 && prefix < n_old) {
+        std::vector<uint32_t> ranked;
+        ranked.reserve(n_old - prefix);
+        for (int i = prefix; i < n_old; i++) {
+            ranked.push_back((uint32_t)i);
+        }
+
+        std::stable_sort(ranked.begin(), ranked.end(), [&](uint32_t a, uint32_t b) {
+            if (rt->global_scores[a] == rt->global_scores[b]) return a < b;
+            return rt->global_scores[a] > rt->global_scores[b];
+        });
+
+        int take = std::min(remaining_budget, (int)ranked.size());
+        ranked.resize(take);
+        std::sort(ranked.begin(), ranked.end());
+        keep_positions.insert(keep_positions.end(), ranked.begin(), ranked.end());
+    }
+
+    /* Add window (recent) tokens */
     for (int pos = n_old; pos < n_kv; ++pos) {
         keep_positions.push_back((uint32_t) pos);
     }

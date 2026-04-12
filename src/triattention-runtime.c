@@ -16,14 +16,11 @@
 
 struct tria_runtime * g_tria_rt = NULL;
 
-/* Access KV cache internals — defined in llama-kv-cache.cpp */
-/* We use the raw tensor pointers from llama_memory/kv_cache */
 struct llama_kv_layer {
     struct ggml_tensor * k;
     struct ggml_tensor * v;
 };
 
-/* Forward declaration — we'll get K tensor via a helper */
 extern struct ggml_tensor * tria_get_k_tensor(void * ctx, int layer_idx);
 extern int tria_get_n_kv(void * ctx);
 extern int tria_get_used_n_kv(void * ctx);
@@ -37,9 +34,16 @@ struct tria_runtime * tria_runtime_init(
     int interval,
     int sink
 ) {
-    if (!stats || budget_pct <= 0) return NULL;
+    if (!stats || budget_pct <= 0 || budget_pct > 100) return NULL;
+    if (stats->num_kv_heads == 0 || stats->num_layers == 0) return NULL;
+
+    /* Overflow check (Codex review) */
+    uint32_t n_pairs_u = (uint32_t)stats->num_layers * (uint32_t)stats->num_kv_heads;
+    if (n_pairs_u / stats->num_layers != stats->num_kv_heads) return NULL;
+    int n_pairs = (int)n_pairs_u;
 
     struct tria_runtime * rt = calloc(1, sizeof(*rt));
+    if (!rt) return NULL;
     rt->stats      = stats;
     rt->budget_pct = budget_pct;
     rt->window     = window;
@@ -47,15 +51,24 @@ struct tria_runtime * tria_runtime_init(
     rt->sink       = sink;
     rt->n_scored   = 0;
 
-    int n_pairs = stats->num_layers * stats->num_kv_heads;
     rt->retained       = calloc(n_pairs, sizeof(int *));
     rt->retained_count = calloc(n_pairs, sizeof(int));
+    if (!rt->retained || !rt->retained_count) {
+        free(rt->retained); free(rt->retained_count); free(rt);
+        return NULL;
+    }
 
     return rt;
 }
 
 void tria_runtime_free(struct tria_runtime * rt) {
     if (!rt) return;
+
+    /* Clear global pointer to prevent UAF (Codex review) */
+    if (g_tria_rt == rt) {
+        g_tria_rt = NULL;
+    }
+
     if (rt->retained) {
         int n_pairs = rt->stats->num_layers * rt->stats->num_kv_heads;
         for (int i = 0; i < n_pairs; i++) {
@@ -101,28 +114,22 @@ int tria_maybe_score(
     int budget = (n_old * rt->budget_pct) / 100;
     if (budget <= 0) budget = 1;
 
-    /* Incremental scoring: only read/score new tokens unless full rescore needed */
-    /* Incremental scoring disabled pending fix for score reordering after compaction
-       and z-norm drift between incremental/full passes (Codex review P1a/P1b).
-       Force full rescore every pass for now. */
+    /* Force full rescore every pass (incremental disabled pending fix) */
     #define TRIA_FULL_RESCORE_INTERVAL 1
     int full_rescore = (rt->score_pass % TRIA_FULL_RESCORE_INTERVAL == 0)
                      || !rt->global_scores
                      || rt->global_n < 1;
 
-    /* How many rows are "new" since last compaction? */
-    int n_prev = 0; /* retained from previous pass */
-    int n_new  = n_old; /* tokens to score */
-    int score_start = 0; /* first row index to read from GPU */
+    int n_prev = 0;
+    int n_new  = n_old;
+    int score_start = 0;
 
     if (!full_rescore && rt->global_scores && rt->global_n > 0) {
-        /* After compaction, retained tokens are at rows 0..global_n-1 with valid scores */
         n_prev = rt->global_n;
         if (n_prev > n_old) n_prev = n_old;
         score_start = n_prev;
         n_new = n_old - n_prev;
         if (n_new <= 0) {
-            /* Nothing new to score, just update budget */
             rt->global_budget = budget;
             rt->n_scored = n_kv;
             rt->score_pass++;
@@ -134,10 +141,23 @@ int tria_maybe_score(
             n_kv, n_old, budget, n_new,
             full_rescore ? "full" : "incremental", rt->score_pass);
 
-    /* Try to read K from cache and score */
     if (!ctx) { rt->n_scored = n_kv; return 0; }
 
-    /* Allocate buffers */
+    /* Validate stats dimensions against actual KV tensor (Codex review) */
+    {
+        struct ggml_tensor * k0 = tria_get_k_tensor(ctx, 0);
+        if (k0) {
+            int64_t actual_row = k0->ne[0];
+            int expected_row = nkv * hd;
+            if (actual_row < expected_row) {
+                fprintf(stderr, "tria_score: TRIA stats mismatch: expected row %d, got %d — skipping\n",
+                        expected_row, (int)actual_row);
+                rt->n_scored = n_kv;
+                return 0;
+            }
+        }
+    }
+
     int n_embd_k_gqa = nkv * hd;
     size_t k_bytes = (size_t)n_new * n_embd_k_gqa * sizeof(float);
     float * k_f32 = (float *)malloc(k_bytes);
@@ -148,7 +168,6 @@ int tria_maybe_score(
     if (rt->global_n < n_old) {
         float * new_gs = (float *)malloc(n_old * sizeof(float));
         if (new_gs) {
-            /* Copy old scores for retained positions */
             if (!full_rescore && rt->global_scores && rt->global_n > 0) {
                 int copy_n = rt->global_n < n_old ? rt->global_n : n_old;
                 memcpy(new_gs, rt->global_scores, copy_n * sizeof(float));
@@ -160,23 +179,21 @@ int tria_maybe_score(
             rt->global_scores = new_gs;
             rt->global_n = n_old;
         } else {
-            /* Resize failed — bail out to avoid buffer overrun */
             free(k_f32); free(scores); free(key_pos);
             rt->n_scored = n_kv;
             return 0;
         }
     } else if (full_rescore) {
         for (int i = 0; i < n_old; i++) rt->global_scores[i] = -1e30f;
+        rt->global_n = n_old;
     } else {
-        /* Extend with -inf for new positions */
         for (int i = n_prev; i < n_old; i++) rt->global_scores[i] = -1e30f;
     }
     rt->global_budget = budget;
     rt->compaction_active = 0;
 
-    /* Pre-allocate buffers for head extraction */
-    float * k_real = (float *)malloc(n_new * fc * sizeof(float));
-    float * k_imag = (float *)malloc(n_new * fc * sizeof(float));
+    float * k_real = (float *)malloc((size_t)n_new * fc * sizeof(float));
+    float * k_imag = (float *)malloc((size_t)n_new * fc * sizeof(float));
 
     if (!k_f32 || !scores || !key_pos || !rt->global_scores || !k_real || !k_imag) {
         free(k_f32); free(scores); free(key_pos); free(k_real); free(k_imag);
@@ -196,7 +213,6 @@ int tria_maybe_score(
         struct ggml_tensor * k_tensor = tria_get_k_tensor(ctx, li);
         if (!k_tensor) continue;
 
-        /* Read only new K rows from GPU (score_start..n_old-1) */
         size_t row_size = ggml_row_size(k_tensor->type, n_embd_k_gqa);
         size_t read_offset = (size_t)score_start * row_size;
         size_t read_bytes = (size_t)n_new * row_size;
@@ -215,7 +231,6 @@ int tria_maybe_score(
             continue;
         }
 
-        /* Score each KV head — only new tokens */
         for (int kvi = 0; kvi < nkv; kvi++) {
             for (int s = 0; s < n_new; s++) {
                 float * row = k_f32 + s * n_embd_k_gqa + kvi * hd;
@@ -229,7 +244,6 @@ int tria_maybe_score(
                                key_pos + score_start,
                                n_kv, n_new, li, kvi, scores);
 
-            /* Z-normalize new scores, max-aggregate into global */
             float mean = 0, var = 0;
             for (int s = 0; s < n_new; s++) mean += scores[s];
             mean /= n_new;
@@ -247,7 +261,6 @@ int tria_maybe_score(
         }
     }
 
-    /* For full rescore, total_pruned is informational */
     total_pruned = (n_old - budget) * nl * nkv;
 
     if (total_pruned > 0) {
@@ -264,17 +277,9 @@ int tria_maybe_score(
     {
         const int compacted = tria_compact_kv(rt, ctx);
         if (compacted > 0) {
-            /* Compact global_scores to match new cache layout:
-               retained positions 0..budget-1 keep their scores,
-               window positions budget..budget+window-1 get -inf (will be rescored) */
             int new_n = tria_get_used_n_kv(ctx);
             int new_old = new_n - rt->window;
             if (new_old > 0 && new_old <= rt->global_n) {
-                /* Scores for retained tokens are already at indices selected by compaction.
-                   After compaction, rows 0..new_old-1 are the retained old tokens.
-                   Their scores in global_scores correspond to the original indices
-                   that were kept — but compaction reordered them. For simplicity,
-                   just keep the first new_old scores (they were the top-K). */
                 rt->global_n = new_old;
             }
             rt->compaction_active = 1;
@@ -301,23 +306,21 @@ int tria_get_evict_mask(
     int n_old = rt->n_scored - rt->window;
     if (n_old <= 0) return 0;
 
+    /* Clamp n_old to actual mask/scores bounds (Codex review: OOB fix) */
+    if (n_old > n_kv) n_old = n_kv;
+    if (n_old > rt->global_n) n_old = rt->global_n;
+
     int budget = rt->global_budget;
     if (budget >= n_old) {
         memset(evict_mask, 0, n_kv);
         return 1;
     }
 
-    /* Find the budget-th largest score as threshold via quickselect O(n) */
-    static float * sorted = NULL;
-    static int sorted_cap = 0;
-    if (n_old > sorted_cap) {
-        free(sorted);
-        sorted = (float *)malloc(n_old * sizeof(float));
-        sorted_cap = n_old;
-    }
+    /* Quickselect for threshold — use local buffer, not static (Codex review: thread safety) */
+    float * sorted = (float *)malloc(n_old * sizeof(float));
+    if (!sorted) return 0;
     memcpy(sorted, rt->global_scores, n_old * sizeof(float));
 
-    /* Quickselect: partition around budget-th largest */
     int lo = 0, hi = n_old - 1, target = budget - 1;
     while (lo < hi) {
         float pivot = sorted[lo + (hi - lo) / 2];
@@ -334,24 +337,22 @@ int tria_get_evict_mask(
         else if (target >= i) lo = i;
         else break;
     }
-    float threshold = sorted[target];
+    /* threshold is unused by the segment-based eviction below,
+       but kept for potential future use */
+    (void)sorted[target];
+    free(sorted);
 
-    /* Build mask: V3 hybrid — prefix protection + per-segment eviction quota.
-     * Instead of global sort (which concentrates eviction in one band),
-     * spread eviction evenly across N_SEGMENTS position buckets.
-     * Prefix (sink) tokens and recent window are never evicted.
-     * See: TheTom, "TriAttention V3", 2026. */
+    /* Build mask: V3 hybrid — prefix protection + per-segment eviction quota */
     memset(evict_mask, 0, n_kv);
 
     const int n_segments = 8;
-    int prefix = rt->sink > 0 ? rt->sink : 128; /* V3 default: protect first 128 */
+    int prefix = rt->sink > 0 ? rt->sink : 128;
     if (prefix > n_old) prefix = n_old;
 
     int evictable = n_old - prefix;
     int n_to_evict = n_old - budget;
     if (evictable <= 0 || n_to_evict <= 0) return 1;
 
-    /* Per-segment eviction */
     int seg_size = evictable / n_segments;
     if (seg_size < 1) seg_size = 1;
     int actual_segs = (evictable + seg_size - 1) / seg_size;
@@ -364,18 +365,16 @@ int tria_get_evict_mask(
         int seg_len = seg_end - seg_start;
         if (seg_len <= 0) continue;
 
-        /* This segment's eviction quota (proportional) */
         int seg_evict = (n_to_evict * seg_len + evictable - 1) / evictable;
         int remaining = n_to_evict - total_evicted;
         if (seg_evict > remaining) seg_evict = remaining;
         if (seg_evict > seg_len)   seg_evict = seg_len;
         if (seg_evict <= 0) continue;
 
-        /* Sort segment indices by score (ascending = worst first) */
         int * idx = (int *)malloc(seg_len * sizeof(int));
+        if (!idx) continue;
         for (int i = 0; i < seg_len; i++) idx[i] = seg_start + i;
 
-        /* Simple selection of seg_evict lowest-scoring positions */
         for (int e = 0; e < seg_evict; e++) {
             int min_j = e;
             for (int j = e + 1; j < seg_len; j++) {
@@ -383,7 +382,10 @@ int tria_get_evict_mask(
                     min_j = j;
             }
             if (min_j != e) { int tmp = idx[e]; idx[e] = idx[min_j]; idx[min_j] = tmp; }
-            evict_mask[idx[e]] = 1;
+            /* Bounds check before writing mask (Codex review: OOB fix) */
+            if (idx[e] >= 0 && idx[e] < n_kv) {
+                evict_mask[idx[e]] = 1;
+            }
             total_evicted++;
         }
         free(idx);
