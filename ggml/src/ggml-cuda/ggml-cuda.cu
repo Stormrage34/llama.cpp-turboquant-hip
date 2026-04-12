@@ -815,9 +815,13 @@ static size_t ggml_backend_cuda_buffer_type_get_alloc_size(ggml_backend_buffer_t
 
     // TQ4_1S → q8_0 load-time conversion: allocate q8_0-sized space in VRAM
     if (tensor->type == GGML_TYPE_TQ4_1S) {
-        // q8_0 block: 34 bytes per 32 elements. TQ4_1S block: 20 bytes per 32 elements.
         const int64_t n_blocks = ggml_nelements(tensor) / QK_TQ4_1S;
         size = n_blocks * sizeof(block_q8_0);
+        // Padding must use q8_0 row size since tensor will be converted on upload
+        if (ne0 % MATRIX_ROW_PADDING != 0) {
+            size += ggml_row_size(GGML_TYPE_Q8_0, MATRIX_ROW_PADDING - ne0 % MATRIX_ROW_PADDING);
+        }
+        return size;
     }
 
     if (ggml_is_quantized(tensor->type)) {

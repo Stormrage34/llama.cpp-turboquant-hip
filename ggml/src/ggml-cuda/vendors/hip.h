@@ -36,24 +36,24 @@
 #define NCCL_CHECK(fn) {ncclResult_t err = fn; if(err != ncclSuccess) { GGML_ABORT("RCCL Failure RCCL returned: %i\n", err); }}
 // __shfl_sync: support both 3-arg (mask, var, srcLane) and 4-arg (mask, var, srcLane, width) calls
 // HIP ignores the mask but requires it to be 64-bit, so we cast explicitly.
-#define __SHFL_SYNC_3(mask, var, srcLane)        __shfl(var, srcLane, warpSize)
+#define __SHFL_SYNC_3(mask, var, srcLane)        __shfl(var, srcLane, WARP_SIZE)
 #define __SHFL_SYNC_4(mask, var, srcLane, width) __shfl(var, srcLane, width)
 #define __SHFL_GET_MACRO(_1, _2, _3, _4, NAME, ...) NAME
 #define __shfl_sync(...) __SHFL_GET_MACRO(__VA_ARGS__, __SHFL_SYNC_4, __SHFL_SYNC_3)(__VA_ARGS__)
 // __shfl_up_sync: support 3-arg and 4-arg calls (HIP ignores mask)
-#define __SHFL_UP_SYNC_3(mask, var, delta)        __shfl_up(var, delta, warpSize)
+#define __SHFL_UP_SYNC_3(mask, var, delta)        __shfl_up(var, delta, WARP_SIZE)
 #define __SHFL_UP_SYNC_4(mask, var, delta, width) __shfl_up(var, delta, width)
 #define __SHFL_UP_GET(_1, _2, _3, _4, NAME, ...) NAME
 #define __shfl_up_sync(...) __SHFL_UP_GET(__VA_ARGS__, __SHFL_UP_SYNC_4, __SHFL_UP_SYNC_3)(__VA_ARGS__)
 
 // __shfl_xor_sync: support 3-arg and 4-arg calls (HIP ignores mask)
-#define __SHFL_XOR_SYNC_3(mask, var, laneMask)        __shfl_xor(var, laneMask, warpSize)
+#define __SHFL_XOR_SYNC_3(mask, var, laneMask)        __shfl_xor(var, laneMask, WARP_SIZE)
 #define __SHFL_XOR_SYNC_4(mask, var, laneMask, width) __shfl_xor(var, laneMask, width)
 #define __SHFL_XOR_GET(_1, _2, _3, _4, NAME, ...) NAME
 #define __shfl_xor_sync(...) __SHFL_XOR_GET(__VA_ARGS__, __SHFL_XOR_SYNC_4, __SHFL_XOR_SYNC_3)(__VA_ARGS__)
 
 // __shfl_down_sync: support 3-arg and 4-arg calls (HIP ignores mask)
-#define __SHFL_DOWN_SYNC_3(mask, var, delta)        __shfl_down(var, delta, warpSize)
+#define __SHFL_DOWN_SYNC_3(mask, var, delta)        __shfl_down(var, delta, WARP_SIZE)
 #define __SHFL_DOWN_SYNC_4(mask, var, delta, width) __shfl_down(var, delta, width)
 #define __SHFL_DOWN_GET(_1, _2, _3, _4, NAME, ...) NAME
 #define __shfl_down_sync(...) __SHFL_DOWN_GET(__VA_ARGS__, __SHFL_DOWN_SYNC_4, __SHFL_DOWN_SYNC_3)(__VA_ARGS__)
