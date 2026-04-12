@@ -40,6 +40,20 @@
 #include <TargetConditionals.h>
 #endif
 
+#ifdef __linux__
+// Older glibc headers may miss these; upstream kernel has had them for years.
+#ifndef MAP_HUGETLB
+#define MAP_HUGETLB 0x40000
+#endif
+#ifndef MAP_HUGE_2MB
+#define MAP_HUGE_2MB (21 << MAP_HUGE_SHIFT)
+#endif
+#endif
+
+// 2 MiB hugepage size, used for both the hugetlb mmap length and the
+// unmap_fragment alignment granularity when the mapping is hugetlb-backed.
+static constexpr size_t LLAMA_HUGE_PAGE_SIZE = 2ull * 1024 * 1024;
+
 // TODO: consider moving to llama-impl.h if needed in more places
 #if defined(_WIN32)
 static std::string llama_format_win_err(DWORD err) {
@@ -437,6 +451,35 @@ struct llama_mmap::impl {
     impl(struct llama_file * file, size_t prefetch, bool numa, bool hugetlb) {
         size = file->size();
         int fd = file->file_id();
+#ifdef __linux__
+        if (hugetlb) {
+            // Anonymous hugetlb mapping rounded up to 2 MiB. PROT_WRITE lets
+            // load_all_data pread the file in (downgraded to PROT_READ after);
+            // MAP_POPULATE surfaces pool-exhaustion here, not mid-load.
+            mmap_size = (size + LLAMA_HUGE_PAGE_SIZE - 1) & ~(LLAMA_HUGE_PAGE_SIZE - 1);
+            addr = mmap(NULL, mmap_size, PROT_READ | PROT_WRITE,
+                        MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB | MAP_HUGE_2MB | MAP_POPULATE, -1, 0);
+            if (addr == MAP_FAILED) {
+                int saved = errno;
+                if (saved == ENOMEM) {
+                    size_t need = mmap_size / LLAMA_HUGE_PAGE_SIZE;
+                    long   have = -1;
+                    if (FILE * f = std::fopen("/sys/kernel/mm/hugepages/hugepages-2048kB/free_hugepages", "r")) {
+                        if (std::fscanf(f, "%ld", &have) != 1) { have = -1; }
+                        std::fclose(f);
+                    }
+                    throw std::runtime_error(format("hugetlb mmap failed: need %zu free 2 MiB pages, pool has %ld. "
+                                                    "Try: sudo sysctl -w vm.nr_hugepages=%zu", need, have, need));
+                }
+                throw std::runtime_error(format("hugetlb mmap failed: %s", strerror(saved)));
+            }
+            is_hugetlb_ = true;
+            mapped_fragments.emplace_back(0, mmap_size);
+            return;
+        }
+#else
+        (void) hugetlb;
+#endif
         int flags = MAP_SHARED;
         if (numa) { prefetch = 0; }
 #ifdef __linux__
@@ -480,7 +523,9 @@ struct llama_mmap::impl {
     }
 
     void unmap_fragment(size_t first, size_t last) {
-        int page_size = sysconf(_SC_PAGESIZE);
+        // Hugetlb munmaps must be 2 MiB-aligned; the file-backed path uses
+        // the kernel base page size as before.
+        size_t page_size = is_hugetlb_ ? LLAMA_HUGE_PAGE_SIZE : (size_t) sysconf(_SC_PAGESIZE);
         align_range(&first, &last, page_size);
         size_t len = last - first;
 
@@ -607,8 +652,8 @@ struct llama_mmap::impl {
     }
 #endif
 
-    void * addr;
-    size_t size;
+    void * addr = nullptr;
+    size_t size = 0;
     // Hugetlb: physical mapping length (file size rounded up to 2 MiB) used
     // by munmap; `size` continues to report the underlying file length.
     size_t mmap_size = 0;
