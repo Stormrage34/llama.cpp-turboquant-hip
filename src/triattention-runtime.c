@@ -149,7 +149,7 @@ int tria_maybe_score(
         if (k0) {
             int64_t actual_row = k0->ne[0];
             int expected_row = nkv * hd;
-            if (actual_row < expected_row) {
+            if (actual_row != expected_row) {
                 fprintf(stderr, "tria_score: TRIA stats mismatch: expected row %d, got %d — skipping\n",
                         expected_row, (int)actual_row);
                 rt->n_scored = n_kv;
@@ -159,7 +159,13 @@ int tria_maybe_score(
     }
 
     int n_embd_k_gqa = nkv * hd;
-    size_t k_bytes = (size_t)n_new * n_embd_k_gqa * sizeof(float);
+    /* Overflow check for element count (Codex review #2) */
+    size_t n_elem = (size_t)n_new * (size_t)n_embd_k_gqa;
+    if (n_elem / (size_t)n_new != (size_t)n_embd_k_gqa) {
+        rt->n_scored = n_kv;
+        return 0;
+    }
+    size_t k_bytes = n_elem * sizeof(float);
     float * k_f32 = (float *)malloc(k_bytes);
     float * scores = (float *)malloc(n_new * sizeof(float));
     int * key_pos = (int *)malloc(n_old * sizeof(int));
@@ -221,12 +227,12 @@ int tria_maybe_score(
             uint16_t * k_f16 = (uint16_t *)malloc(read_bytes);
             if (!k_f16) continue;
             ggml_backend_tensor_get(k_tensor, k_f16, read_offset, read_bytes);
-            for (int i = 0; i < n_new * n_embd_k_gqa; i++) {
+            for (size_t i = 0; i < n_elem; i++) {
                 k_f32[i] = ggml_fp16_to_fp32(((ggml_fp16_t *)k_f16)[i]);
             }
             free(k_f16);
         } else if (k_tensor->type == GGML_TYPE_F32) {
-            ggml_backend_tensor_get(k_tensor, k_f32, read_offset, n_new * n_embd_k_gqa * sizeof(float));
+            ggml_backend_tensor_get(k_tensor, k_f32, read_offset, n_elem * sizeof(float));
         } else {
             continue;
         }

@@ -93,6 +93,9 @@ int tria_compact_kv(struct tria_runtime * rt, void * ctx_void) {
     int prefix = rt->sink > 0 ? rt->sink : 128;
     if (prefix > n_old) prefix = n_old;
 
+    /* Ensure budget covers at least the protected prefix (Codex review #2) */
+    if (budget < prefix) budget = prefix;
+
     /* Build keep set: always keep prefix, then top-scoring from rest */
     std::vector<uint32_t> keep_positions;
     keep_positions.reserve(budget + rt->window);

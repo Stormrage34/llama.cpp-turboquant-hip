@@ -51,7 +51,7 @@ struct tria_stats * tria_load(const char *path) {
     uint32_t nl = s->num_layers, nh = s->num_heads, nkv = s->num_kv_heads, fc = s->freq_count;
     if (nl == 0 || nl > 1024 || nh == 0 || nh > 1024 || nkv == 0 || nkv > nh ||
         fc == 0 || fc > TRIA_MAX_FC || s->head_dim == 0 || s->head_dim > 2048 ||
-        nh % nkv != 0) {
+        nh % nkv != 0 || fc != s->head_dim / 2) {
         fprintf(stderr, "tria_load: invalid dimensions: nl=%u nh=%u nkv=%u fc=%u hd=%u\n",
                 nl, nh, nkv, fc, s->head_dim);
         free(s); fclose(fp); return NULL;
@@ -107,6 +107,10 @@ struct tria_stats * tria_load(const char *path) {
             fclose(fp); tria_free(s); return NULL;
         }
         fseek(fp, fc * 4, SEEK_CUR);  /* skip mrl */
+        if (ftell(fp) < 0) {
+            fprintf(stderr, "tria_load: truncated mrl at head %u\n", h);
+            fclose(fp); tria_free(s); return NULL;
+        }
 
         /* Precompute |E[q_f]| */
         for (uint32_t f = 0; f < fc; f++) {
