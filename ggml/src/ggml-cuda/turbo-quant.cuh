@@ -250,6 +250,36 @@ static void turbo_innerq_finalize(int group_size) {
     }
     mean_rms /= (float)group_size;
 
+    // RPN: merge RoPE pairs to shared RMS before computing scales.
+    // RoPE rotates pairs together — independent scales would deform
+    // the pair circle into an ellipse, causing phase-dependent distortion.
+    // Pair mapping depends on rope_type:
+    //   NORM:  (2i, 2i+1)
+    //   NEOX/MROPE/IMROPE: (i, i + n_rot/2) for i < n_rot/2
+    // Only applied to K cache (V is not RoPE'd).
+    if (g_rpn_config.is_key && g_rpn_config.n_rot >= 2) {
+        const int n_rot = (g_rpn_config.n_rot <= group_size) ? g_rpn_config.n_rot : group_size;
+        const int rtype = g_rpn_config.rope_type;
+        // LLAMA_ROPE_TYPE_NORM == 2
+        const bool is_norm = (rtype == 2);
+        if (is_norm) {
+            // NORM: pairs are (2i, 2i+1)
+            for (int i = 0; i + 1 < n_rot; i += 2) {
+                float pr = sqrtf(0.5f * (rms[i]*rms[i] + rms[i+1]*rms[i+1]));
+                rms[i] = pr; rms[i+1] = pr;
+            }
+        } else {
+            // NEOX/MROPE/IMROPE: pairs are (i, i + n_rot/2)
+            const int half = n_rot / 2;
+            for (int i = 0; i < half; i++) {
+                float pr = sqrtf(0.5f * (rms[i]*rms[i] + rms[i+half]*rms[i+half]));
+                rms[i] = pr; rms[i+half] = pr;
+            }
+        }
+        GGML_LOG_INFO("%s: RPN pair merge applied (rope_type=%d, n_rot=%d, mode=%s)\n",
+                       __func__, rtype, n_rot, is_norm ? "norm" : "neox");
+    }
+
     // Compute scale[i] = (mean_rms / channel_rms[i])^strength, clamp to [0.5, 2.0]
     float scale[INNERQ_MAX_CHANNELS];
     float scale_inv[INNERQ_MAX_CHANNELS];

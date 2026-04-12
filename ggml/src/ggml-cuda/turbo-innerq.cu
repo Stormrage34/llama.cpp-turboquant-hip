@@ -12,6 +12,14 @@ TURBO_IQ_API float g_innerq_scale_inv_host[INNERQ_MAX_CHANNELS] = {
 
 static bool g_innerq_tensor_needs_update = false;
 
+TURBO_IQ_API turbo_rpn_config_t g_rpn_config = {0, 0, true};
+
+TURBO_IQ_API void turbo_rpn_set_config(int rope_type, int n_rot, bool is_key) {
+    g_rpn_config.rope_type = rope_type;
+    g_rpn_config.n_rot     = n_rot;
+    g_rpn_config.is_key    = is_key;
+}
+
 void turbo_innerq_publish(const float * scale_inv, int group_size) {
     for (int i = 0; i < group_size && i < INNERQ_MAX_CHANNELS; i++) {
         g_innerq_scale_inv_host[i] = scale_inv[i];

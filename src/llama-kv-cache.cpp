@@ -97,6 +97,7 @@ extern TURBO_IQ_IMPORT bool  g_innerq_finalized;
 extern TURBO_IQ_IMPORT float g_innerq_scale_inv_host[INNERQ_MAX_CHANNELS];
 TURBO_IQ_IMPORT bool turbo_innerq_needs_tensor_update(void);
 TURBO_IQ_IMPORT void turbo_innerq_mark_tensor_updated(void);
+TURBO_IQ_IMPORT void turbo_rpn_set_config(int rope_type, int n_rot, bool is_key);
 #else
 static bool  g_innerq_finalized = false;
 static float g_innerq_scale_inv_host[INNERQ_MAX_CHANNELS] = {};
@@ -469,6 +470,23 @@ llama_kv_cache::llama_kv_cache(
             }
 
             LLAMA_LOG_INFO("%s: TurboQuant rotation matrices initialized (128x128)\n", __func__);
+        }
+
+        // RPN: configure RoPE pair normalization for InnerQ
+        // Only for K cache with turbo types — V is not RoPE'd
+        {
+            const bool k_is_turbo = (type_k == GGML_TYPE_TURBO3_0 || type_k == GGML_TYPE_TURBO4_0 || type_k == GGML_TYPE_TURBO2_0);
+#if defined(GGML_USE_CUDA) || defined(GGML_USE_HIP)
+            if (k_is_turbo) {
+                turbo_rpn_set_config(
+                    (int)hparams.rope_type,
+                    (int)hparams.n_rot(),
+                    true  // is_key
+                );
+            }
+#else
+            GGML_UNUSED(k_is_turbo);
+#endif
         }
         ctxs_bufs.emplace_back(std::move(ctx), buf);
     }

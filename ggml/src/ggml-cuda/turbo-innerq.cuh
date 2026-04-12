@@ -6,6 +6,13 @@
 
 #define INNERQ_MAX_CHANNELS 128
 
+// RPN (RoPE Pair Normalization) config — set by host before finalization
+typedef struct {
+    int  rope_type;   // LLAMA_ROPE_TYPE_NORM=2, NEOX=20, MROPE=21, etc. 0=unknown
+    int  n_rot;       // number of rotated dims (head_dim for 100% RoPE)
+    bool is_key;      // true=K cache, false=V cache
+} turbo_rpn_config_t;
+
 #if defined(_WIN32) && !defined(__MINGW32__)
 #  ifdef GGML_BACKEND_BUILD
 #    define TURBO_IQ_API __declspec(dllexport)
@@ -28,3 +35,7 @@ TURBO_IQ_API bool turbo_innerq_needs_tensor_update(void);
 
 // Called after tensor update to clear the flag
 TURBO_IQ_API void turbo_innerq_mark_tensor_updated(void);
+
+// RPN config — set before InnerQ calibration starts
+TURBO_IQ_API extern turbo_rpn_config_t g_rpn_config;
+TURBO_IQ_API void turbo_rpn_set_config(int rope_type, int n_rot, bool is_key);
