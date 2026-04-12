@@ -304,11 +304,14 @@ static void turbo_innerq_check_finalize(int group_size, int64_t ne00) {
     //   ne00 = head_dim (single head), group_size = 64, ne00/group_size = 9 groups per head → WRONG.
     // Detect: if ne00 / group_size doesn't divide evenly into standard head counts (1,2,4,8,16,32,64,128),
     // it's likely multi-group-per-head. Simpler check: group_size < 128 means head_dim > 128.
-    const bool multi_group_per_head = (group_size < 128);  // 64-group → head_dim > 128, multi-group
-    if (multi_group_per_head) {
+    // InnerQ only works when group_size == INNERQ_MAX_CHANNELS (128).
+    // Reject group_size > 128 (Gemma 4 D=256) and < 128 (multi-group-per-head).
+    // Codex review P0: group_size=256 overflows 128-entry device symbols and stack arrays.
+    const bool incompatible_group = (group_size != INNERQ_MAX_CHANNELS);
+    if (incompatible_group) {
         if (innerq_enabled == 1) {
-            GGML_LOG_WARN("%s: InnerQ disabled (ne00=%lld != group_size=%d, multi-group heads)\n",
-                           __func__, (long long)ne00, group_size);
+            GGML_LOG_WARN("%s: InnerQ disabled (group_size=%d != %d, incompatible)\n",
+                           __func__, group_size, INNERQ_MAX_CHANNELS);
             innerq_enabled = 0;
             int zero = 0;
             (void)cudaMemcpyToSymbol(d_innerq_calibrating, &zero, sizeof(int));
