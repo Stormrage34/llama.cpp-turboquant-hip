@@ -50,6 +50,37 @@ Tested: get_weather, send_email, search_web, calculate, create_reminder.
 | | q4_0 | 6.5238 | +3.96% | 3.56× |
 | | turbo3 | 6.2187 | -0.9% | 5.12× |
 
+### Long Context: K Cache Sensitivity and Mixed Precision
+
+turbo3 K cache can degrade at long context on models with full RoPE. V cache is robust. The cause is post-RoPE K quantization — RoPE applies position-dependent rotations that create heavier tails in the K distribution, which 8 centroids (turbo3) struggle to represent at high positions.
+
+**Qwen3-8B Q4_K_M, ctx=16K, wikitext-2, 5 chunks:**
+
+| Config | PPL | vs f16 |
+|---|---|---|
+| f16 KV | 6.92 | — |
+| turbo4 K+V | 6.99 | +0.9% |
+| turbo4 K + turbo3 V | 7.01 | +1.3% |
+| q8_0 K + turbo3 V | 6.95 | +0.4% |
+| turbo3 K + q8_0 V | 21.16 | +206% ⚠️ |
+| turbo3 K+V | 19.70 | +185% ⚠️ |
+
+**Llama-3.1-8B base Q4_K_M, ctx=16K:** turbo3 K+V = 5.33 vs f16 4.91 (+8.4%). Moderate, not catastrophic.
+
+**Qwen3.5-27B Q5_K_M, ctx=16K:** turbo3 K+V = 6.11 vs f16 6.12 (no regression — partial_rotary_factor=0.25 means only 25% of K dims have RoPE).
+
+Severity depends on: RoPE coverage, rope_theta, model architecture. Consistent with KVQuant (Berkeley) and Q-ROAR findings on post-RoPE K quantization sensitivity.
+
+**Recommended configs:**
+
+| Context | Config |
+|---|---|
+| ≤ 8K | `--cache-type-k turbo3 --cache-type-v turbo3` |
+| 8K–32K | `--cache-type-k turbo4 --cache-type-v turbo3` |
+| 32K+ | `--cache-type-k turbo4 --cache-type-v turbo4` or benchmark your model |
+
+Models with `partial_rotary_factor < 1.0` (Qwen3.5 family) showed no regression at 16K with turbo3 K+V.
+
 ### Speed (RX 7900 XTX, ROCm 6.4)
 
 | Model | Context | Config | Prefill (tok/s) | Decode (tok/s) |
