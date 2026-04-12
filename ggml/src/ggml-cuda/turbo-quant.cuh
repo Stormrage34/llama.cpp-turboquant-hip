@@ -192,7 +192,7 @@ static __device__ int   d_innerq_calibrating;  // 1 = accumulating K² stats
 
 static int  innerq_enabled       = 0;  // host: 0=off, 1=calibrating, 2=active
 static int  innerq_target_tokens = 0;
-static float innerq_strength     = 0.25f;
+static float innerq_strength     = 0.15f;
 static bool  innerq_initialized  = false;
 
 // Host: read TURBO_INNERQ env, start calibration if enabled
@@ -210,7 +210,7 @@ static void turbo_innerq_init(void) {
 
     const char * env_str = getenv("TURBO_INNERQ_STRENGTH");
     if (env_str) innerq_strength = atof(env_str);
-    if (innerq_strength <= 0.0f || innerq_strength > 1.0f) innerq_strength = 0.25f;
+    if (innerq_strength <= 0.0f || innerq_strength > 1.0f) innerq_strength = 0.15f;
 
     // Zero accumulators and set calibrating flag on device
     float zeros[INNERQ_MAX_CHANNELS] = {0};
