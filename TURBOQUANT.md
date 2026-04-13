@@ -69,6 +69,8 @@ Two techniques that dramatically improve turbo3 K cache quality at long context:
 | + strength=0.15 | 7.17 | +3.6% |
 | + actual-data codebook (20K pairs) | 7.14 | +3.2% |
 | + improved K-means (74K, 20 inits) | **7.05** | **+1.9%** |
+
+Note: above progression measured on first 5 chunks of wikitext-2. Full 18-20 chunk evaluation gives higher absolute PPL and larger relative gap (see below).
 | turbo4 K+V (reference) | 6.99 | +0.9% |
 
 InnerQ calibration uses 512 tokens (override via `TURBO_INNERQ` env var).
@@ -86,6 +88,15 @@ With InnerQ + 2D VQ enabled (default), turbo3 K+V is now viable at 16K context:
 | f16 KV | 6.92 | — |
 | turbo4 K+V | 6.99 | +0.9% |
 | turbo3 K+V (with InnerQ + 2D VQ) | **7.05** | **+1.9%** |
+
+**Full evaluation (18-20 chunks, same wikitext-2):**
+
+| Config | Model | PPL | vs f16 |
+|--------|-------|-----|--------|
+| f16 KV | Qwen3-8B Q4_K_M | 8.15 ± 0.06 | — |
+| turbo3 K+V | Qwen3-8B Q4_K_M | 8.62 ± 0.06 | **+5.7%** |
+| f16 KV | Qwen3.5-27B Q5_K_M | 6.91 ± 0.05 | — |
+| turbo3 K+V | Qwen3.5-27B Q5_K_M | 6.96 ± 0.05 | **+0.7%** |
 | turbo4 K + turbo3 V | 7.01 | +1.3% |
 | q8_0 K + turbo3 V | 6.95 | +0.4% |
 | turbo3 K+V (no InnerQ) | 19.70 | +185% ⚠️ |
