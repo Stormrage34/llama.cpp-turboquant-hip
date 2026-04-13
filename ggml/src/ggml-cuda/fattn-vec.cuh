@@ -124,8 +124,8 @@ static __global__ void flash_attn_ext_vec(
 #endif // V_DOT2_F32_F16_AVAILABLE
 
     // Sparse V: skip V dequant for positions with negligible attention weights.
-    // At long context, most V positions contribute < 1e-6 to the output — skipping
-    // their dequant saves significant compute (especially for quantized V types).
+    // Only enabled for turbo types where dequant is expensive enough to justify the branch.
+    constexpr bool sparse_v_enabled = (type_V == GGML_TYPE_TURBO3_0 || type_V == GGML_TYPE_TURBO2_0 || type_V == GGML_TYPE_TURBO4_0);
     constexpr float sparse_v_threshold_f = 1e-6f;
 #ifdef V_DOT2_F32_F16_AVAILABLE
     const     half  sparse_v_threshold_h = __float2half(sparse_v_threshold_f);
@@ -333,7 +333,7 @@ static __global__ void flash_attn_ext_vec(
             }
 
             // Sparse V: skip V dequant if all attention weights for this position are negligible
-            {
+            if constexpr (sparse_v_enabled) {
                 bool dominated = true;
 #pragma unroll
                 for (int j = 0; j < ncols; ++j) {
@@ -373,7 +373,7 @@ static __global__ void flash_attn_ext_vec(
             }
 
             // Sparse V: skip V dequant if all attention weights for this position are negligible
-            {
+            if constexpr (sparse_v_enabled) {
                 bool dominated = true;
 #pragma unroll
                 for (int j = 0; j < ncols; ++j) {
