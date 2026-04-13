@@ -213,7 +213,13 @@ static void score_keys_single_head(
        from file-controlled fc (Codex review: stack overflow risk) */
     if (tria_max_beta < 0.0f) {
         const char *env = getenv("TRIA_MAX_BETA");
-        tria_max_beta = env ? strtof(env, NULL) : 0.0f;
+        tria_max_beta = 0.0f;
+        if (env) {
+            char *end;
+            float v = strtof(env, &end);
+            if (end != env && isfinite(v) && v >= 0.0f && v <= 1.0f)
+                tria_max_beta = v;
+        }
         fprintf(stderr, "tria: max_beta=%.2f\n", tria_max_beta);
     }
     float *rel_r = malloc(fc * sizeof(float));

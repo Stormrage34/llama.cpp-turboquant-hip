@@ -272,7 +272,8 @@ int tria_maybe_score(
 
     /* ---- Value-aware scoring boost (VATP/OBCache-inspired) ---- */
     /* Compute per-token V energy across all layers, z-normalize,
-       and add lambda * max(0, v_z) to global_scores.              */
+       and add lambda * v_z to global_scores (bidirectional).
+       Only works with non-transposed V (flash_attn mode).         */
     {
         const float lambda = 0.25f;
         float * v_energy = (float *)calloc(n_old, sizeof(float));
@@ -281,13 +282,15 @@ int tria_maybe_score(
             for (int li = 0; li < nl; li++) {
                 struct ggml_tensor * v_tensor = tria_get_v_tensor(ctx, li);
                 if (!v_tensor) continue;
+                /* Skip transposed V (nb[1] > nb[2]) — row reads would be wrong */
+                if (v_tensor->nb[1] > v_tensor->nb[2]) continue;
 
                 int n_embd_v = (int)v_tensor->ne[0];
+                size_t v_row_size = ggml_row_size(v_tensor->type, n_embd_v);
+                uint8_t * row_buf = (uint8_t *)malloc(v_row_size);
+                if (!row_buf) continue;
 
                 if (v_tensor->type == GGML_TYPE_F16 || v_tensor->type == GGML_TYPE_F32) {
-                    size_t v_row_size = ggml_row_size(v_tensor->type, n_embd_v);
-                    uint8_t * row_buf = (uint8_t *)malloc(v_row_size);
-                    if (!row_buf) continue;
                     for (int s = 0; s < n_old; s++) {
                         ggml_backend_tensor_get(v_tensor, row_buf,
                                                 (size_t)s * v_row_size, v_row_size);
@@ -305,35 +308,29 @@ int tria_maybe_score(
                         }
                         v_energy[s] += energy;
                     }
-                    free(row_buf);
                     v_layers++;
-                } else {
-                    /* turbo3/turbo4: read block norms as energy proxy.
-                       V energy ≈ Σ(norm² * mean_centroid²_per_block).
-                       Since mean_centroid² is constant (~0.088² * 128 ≈ 1.0),
-                       norm² is a good proxy. */
-                    size_t v_row_size = ggml_row_size(v_tensor->type, n_embd_v);
-                    int n_blocks = n_embd_v / 128; /* QK_TURBO3 = 128 */
-                    if (n_blocks <= 0) continue;
-                    /* block_turbo3_0: first 2 bytes = fp16 norm, total 14 bytes */
-                    size_t block_size = 14;
-                    uint8_t * row_buf = (uint8_t *)malloc(v_row_size);
-                    if (!row_buf) continue;
-                    for (int s = 0; s < n_old; s++) {
-                        ggml_backend_tensor_get(v_tensor, row_buf,
-                                                (size_t)s * v_row_size, v_row_size);
-                        float energy = 0.0f;
-                        for (int b = 0; b < n_blocks; b++) {
-                            ggml_fp16_t norm_fp16;
-                            memcpy(&norm_fp16, row_buf + b * block_size, sizeof(ggml_fp16_t));
-                            float norm = ggml_fp16_to_fp32(norm_fp16);
-                            energy += norm * norm;
+                } else if (v_tensor->type == GGML_TYPE_TURBO3_0) {
+                    /* turbo3: block norms as energy proxy (WHT equalizes,
+                       so vstd guard will likely skip the boost) */
+                    int n_blocks = n_embd_v / 128;
+                    if (n_blocks > 0) {
+                        for (int s = 0; s < n_old; s++) {
+                            ggml_backend_tensor_get(v_tensor, row_buf,
+                                                    (size_t)s * v_row_size, v_row_size);
+                            float energy = 0.0f;
+                            for (int b = 0; b < n_blocks; b++) {
+                                ggml_fp16_t norm_fp16;
+                                memcpy(&norm_fp16, row_buf + b * 14, sizeof(ggml_fp16_t));
+                                float norm = ggml_fp16_to_fp32(norm_fp16);
+                                energy += norm * norm;
+                            }
+                            v_energy[s] += energy;
                         }
-                        v_energy[s] += energy;
+                        v_layers++;
                     }
-                    free(row_buf);
-                    v_layers++;
                 }
+                /* Other quant types: skip (no safe norm proxy) */
+                free(row_buf);
             }
 
             if (v_layers > 0) {
