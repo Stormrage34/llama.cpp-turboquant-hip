@@ -34,10 +34,32 @@ GGML_API int turbo3_cpu_wht_group_size = 0;
 /* 2-bit: {±0.453, ±1.51} / sqrt(d) */
 static const float CENTROIDS_2BIT[4] = { -0.133462f, -0.039994f, 0.039994f, 0.133462f };
 
-/* 3-bit: Lloyd-Max for N(0, 1/128), pre-computed */
+/* 3-bit: Lloyd-Max for N(0, 1/128), pre-computed (legacy scalar, used by turbo4) */
 static const float CENTROIDS_3BIT[8] = {
     -0.190685f, -0.117832f, -0.065717f, -0.021460f,
      0.021460f,  0.065717f,  0.117832f,  0.190685f
+};
+
+/* 2D VQ codebook (64 entries, K-means trained on 74K WHT output pairs) */
+static const float TURBO_VQ2D_X[64] = {
+    0.0279071f, -0.1041781f, -0.0497183f, 0.0836585f, 0.0755566f, -0.1593080f, -0.0472192f, 0.1499346f,
+    -0.0259202f, -0.0749334f, -0.1060147f, -0.1302685f, 0.0510575f, 0.0321239f, 0.0427720f, 0.2017132f,
+    -0.0174130f, 0.0938271f, 0.1514418f, -0.1524931f, -0.0659325f, -0.1347785f, 0.1569419f, 0.0335782f,
+    0.2139767f, 0.0298571f, 0.1024047f, -0.1463255f, -0.0380896f, -0.1880937f, 0.1287539f, -0.0810642f,
+    -0.0230893f, -0.0325119f, -0.0495625f, 0.0664514f, 0.1864402f, 0.0794077f, -0.2225531f, 0.0198063f,
+    -0.0478895f, 0.1485750f, 0.0846328f, 0.0470138f, 0.0562434f, -0.1950971f, 0.0961574f, -0.0095595f,
+    -0.0900242f, -0.0080224f, -0.0094565f, -0.1106773f, -0.0637866f, -0.1312685f, 0.0118203f, 0.0150917f,
+    0.1209811f, -0.0833506f, -0.1212273f, 0.0995258f, -0.0725997f, 0.1161496f, 0.0609390f, -0.0160979f,
+};
+static const float TURBO_VQ2D_Y[64] = {
+    -0.0263300f, 0.0685406f, -0.1090837f, 0.1035094f, -0.0896168f, -0.0125089f, -0.0671406f, -0.0187005f,
+    0.0717508f, 0.1467829f, -0.0184862f, -0.1144251f, 0.0793044f, -0.1656622f, 0.1358503f, 0.0923961f,
+    -0.0055588f, 0.0639664f, -0.1557487f, 0.0507863f, 0.0079050f, 0.1759942f, 0.1642957f, -0.1138678f,
+    0.0008668f, -0.0694018f, 0.0207315f, -0.1742128f, -0.2115104f, 0.1064816f, 0.1005936f, -0.1476948f,
+    0.0305579f, 0.1157162f, -0.0274784f, -0.0479926f, -0.0830491f, -0.2145961f, 0.0121470f, 0.0135110f,
+    0.2169799f, 0.0451792f, -0.1392938f, 0.2095770f, 0.0380025f, -0.0849720f, 0.1537713f, -0.0449162f,
+    -0.0923609f, 0.1603929f, -0.0886196f, 0.0234268f, 0.0493861f, -0.0623466f, 0.1004377f, 0.0549886f,
+    -0.1051118f, -0.0522899f, 0.1113740f, -0.0216251f, 0.0940127f, -0.0629645f, -0.0015928f, -0.1436934f,
 };
 
 /* ---------- rotation matrix (lazy init) ---------- */
@@ -274,7 +296,7 @@ void quantize_row_turbo3_0_ref(const float * GGML_RESTRICT x, block_turbo3_0 * G
         // 3. Forward WHT rotation
         turbo_cpu_fwht(buf, group_size);
 
-        // 4. Quantize + pack into sub-blocks
+        // 4. 2D VQ quantize pairs + pack into sub-blocks
         float recon_sq = 0.0f;
         for (int b = 0; b < blocks_per_group; b++) {
             block_turbo3_0 * blk = &grp_dst[b];
@@ -283,13 +305,27 @@ void quantize_row_turbo3_0_ref(const float * GGML_RESTRICT x, block_turbo3_0 * G
             memset(blk->qs, 0, QK_TURBO3 / 4);
             memset(blk->signs, 0, QK_TURBO3 / 8);
 
-            for (int j = 0; j < QK_TURBO3; j++) {
-                int idx = nearest_centroid_3bit(buf[off + j]);
-                blk->qs[j / 4] |= (idx & 0x3) << ((j % 4) * 2);
-                if (idx & 0x4) {
-                    blk->signs[j / 8] |= (1 << (j % 8));
+            for (int j = 0; j < QK_TURBO3; j += 2) {
+                float vx = buf[off + j];
+                float vy = buf[off + j + 1];
+                // Brute-force 64-entry 2D VQ search
+                uint8_t best_vq = 0;
+                float best_dist = 1e30f;
+                for (int c = 0; c < 64; c++) {
+                    float dx = vx - TURBO_VQ2D_X[c];
+                    float dy = vy - TURBO_VQ2D_Y[c];
+                    float d = dx*dx + dy*dy;
+                    if (d < best_dist) { best_dist = d; best_vq = (uint8_t)c; }
                 }
-                recon_sq += CENTROIDS_3BIT[idx] * CENTROIDS_3BIT[idx];
+                // Even element: high 3 bits, odd element: low 3 bits
+                uint8_t idx_even = (best_vq >> 3) & 0x7;
+                uint8_t idx_odd  = best_vq & 0x7;
+                blk->qs[j / 4]       |= (idx_even & 0x3) << ((j % 4) * 2);
+                blk->qs[(j+1) / 4]   |= (idx_odd  & 0x3) << (((j+1) % 4) * 2);
+                if (idx_even & 0x4) blk->signs[j / 8]     |= (1 << (j % 8));
+                if (idx_odd  & 0x4) blk->signs[(j+1) / 8] |= (1 << ((j+1) % 8));
+                recon_sq += TURBO_VQ2D_X[best_vq] * TURBO_VQ2D_X[best_vq]
+                          + TURBO_VQ2D_Y[best_vq] * TURBO_VQ2D_Y[best_vq];
             }
         }
 
@@ -303,16 +339,20 @@ void quantize_row_turbo3_0_ref(const float * GGML_RESTRICT x, block_turbo3_0 * G
 }
 
 void dequantize_row_turbo3_0(const block_turbo3_0 * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k) {
-    // Stub — Metal shader handles dequant on GPU.
     assert(k % QK_TURBO3 == 0);
     const int nb = k / QK_TURBO3;
     for (int block = 0; block < nb; block++) {
         float norm = GGML_FP16_TO_FP32(x[block].norm);
-        for (int j = 0; j < QK_TURBO3; j++) {
-            uint8_t low2 = (x[block].qs[j/4] >> ((j%4)*2)) & 0x3;
-            uint8_t hi1 = (x[block].signs[j/8] >> (j%8)) & 0x1;
-            uint8_t idx = low2 | (hi1 << 2);
-            y[block * QK_TURBO3 + j] = CENTROIDS_3BIT[idx] * norm;
+        for (int j = 0; j < QK_TURBO3; j += 2) {
+            uint8_t low2_e = (x[block].qs[j/4]     >> ((j%4)*2))     & 0x3;
+            uint8_t hi1_e  = (x[block].signs[j/8]   >> (j%8))        & 0x1;
+            uint8_t low2_o = (x[block].qs[(j+1)/4]  >> (((j+1)%4)*2)) & 0x3;
+            uint8_t hi1_o  = (x[block].signs[(j+1)/8] >> ((j+1)%8))  & 0x1;
+            uint8_t idx_even = low2_e | (hi1_e << 2);
+            uint8_t idx_odd  = low2_o | (hi1_o << 2);
+            uint8_t vq = (idx_even << 3) | idx_odd;
+            y[block * QK_TURBO3 + j]     = TURBO_VQ2D_X[vq] * norm;
+            y[block * QK_TURBO3 + j + 1] = TURBO_VQ2D_Y[vq] * norm;
         }
     }
 }
