@@ -259,6 +259,23 @@ static void turbo_innerq_finalize(int group_size) {
     // Only applied to K cache (V is not RoPE'd).
     if (g_rpn_config.is_key && g_rpn_config.n_rot >= 2) {
         const int n_rot = (g_rpn_config.n_rot <= group_size) ? g_rpn_config.n_rot : group_size;
+
+        // Auto-disable InnerQ for partial-RoPE models (n_rot < group_size).
+        // InnerQ adds noise to non-RoPE dimensions without benefit.
+        if (n_rot < group_size) {
+            GGML_LOG_INFO("%s: partial RoPE detected (n_rot=%d < group=%d), disabling InnerQ\n",
+                           __func__, n_rot, group_size);
+            innerq_enabled = 0;
+            int zero = 0;
+            (void)cudaMemcpyToSymbol(d_innerq_calibrating, &zero, sizeof(int));
+            // Set scale_inv to 1.0 (no equalization)
+            for (int i = 0; i < group_size; i++) {
+                g_innerq_scale_inv_host[i] = 1.0f;
+            }
+            g_innerq_finalized = true;
+            return;
+        }
+
         const int rtype = g_rpn_config.rope_type;
         // LLAMA_ROPE_TYPE_NORM == 2
         const bool is_norm = (rtype == 2);
