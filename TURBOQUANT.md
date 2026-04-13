@@ -105,6 +105,8 @@ Severity depends on: RoPE coverage, rope_theta, model architecture. Consistent w
 
 Models with `partial_rotary_factor < 1.0` (Qwen3.5 family) showed no regression at 16K with turbo3 K+V even without InnerQ.
 
+**Important:** InnerQ should be **disabled** (`TURBO_INNERQ=0`) on models with partial RoPE (e.g. Qwen3.5-27B, partial_rotary_factor=0.25). InnerQ adds noise to non-RoPE dimensions and degrades quality. Without InnerQ, Qwen3.5-27B turbo3 K+V achieves PPL 6.00 — **better than f16** (6.12).
+
 ### Speed (RX 7900 XTX, ROCm 6.4)
 
 | Model | Context | Config | Prefill (tok/s) | Decode (tok/s) |
