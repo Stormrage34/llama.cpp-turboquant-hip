@@ -92,7 +92,7 @@ With InnerQ + 2D VQ enabled (default), turbo3 K+V is now viable at 16K context:
 
 **Llama-3.1-8B base Q4_K_M, ctx=16K:** turbo3 K+V = 5.30 vs f16 4.91 (+7.8%).
 
-**Qwen3.5-27B Q5_K_M, ctx=16K:** turbo3 K+V = 6.11 vs f16 6.12 (no regression — partial_rotary_factor=0.25 means only 25% of K dims have RoPE, InnerQ disabled).
+**Qwen3.5-27B Q5_K_M, ctx=16K:** turbo3 K+V = 6.00 vs f16 5.98 (+0.3% — near-lossless, InnerQ auto-disabled).
 
 Severity depends on: RoPE coverage, rope_theta, model architecture. Consistent with KVQuant (Berkeley) and Q-ROAR findings on post-RoPE K quantization sensitivity.
 
@@ -105,7 +105,7 @@ Severity depends on: RoPE coverage, rope_theta, model architecture. Consistent w
 
 Models with `partial_rotary_factor < 1.0` (Qwen3.5 family) showed no regression at 16K with turbo3 K+V even without InnerQ.
 
-**Important:** InnerQ is **automatically disabled** on models with partial RoPE (e.g. Qwen3.5-27B, partial_rotary_factor=0.25). No user action needed. Without InnerQ, Qwen3.5-27B turbo3 K+V achieves PPL 6.00 — **better than f16** (6.12).
+**Important:** InnerQ is **automatically disabled** on models with partial RoPE (e.g. Qwen3.5-27B, partial_rotary_factor=0.25). No user action needed. Qwen3.5-27B turbo3 K+V achieves PPL 6.00 vs f16 5.98 (+0.3%).
 
 ### Speed (RX 7900 XTX, ROCm 6.4)
 
@@ -256,7 +256,7 @@ At 131K context, turbo3 saves 6.4 GiB vs f16. turbo2 saves 6.9 GiB.
 
 | Method | KV Compression | Quality |
 |---|---|---|
-| turbo3 alone | 5.12× | Qwen3.5-27B: PPL 6.00 (better than f16 6.12) |
+| turbo3 alone | 5.12× | Qwen3.5-27B: PPL 6.00 vs f16 5.98 (+0.3%) |
 | TriAttention 75% alone | 1.33× | -1.3% PPL |
 | **turbo3 + TriAttention 75%** | **~6.8×** | Qwen3.5-27B: PPL 6.19 (+1.1% vs f16), GSM8K 72.0% (=f16) |
 | **turbo3 + TriAttention 50%** | **~10.2×** | Qwen3.5-27B: PPL 6.23 (+1.8% vs f16) |
