@@ -34,6 +34,12 @@ struct ggml_tensor * tria_get_k_tensor(void * ctx_void, int layer_idx) {
     return kv->get_k_raw(layer_idx);
 }
 
+struct ggml_tensor * tria_get_v_tensor(void * ctx_void, int layer_idx) {
+    auto * kv = get_kv(ctx_void);
+    if (!kv) return nullptr;
+    return kv->get_v_raw(layer_idx);
+}
+
 int tria_get_n_kv(void * ctx_void) {
     auto * kv = get_kv(ctx_void);
     if (!kv) return 0;

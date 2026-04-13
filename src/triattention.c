@@ -230,6 +230,7 @@ static void score_keys_single_head(
         }
 
         float trig_sum = 0.0f;
+        float trig_max = -1e30f;
         for (int o = 0; o < TRIA_N_OFFSETS; o++) {
             int base = (s * TRIA_N_OFFSETS + o) * fc;
             float trig = 0.0f;
@@ -238,8 +239,11 @@ static void score_keys_single_head(
                       - rel_i[f] * cs->sin_tab[base + f];
             }
             trig_sum += trig;
+            if (trig > trig_max) trig_max = trig;
         }
-        out[s] = trig_sum / (float)TRIA_N_OFFSETS + extra;
+        /* DefensiveKV-lite: blend mean with max for worst-case robustness */
+        float trig_mean = trig_sum / (float)TRIA_N_OFFSETS;
+        out[s] = trig_mean + 0.3f * (trig_max - trig_mean) + extra;
     }
     free(rel_r);
     free(rel_i);

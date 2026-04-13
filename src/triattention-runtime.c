@@ -22,6 +22,7 @@ struct llama_kv_layer {
 };
 
 extern struct ggml_tensor * tria_get_k_tensor(void * ctx, int layer_idx);
+extern struct ggml_tensor * tria_get_v_tensor(void * ctx, int layer_idx);
 extern int tria_get_n_kv(void * ctx);
 extern int tria_get_used_n_kv(void * ctx);
 extern int tria_get_kv_positions(void * ctx, int * positions, int max_positions);
@@ -268,6 +269,107 @@ int tria_maybe_score(
     }
 
     total_pruned = (n_old - budget) * nl * nkv;
+
+    /* ---- Value-aware scoring boost (VATP/OBCache-inspired) ---- */
+    /* Compute per-token V energy across all layers, z-normalize,
+       and add lambda * max(0, v_z) to global_scores.              */
+    {
+        const float lambda = 0.25f;
+        float * v_energy = (float *)calloc(n_old, sizeof(float));
+        if (v_energy) {
+            int v_layers = 0;
+            for (int li = 0; li < nl; li++) {
+                struct ggml_tensor * v_tensor = tria_get_v_tensor(ctx, li);
+                if (!v_tensor) continue;
+
+                int n_embd_v = (int)v_tensor->ne[0];
+
+                if (v_tensor->type == GGML_TYPE_F16 || v_tensor->type == GGML_TYPE_F32) {
+                    size_t v_row_size = ggml_row_size(v_tensor->type, n_embd_v);
+                    uint8_t * row_buf = (uint8_t *)malloc(v_row_size);
+                    if (!row_buf) continue;
+                    for (int s = 0; s < n_old; s++) {
+                        ggml_backend_tensor_get(v_tensor, row_buf,
+                                                (size_t)s * v_row_size, v_row_size);
+                        float energy = 0.0f;
+                        if (v_tensor->type == GGML_TYPE_F16) {
+                            const ggml_fp16_t * vf16 = (const ggml_fp16_t *)row_buf;
+                            for (int d = 0; d < n_embd_v; d++) {
+                                float v = ggml_fp16_to_fp32(vf16[d]);
+                                energy += v * v;
+                            }
+                        } else {
+                            const float * vf32 = (const float *)row_buf;
+                            for (int d = 0; d < n_embd_v; d++)
+                                energy += vf32[d] * vf32[d];
+                        }
+                        v_energy[s] += energy;
+                    }
+                    free(row_buf);
+                    v_layers++;
+                } else {
+                    /* turbo3/turbo4: read block norms as energy proxy.
+                       V energy ≈ Σ(norm² * mean_centroid²_per_block).
+                       Since mean_centroid² is constant (~0.088² * 128 ≈ 1.0),
+                       norm² is a good proxy. */
+                    size_t v_row_size = ggml_row_size(v_tensor->type, n_embd_v);
+                    int n_blocks = n_embd_v / 128; /* QK_TURBO3 = 128 */
+                    if (n_blocks <= 0) continue;
+                    /* block_turbo3_0: first 2 bytes = fp16 norm, total 14 bytes */
+                    size_t block_size = 14;
+                    uint8_t * row_buf = (uint8_t *)malloc(v_row_size);
+                    if (!row_buf) continue;
+                    for (int s = 0; s < n_old; s++) {
+                        ggml_backend_tensor_get(v_tensor, row_buf,
+                                                (size_t)s * v_row_size, v_row_size);
+                        float energy = 0.0f;
+                        for (int b = 0; b < n_blocks; b++) {
+                            ggml_fp16_t norm_fp16;
+                            memcpy(&norm_fp16, row_buf + b * block_size, sizeof(ggml_fp16_t));
+                            float norm = ggml_fp16_to_fp32(norm_fp16);
+                            energy += norm * norm;
+                        }
+                        v_energy[s] += energy;
+                    }
+                    free(row_buf);
+                    v_layers++;
+                }
+            }
+
+            if (v_layers > 0) {
+                /* log1p + z-normalize */
+                for (int s = 0; s < n_old; s++)
+                    v_energy[s] = logf(1.0f + v_energy[s] / v_layers);
+
+                float vmean = 0.0f;
+                for (int s = 0; s < n_old; s++) vmean += v_energy[s];
+                vmean /= n_old;
+
+                float vvar = 0.0f;
+                for (int s = 0; s < n_old; s++) {
+                    float d = v_energy[s] - vmean;
+                    vvar += d * d;
+                }
+                float vstd = sqrtf(vvar / n_old + 1e-8f);
+
+                /* Guard: if variance collapsed (WHT-normalized turbo3), skip boost */
+                if (vstd > 0.01f) {
+                    int boosted = 0;
+                    for (int s = 0; s < n_old; s++) {
+                        float vz = (v_energy[s] - vmean) / vstd;
+                        float boost = lambda * vz;
+                        rt->global_scores[s] += boost;
+                        if (boost > 0.01f) boosted++;
+                    }
+                    fprintf(stderr, "tria_score: value-aware boost applied to %d/%d tokens (lambda=%.2f, vstd=%.4f)\n",
+                            boosted, n_old, lambda, vstd);
+                } else {
+                    fprintf(stderr, "tria_score: value-aware skipped (vstd=%.6f < 0.01, WHT-normalized)\n", vstd);
+                }
+            }
+            free(v_energy);
+        }
+    }
 
     if (total_pruned > 0) {
         fprintf(stderr, "tria_score: pruned %d tokens across %d×%d heads\n",

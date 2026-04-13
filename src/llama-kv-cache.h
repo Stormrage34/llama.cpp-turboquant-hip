@@ -288,6 +288,13 @@ public:
         return nullptr;
     }
 
+    ggml_tensor * get_v_raw(int32_t il) const {
+        for (const auto & l : layers) {
+            if ((int32_t)l.il == il) return l.v;
+        }
+        return nullptr;
+    }
+
     uint32_t get_used_n_kv() const;
     bool get_cell_positions(std::vector<llama_pos> & positions) const;
     bool triattention_compact(const std::vector<uint32_t> & keep_positions);
