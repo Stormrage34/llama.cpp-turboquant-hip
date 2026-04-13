@@ -447,19 +447,14 @@ int tria_get_evict_mask(
     (void)sorted[target];
     free(sorted);
 
-    /* Build mask: V3 hybrid — prefix protection + tail protection + per-segment eviction quota */
+    /* Build mask: V3 hybrid — prefix protection + per-segment eviction quota */
     memset(evict_mask, 0, n_kv);
 
     const int n_segments = 8;
     int prefix = rt->sink > 0 ? rt->sink : 128;
     if (prefix > n_old) prefix = n_old;
 
-    /* Protect recent tail — last 5% of old tokens or 64, whichever is larger */
-    int tail = n_old / 20;
-    if (tail < 64) tail = 64;
-    if (tail > n_old - prefix) tail = n_old - prefix;
-
-    int evictable = n_old - prefix - tail;
+    int evictable = n_old - prefix;
     int n_to_evict = n_old - budget;
     if (evictable <= 0 || n_to_evict <= 0) return 1;
 
@@ -471,7 +466,7 @@ int tria_get_evict_mask(
     for (int s = 0; s < actual_segs && total_evicted < n_to_evict; s++) {
         int seg_start = prefix + s * seg_size;
         int seg_end   = seg_start + seg_size;
-        if (seg_end > n_old - tail) seg_end = n_old - tail;
+        if (seg_end > n_old) seg_end = n_old;
         int seg_len = seg_end - seg_start;
         if (seg_len <= 0) continue;
 
