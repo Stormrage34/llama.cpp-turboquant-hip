@@ -595,9 +595,10 @@ void ggml_cuda_flash_attn_ext(ggml_backend_cuda_context & ctx, ggml_tensor * dst
 }
 
 bool ggml_cuda_flash_attn_ext_supported(int device, const ggml_tensor * dst) {
-    // KV indirection not yet implemented in FA kernels
+    // KV indirection supported only for VEC kernel path
     if (dst->src[5] != nullptr) {
-        return false;
+        best_fattn_kernel k = ggml_cuda_get_best_fattn_kernel(device, dst);
+        return k == BEST_FATTN_KERNEL_VEC;
     }
     return ggml_cuda_get_best_fattn_kernel(device, dst) != BEST_FATTN_KERNEL_NONE;
 }

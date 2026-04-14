@@ -1921,6 +1921,16 @@ ggml_tensor * llm_graph_context::build_attn_mha(
         ggml_flash_attn_ext_add_sinks(cur, sinks);
         ggml_flash_attn_ext_set_prec (cur, GGML_PREC_F32);
 
+        // TriAttention Phase 3: identity map test (TRIA_IDENTITY_MAP=1)
+        // Creates [0,1,...,n_kv-1] index to verify indirect path matches dense path.
+        if (getenv("TRIA_IDENTITY_MAP")) {
+            const int64_t n_kv = k->ne[1];
+            ggml_tensor * kv_idx_f = ggml_arange(ctx0, 0.0f, (float)n_kv, 1.0f);
+            ggml_tensor * kv_idx   = ggml_cast(ctx0, kv_idx_f, GGML_TYPE_I32);
+            ggml_set_name(kv_idx, "tria_identity_idx");
+            ggml_flash_attn_ext_set_kv_indices(cur, kv_idx);
+        }
+
         // TurboQuant: inverse WHT on FA output when V values are WHT-rotated.
         // For MLA, V is a view of K with different ne[0] (e.g. V=512, K=576).
         // Group size must come from K (which determines the WHT rotation), not V.
