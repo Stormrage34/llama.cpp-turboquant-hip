@@ -10,7 +10,7 @@
 |---|---|---|---|---|
 | **Qwen3.5-27B** Q5_K_M | **71.9%** | **72.0%** | **72.0%** | 1319 |
 | **Gemma 4 26B-A4B** Q4_K_M | 83%* | **80.3%** | — | 100×3 |
-| **Gemma 4 31B Dense** Q4_K_M | 96%* | **97%** | — | 100 |
+| **Gemma 4 31B Dense** Q4_K_M | **99%** | **96%** | — | 100 |
 
 Qwen3.5-27B: all three configs validated on full 1319 problems. TriAttention pruning adds zero reasoning degradation.
 *Gemma 4 baselines from 100-problem subsets.
@@ -284,7 +284,7 @@ Combo validated on Qwen3.5-27B Q5_K_M (hybrid SSM+attn) and Qwen3-8B Q4_K_M. GSM
 | | turbo3 + TriAtt 75% | 8.99 ± 0.07 | +10.3% |
 | | turbo3 + TriAtt 25% | 9.33 ± 0.07 | +14.5% |
 | Qwen3.5-27B Q5_K_M | f16 | 6.91 ± 0.05 | — |
-| | turbo3 | 6.94 ± 0.05 | +0.5% |
+| | turbo3 | 6.94 ± 0.05 | +0.4% |
 | | turbo3 + TriAtt 75% | 7.17 ± 0.05 | +3.8% |
 | | turbo3 + TriAtt 25% | 7.43 ± 0.05 | +7.5% |
 
