@@ -394,6 +394,10 @@ public:
     ggml_tensor * get_k(ggml_context * ctx, int32_t il) const;
     ggml_tensor * get_v(ggml_context * ctx, int32_t il) const;
 
+    // TriAttention: get KV indirection index for sparse cache access.
+    // Returns nullptr when all positions are active (dense path).
+    ggml_tensor * get_kv_indices(ggml_context * ctx) const;
+
     // TurboQuant rotation accessors
     ggml_tensor * get_turbo_rotation() const;
     ggml_tensor * get_turbo_rotation_inv() const;
