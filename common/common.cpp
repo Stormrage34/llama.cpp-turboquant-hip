@@ -1270,9 +1270,15 @@ common_init_result::common_init_result(common_params & params) :
                     params.triattention_sink);
 
             // Init runtime and set global pointer for mask injection
+            int budget = params.triattention_budget_pct;
+            if (budget <= 0) {
+                const char * benv = getenv("TRIA_BUDGET_PCT");
+                if (benv) budget = atoi(benv);
+                if (budget <= 0) budget = 50; // default 50% when stats loaded but no budget set
+            }
             g_tria_rt = tria_runtime_init(
                 pimpl->tria,
-                params.triattention_budget_pct,
+                budget,
                 params.triattention_window,
                 params.triattention_interval,
                 params.triattention_sink

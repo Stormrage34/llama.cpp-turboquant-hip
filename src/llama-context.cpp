@@ -3485,7 +3485,19 @@ int32_t llama_decode(
         LLAMA_LOG_ERROR("%s: failed to decode, ret = %d\n", __func__, ret);
     }
 
-    /* TriAttention: trigger scoring after successful decode */
+    /* TriAttention: lazy init from env vars if not loaded by common_init */
+    if (ret == 0 && !g_tria_rt) {
+        const char * sp = getenv("TRIA_STATS_PATH");
+        if (sp) {
+            struct tria_stats * st = tria_load(sp);
+            if (st) {
+                const char * bp = getenv("TRIA_BUDGET_PCT");
+                int bpct = bp ? atoi(bp) : 50;
+                if (bpct <= 0 || bpct > 100) bpct = 50;
+                g_tria_rt = tria_runtime_init(st, bpct, 128, 128, 4);
+            }
+        }
+    }
     if (ret == 0 && g_tria_rt) {
         tria_maybe_score(g_tria_rt, (void *)ctx);
     }
