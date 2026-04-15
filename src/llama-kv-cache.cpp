@@ -2953,9 +2953,23 @@ ggml_tensor * llama_kv_cache_context::get_v(ggml_context * ctx, int32_t il) cons
 }
 
 ggml_tensor * llama_kv_cache_context::get_kv_indices(ggml_context * ctx) const {
-    GGML_UNUSED(ctx);
-    // TODO: return pruned index from TriAttention runtime
-    return nullptr;
+    if (kv->active_kv.empty()) {
+        return nullptr; // dense path
+    }
+
+    const int64_t n_active = (int64_t)kv->active_kv.size();
+    ggml_tensor * idx = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, n_active);
+    ggml_set_name(idx, "kv_indices");
+    ggml_set_input(idx);
+
+    return idx;
+}
+
+void llama_kv_cache_context::set_input_kv_indices(ggml_tensor * dst) const {
+    GGML_ASSERT(!kv->active_kv.empty());
+    GGML_ASSERT(dst->ne[0] == (int64_t)kv->active_kv.size());
+
+    memcpy(dst->data, kv->active_kv.data(), kv->active_kv.size() * sizeof(int32_t));
 }
 
 ggml_tensor * llama_kv_cache_context::get_turbo_rotation() const {

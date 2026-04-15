@@ -474,6 +474,10 @@ void llm_graph_input_attn_kv::set_input(const llama_ubatch * ubatch) {
     if (self_v_rot) {
         mctx->set_input_v_rot(self_v_rot);
     }
+
+    if (self_kv_indices) {
+        mctx->set_input_kv_indices(self_kv_indices);
+    }
 }
 
 bool llm_graph_input_attn_kv::can_reuse(const llm_graph_params & params) {
@@ -2142,6 +2146,9 @@ static std::unique_ptr<llm_graph_input_attn_kv> build_attn_inp_kv_impl(
     inp->self_k_rot = mctx_cur->build_input_k_rot(ctx0);
     inp->self_v_rot = mctx_cur->build_input_v_rot(ctx0);
 
+    // TriAttention: create kv_indices tensor if active_kv is set
+    inp->self_kv_indices = mctx_cur->get_kv_indices(ctx0);
+
     return inp;
 }
 
@@ -2214,7 +2221,7 @@ ggml_tensor * llm_graph_context::build_attn(
         q = ggml_turbo_wht(ctx0, q, 0, 0, innerq_scale);  // 0 = forward, 0 = auto group size from q->ne[0]
     }
 
-    ggml_tensor * kv_idx = mctx_cur->get_kv_indices(ctx0);
+    ggml_tensor * kv_idx = inp->get_kv_indices();
     ggml_tensor * cur = build_attn_mha(q, k, v, kq_b, kq_mask, sinks, v_mla, kq_scale, il, kv_idx);
     cb(cur, "kqv_out", il);
 
@@ -2333,7 +2340,7 @@ ggml_tensor * llm_graph_context::build_attn(
         q = ggml_turbo_wht(ctx0, q, 0, 0, innerq_scale);  // 0 = forward, 0 = auto group size
     }
 
-    ggml_tensor * kv_idx = mctx_cur->get_kv_indices(ctx0);
+    ggml_tensor * kv_idx = nullptr; // TODO: add kv_indices to attn_k input
     ggml_tensor * cur = build_attn_mha(q, k, v, kq_b, kq_mask, sinks, v_mla, kq_scale, il, kv_idx);
     cb(cur, "kqv_out", il);
 
@@ -2445,7 +2452,7 @@ ggml_tensor * llm_graph_context::build_attn(
         q = ggml_turbo_wht(ctx0, q, 0, 0, innerq_scale);
     }
 
-    ggml_tensor * kv_idx = mctx_cur->get_kv_indices(ctx0);
+    ggml_tensor * kv_idx = nullptr; // TODO: add kv_indices to attn_kv_iswa input
     ggml_tensor * cur = build_attn_mha(q, k, v, kq_b, kq_mask, sinks, v_mla, kq_scale, il, kv_idx);
     cb(cur, "kqv_out", il);
 

@@ -279,6 +279,13 @@ private:
 
     std::vector<kv_layer> layers;
 
+    // TriAttention: active KV indices for sparse cache access.
+    // Maps logical positions [0..n_active-1] to physical KV rows.
+    // Empty = dense (all positions active, no indirection).
+    std::vector<int32_t> active_kv;
+
+    friend class llama_kv_cache_context;
+
     // TriAttention: raw K tensor access for scoring
 public:
     ggml_tensor * get_k_raw(int32_t il) const {
@@ -397,6 +404,9 @@ public:
     // TriAttention: get KV indirection index for sparse cache access.
     // Returns nullptr when all positions are active (dense path).
     ggml_tensor * get_kv_indices(ggml_context * ctx) const;
+
+    // TriAttention: fill kv_indices tensor with active_kv data
+    void set_input_kv_indices(ggml_tensor * dst) const;
 
     // TurboQuant rotation accessors
     ggml_tensor * get_turbo_rotation() const;
