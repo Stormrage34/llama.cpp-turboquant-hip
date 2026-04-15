@@ -2969,6 +2969,11 @@ void llama_kv_cache_context::set_input_kv_indices(ggml_tensor * dst) const {
     GGML_ASSERT(!kv->active_kv.empty());
     GGML_ASSERT(dst->ne[0] == (int64_t)kv->active_kv.size());
 
+    const int32_t n_physical = (int32_t)kv->get_size();
+    for (const int32_t idx : kv->active_kv) {
+        GGML_ASSERT(idx >= 0 && idx < n_physical);
+    }
+
     memcpy(dst->data, kv->active_kv.data(), kv->active_kv.size() * sizeof(int32_t));
 }
 
