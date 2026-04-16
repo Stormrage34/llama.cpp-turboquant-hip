@@ -34,6 +34,15 @@ struct tria_runtime {
     int     global_budget;  /* how many tokens to keep globally */
     int     compaction_active; /* 1 after physical compaction disables mask injection */
     int     score_pass;     /* counts scoring passes, full rescore every TRIA_FULL_RESCORE_INTERVAL */
+
+    /* GPU-resident scoring stats (uploaded once, reused every scoring pass) */
+    float  *gpu_omega;          /* [freq_count] on GPU, NULL if not uploaded */
+    float  *gpu_q_mean_real;    /* [num_layers * num_kv_heads * freq_count] on GPU */
+    float  *gpu_q_mean_imag;    /* [num_layers * num_kv_heads * freq_count] on GPU */
+    int     gpu_q_mean_layers;  /* number of layers uploaded into gpu_q_mean_* */
+    int     gpu_q_mean_kv_heads;/* number of KV heads uploaded into gpu_q_mean_* */
+    float  *gpu_global_scores;  /* [n_scored] on GPU, for GPU scoring path */
+    int     gpu_global_scores_n;/* allocated size */
 };
 
 /*

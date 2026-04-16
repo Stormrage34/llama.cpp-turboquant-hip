@@ -5,6 +5,7 @@
 #define _GNU_SOURCE
 #include "triattention-runtime.h"
 #include "triattention.h"
+#include "triattention-hip.h"
 
 #include "ggml.h"
 #include "ggml-backend.h"
@@ -79,6 +80,14 @@ void tria_runtime_free(struct tria_runtime * rt) {
     }
     free(rt->retained_count);
     free(rt->global_scores);
+
+    /* Free GPU scoring stats */
+    tria_hip_stats_free(rt->gpu_omega, rt->gpu_q_mean_real, rt->gpu_q_mean_imag);
+    if (rt->gpu_global_scores) {
+        /* hipFree via stats_free pattern — use direct call */
+        tria_hip_stats_free(rt->gpu_global_scores, NULL, NULL);
+    }
+
     free(rt);
 }
 
@@ -243,24 +252,110 @@ int tria_maybe_score(
     layer_weight_mean /= nl;
     if (layer_weight_mean <= 0.0f) layer_weight_mean = 1.0f;
 
-    /* Sampled-layer scoring for quantized K cache (e.g. q8_0).
-     * GPU->CPU transfer is expensive: score only every STRIDE layers.
-     * Default stride=1 (all layers). Set TRIA_SCORE_LAYER_STRIDE=4 for q8_0.
-     * Auto-detect: if K cache is quantized and stride not set, use stride=4. */
+    /* Detect K cache type and choose scoring path */
     int score_stride = 1;
+    int use_gpu_scoring = 0;
     {
         struct ggml_tensor * k0 = tria_get_k_tensor(ctx, 0);
-        int is_quantized = k0 && k0->type != GGML_TYPE_F16 && k0->type != GGML_TYPE_F32;
+        int is_q8_0 = k0 && k0->type == GGML_TYPE_Q8_0;
         const char * sls = getenv("TRIA_SCORE_LAYER_STRIDE");
         if (sls) score_stride = atoi(sls);
-        else if (is_quantized) score_stride = 4;
         if (score_stride < 1) score_stride = 1;
+
+        /* GPU scoring path: use for q8_0 if GPU stats are available */
+        if (is_q8_0) {
+            /* Lazy upload GPU stats on first use */
+            if (!rt->gpu_omega || rt->gpu_q_mean_layers != nl || rt->gpu_q_mean_kv_heads != nkv) {
+                /* Build flat q_mean_real/imag arrays [nl * nkv * fc] */
+                float * qmr = (float *)malloc((size_t)nl * nkv * fc * sizeof(float));
+                float * qmi = (float *)malloc((size_t)nl * nkv * fc * sizeof(float));
+                if (qmr && qmi) {
+                    for (int li = 0; li < nl; li++) {
+                        for (int kvi = 0; kvi < nkv; kvi++) {
+                            struct tria_head_stats * hs = &rt->stats->heads[li * nkv + kvi];
+                            const size_t base = ((size_t)li * nkv + kvi) * fc;
+                            for (int f = 0; f < fc; f++) {
+                                qmr[base + f] = hs->q_mean_real[f];
+                                qmi[base + f] = hs->q_mean_imag[f];
+                            }
+                        }
+                    }
+                    tria_hip_stats_free(rt->gpu_omega, rt->gpu_q_mean_real, rt->gpu_q_mean_imag);
+                    rt->gpu_omega = NULL;
+                    rt->gpu_q_mean_real = NULL;
+                    rt->gpu_q_mean_imag = NULL;
+                    rt->gpu_q_mean_layers = 0;
+                    rt->gpu_q_mean_kv_heads = 0;
+                    if (tria_hip_stats_upload(rt->stats->omega, fc, qmr, qmi, nl * nkv,
+                                              &rt->gpu_omega, &rt->gpu_q_mean_real, &rt->gpu_q_mean_imag) == 0) {
+                        rt->gpu_q_mean_layers = nl;
+                        rt->gpu_q_mean_kv_heads = nkv;
+                    }
+                }
+                free(qmr);
+                free(qmi);
+            }
+            if (rt->gpu_omega) {
+                use_gpu_scoring = 1;
+                score_stride = 1; /* GPU can score all layers efficiently */
+            } else {
+                /* Fallback: CPU with stride */
+                if (!sls) score_stride = 4;
+            }
+        }
+    }
+
+    /* Upload this pass's global_scores slice once; all GPU layers reuse it. */
+    if (use_gpu_scoring) {
+        if (rt->gpu_global_scores) {
+            tria_hip_stats_free(rt->gpu_global_scores, NULL, NULL);
+            rt->gpu_global_scores = NULL;
+            rt->gpu_global_scores_n = 0;
+        }
+        if (tria_hip_stats_upload(rt->global_scores + score_start, n_new, NULL, NULL, 0,
+                                  &rt->gpu_global_scores, NULL, NULL) == 0) {
+            rt->gpu_global_scores_n = n_new;
+        } else {
+            use_gpu_scoring = 0;
+        }
+    }
+
+    /* Precompute future offsets (same as CPU path) */
+    int offsets[TRIA_N_OFFSETS];
+    {
+        int o = 1;
+        for (int i = 0; i < TRIA_N_OFFSETS; i++) {
+            offsets[i] = o;
+            o *= 2;
+        }
     }
 
     for (int li = 0; li < nl; li++) {
         if (li % score_stride != 0) continue;  /* sampled-layer skip */
         struct ggml_tensor * k_tensor = tria_get_k_tensor(ctx, li);
         if (!k_tensor) continue;
+
+        /* GPU scoring path for q8_0: score directly on GPU, no CPU transfer */
+        if (use_gpu_scoring && k_tensor->type == GGML_TYPE_Q8_0 && rt->gpu_omega) {
+            float layer_weight = rt->stats->layer_budget_scales[li] / layer_weight_mean;
+            if (layer_weight < 0.25f) layer_weight = 0.25f;
+            if (layer_weight > 4.0f)  layer_weight = 4.0f;
+
+            if (rt->gpu_global_scores) {
+                tria_hip_score_q8_0(
+                    k_tensor->data,
+                    n_new, score_start,
+                    n_embd_k_gqa, nkv, hd, fc,
+                    key_pos + score_start,
+                    rt->gpu_omega,
+                    rt->gpu_q_mean_real, rt->gpu_q_mean_imag,
+                    li * nkv * fc,
+                    layer_weight,
+                    rt->gpu_global_scores,
+                    TRIA_N_OFFSETS, offsets);
+            }
+            continue;  /* skip CPU path for this layer */
+        }
 
         size_t row_size = ggml_row_size(k_tensor->type, n_embd_k_gqa);
         size_t read_offset = (size_t)score_start * row_size;
@@ -343,6 +438,10 @@ int tria_maybe_score(
                     rt->global_scores[score_start + s] = wz;
             }
         }
+    }
+
+    if (use_gpu_scoring && rt->gpu_global_scores) {
+        tria_hip_scores_download(rt->global_scores + score_start, rt->gpu_global_scores, n_new);
     }
 
     total_pruned = (n_old - budget) * nl * nkv;
