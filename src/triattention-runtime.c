@@ -243,7 +243,22 @@ int tria_maybe_score(
     layer_weight_mean /= nl;
     if (layer_weight_mean <= 0.0f) layer_weight_mean = 1.0f;
 
+    /* Sampled-layer scoring for quantized K cache (e.g. q8_0).
+     * GPU->CPU transfer is expensive: score only every STRIDE layers.
+     * Default stride=1 (all layers). Set TRIA_SCORE_LAYER_STRIDE=4 for q8_0.
+     * Auto-detect: if K cache is quantized and stride not set, use stride=4. */
+    int score_stride = 1;
+    {
+        struct ggml_tensor * k0 = tria_get_k_tensor(ctx, 0);
+        int is_quantized = k0 && k0->type != GGML_TYPE_F16 && k0->type != GGML_TYPE_F32;
+        const char * sls = getenv("TRIA_SCORE_LAYER_STRIDE");
+        if (sls) score_stride = atoi(sls);
+        else if (is_quantized) score_stride = 4;
+        if (score_stride < 1) score_stride = 1;
+    }
+
     for (int li = 0; li < nl; li++) {
+        if (li % score_stride != 0) continue;  /* sampled-layer skip */
         struct ggml_tensor * k_tensor = tria_get_k_tensor(ctx, li);
         if (!k_tensor) continue;
 
@@ -262,11 +277,29 @@ int tria_maybe_score(
         } else if (k_tensor->type == GGML_TYPE_F32) {
             ggml_backend_tensor_get(k_tensor, k_f32, read_offset, n_elem * sizeof(float));
         } else if (k_tensor->type == GGML_TYPE_Q8_0) {
-            /* Q8_0 scoring via CPU dequantize is too slow for GPU tensors
-             * (requires ~80MB GPU->CPU transfer per scoring round at d=65k).
-             * TODO: implement GPU-side scoring kernel for quantized K cache.
-             * For now, skip and fall through to V-energy boost only. */
-            continue;
+            /* Q8_0 block: [fp16 scale d][32 x int8 qs] — sizeof = 34 bytes.
+             * Only reached when score_stride reduces layer count to manageable. */
+            #define TRIA_QK8_0 32
+            #define TRIA_Q8_0_BLOCK_SIZE (sizeof(ggml_fp16_t) + TRIA_QK8_0)
+            if (n_embd_k_gqa % TRIA_QK8_0 != 0) { continue; }
+            uint8_t * k_q8 = (uint8_t *)malloc(read_bytes);
+            if (!k_q8) continue;
+            ggml_backend_tensor_get(k_tensor, k_q8, read_offset, read_bytes);
+            const int nb = n_embd_k_gqa / TRIA_QK8_0;
+            for (int s = 0; s < n_new; s++) {
+                const uint8_t * row_q8 = k_q8 + (size_t)s * row_size;
+                float * dst = k_f32 + (size_t)s * n_embd_k_gqa;
+                for (int b = 0; b < nb; b++) {
+                    const uint8_t * blk = row_q8 + b * TRIA_Q8_0_BLOCK_SIZE;
+                    ggml_fp16_t d_fp16;
+                    memcpy(&d_fp16, blk, sizeof(ggml_fp16_t));
+                    float d = ggml_fp16_to_fp32(d_fp16);
+                    const int8_t * qs = (const int8_t *)(blk + sizeof(ggml_fp16_t));
+                    for (int j = 0; j < TRIA_QK8_0; j++)
+                        dst[b * TRIA_QK8_0 + j] = d * qs[j];
+                }
+            }
+            free(k_q8);
         } else {
             continue;
         }
