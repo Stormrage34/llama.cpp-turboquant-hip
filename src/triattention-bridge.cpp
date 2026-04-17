@@ -44,7 +44,15 @@ int tria_get_n_kv(void * ctx_void) {
     auto * kv = get_kv(ctx_void);
     if (!kv) return 0;
 
-    llama_pos pmax = kv->seq_pos_max(0);
+    // TODO: per-sequence tracking for multi-slot server.
+    // Current approach: max pos across all sequences. Correct for -np 1.
+    // For multi-slot: cur_pos used in scoring may be wrong for shorter slots.
+    auto * ctx = (llama_context *)ctx_void;
+    const uint32_t n_seq = llama_n_seq_max(ctx);
+    llama_pos pmax = -1;
+    for (llama_seq_id s = 0; s < (llama_seq_id) n_seq; ++s) {
+        pmax = std::max(pmax, kv->seq_pos_max(s));
+    }
     return (pmax >= 0) ? (int) (pmax + 1) : 0;
 }
 
