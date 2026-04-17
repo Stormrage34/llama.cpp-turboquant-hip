@@ -1,0 +1,38 @@
+services:
+  llama-turboquant:
+    build:
+      context: .
+      dockerfile: Dockerfile.turboquant-rocm
+      args:
+        GPU_TARGETS: ${GPU_TARGETS:-gfx1100}
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - HIP_VISIBLE_DEVICES=${HIP_VISIBLE_DEVICES:-0}
+      - ROCR_VISIBLE_DEVICES=${HIP_VISIBLE_DEVICES:-0}
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - video
+      - render
+    volumes:
+      - ${MODELS_DIR:-./models}:/models:ro
+    ports:
+      - "${PORT:-8080}:8080"
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        : "$${MODEL_PATH:?Set MODEL_PATH in .env}" &&
+        exec /app/llama-server
+        --model "$${MODEL_PATH}"
+        --host 0.0.0.0
+        --port 8080
+        --n-gpu-layers $${N_GPU_LAYERS:-999}
+        --cache-type-k $${CACHE_TYPE_K:-q8_0}
+        --cache-type-v $${CACHE_TYPE_V:-q8_0}
+        --ctx-size $${CTX_SIZE:-4096}
+        --flash-attn on
+        $${EXTRA_ARGS:-}
