@@ -122,17 +122,18 @@ int tria_maybe_score(
     if (n_old <= 0) return 0;
 
     int budget = (n_old * rt->budget_pct) / 100;
+    int absolute_budget = 0;
     {
         const char * bt = getenv("TRIA_BUDGET_TOKENS");
-        if (bt) budget = atoi(bt);
+        if (bt) { budget = atoi(bt); absolute_budget = 1; }
     }
     if (budget <= 0) budget = 1;
 
     /* Exponential ramp eviction (opt-in via TRIA_RAMP_START_PCT).
      * When set: cap doubles each pass (e.g. 10->20->40->80->100%).
      * Prevents abrupt semantic shock after long prefill.
-     * Default: disabled (no cap, full eviction to budget immediately). */
-    {
+     * Disabled when TRIA_BUDGET_TOKENS is set (absolute budget). */
+    if (!absolute_budget) {
         const char * rsp = getenv("TRIA_RAMP_START_PCT");
         if (rsp) {
             int ramp_start = atoi(rsp);
