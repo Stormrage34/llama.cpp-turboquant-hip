@@ -289,3 +289,74 @@ Combo validated on Qwen3.5-27B Q5_K_M (hybrid SSM+attn) and Qwen3-8B Q4_K_M. GSM
 | | turbo3 + TriAtt 25% | 7.43 ± 0.05 | +7.5% |
 
 27B model shows minimal degradation across all configs. 8B model is more sensitive to both quantization and pruning, as expected from smaller capacity.
+
+### AIME25 Reasoning Quality (Qwen3-8B Q4_K_M, TriAttention)
+
+| Config | Correct | Accuracy | Answered | Boxed rate | Δ vs dense |
+|---|---|---|---|---|---|
+| Dense (no pruning) | 21/30 | 70.0% | 28/30 | 93.3% | — |
+| Tria budget=8192 | 19/30 | 63.3% | 23/30 | 76.7% | -6.7pp |
+| Tria budget=4096 | 14/30 | 46.7% | 17/30 | 56.7% | -23.3pp |
+| Tria budget=2048 | 7/30 | 23.3% | 8/30 | 26.7% | -46.7pp |
+
+Paper (bf16, full impl): Dense 40.8%, Tria budget=2048: 32.9% (-7.9pp). Our simplified port at 4× budget achieves comparable degradation (-6.7pp vs -7.9pp).
+
+### FA TILE VRAM Fix (2026-04-18)
+
+The TILE/MMA/WMMA FA paths allocate unbounded f16 temp buffers for quantized KV. The HIP legacy memory pool retains peak allocations permanently (`VMM: no` on all RDNA GPUs), causing quantized KV to OOM before f16 at the same context length.
+
+**Fix** (cherry-picked from TheTom PR #90): pool bypass with RAII hipMalloc/hipFree + VEC force for quantized KV on HIP.
+
+| Test | f16 KV | turbo3 KV |
+|---|---|---|
+| Gemma4 31B @d40960 | 23.67 t/s ✅ | 16.34 t/s ✅ |
+| Gemma4 31B @d49152 | **OOM** | 15.55 t/s ✅ |
+| Gemma4 31B @d65536 | — | 13.95 t/s ✅ |
+
+Decode overhead: 5-9% vs unpatched baseline. Confirmed on RX 7900 XTX (gfx1100, 24GB, ROCm 7.2.2).
+
+---
+
+## Version History
+
+| Commit | Date | Description |
+|---|---|---|
+| `4b92c8d42` | 2026-04-18 | fix: bypass HIP memory pool for FA f16 temp buffers (TheTom PR #90) |
+| `264279f96` | 2026-04-18 | fix: triattention-backend compile fixes + ROCm 7.2.2 |
+| `6b3b2cf1b` | 2026-04-18 | fix: improve budget logging and add multi-slot warning |
+| `c01b714f4` | 2026-04-18 | fix: triattention-backend compile fixes (stdint.h, GGML_USE_CUDA guard) |
+| `33ffd028d` | 2026-04-18 | fix: resolve triattention HIP symbols through backend function pointers |
+| `982ccb421` | 2026-04-18 | fix: disable exponential ramp when TRIA_BUDGET_TOKENS set |
+
+## Confirmed Hardware
+
+| GPU | Arch | VRAM | Tester | Status |
+|---|---|---|---|---|
+| RX 7900 XTX | gfx1100 | 24GB | domvox | ✅ primary |
+| RX 7900 XT | gfx1100 | 20GB | ozboss | ✅ |
+| RX 9060 XT | gfx1200 | 16GB | Gerporgl | ✅ |
+| RX 6700 XT | gfx1030 | 12GB | LyraMoonDev | ✅ (HSA_OVERRIDE) |
+| Strix Halo | gfx1151 | 128GB | rkmth, mikiadev | ✅ |
+| MI50 | gfx906 | 32GB | wtarreau | ✅ (PP overhead) |
+
+## Docker
+
+```bash
+# Pre-built image (ROCm 7.2.2)
+docker pull ghcr.io/domvox/llama.cpp-turboquant-hip:vram-fix
+
+# Or build locally
+docker build -f Dockerfile.tria-eval -t llama-tq:vram-fix .
+
+# Run
+docker run --rm --device=/dev/kfd --device=/dev/dri \
+  --group-add video --group-add render \
+  -e HIP_VISIBLE_DEVICES=0 \
+  -v ~/models:/models:ro -p 8080:8080 \
+  llama-tq:vram-fix \
+  /app/build/bin/llama-server \
+  -m /models/your-model.gguf -ngl 99 -fa on -c 32768 \
+  --cache-type-k turbo3 --cache-type-v turbo3 --host 0.0.0.0
+```
+
+Built on ROCm 7.2.2. Branch: `feature/triattention-scoring`.
