@@ -109,6 +109,14 @@ int tria_maybe_score(
     int n_used = tria_get_used_n_kv(ctx);
     if (n_kv <= 0 || n_used <= 0) return 0;
 
+    /* Warn once if multi-slot detected — scoring is approximate */
+    static int multi_slot_warned = 0;
+    if (!multi_slot_warned && n_used > n_kv + 128) {
+        fprintf(stderr, "tria: warning: n_used (%d) >> n_kv (%d), multi-slot detected. "
+                "Scoring uses max-over-sequences which is approximate.\n", n_used, n_kv);
+        multi_slot_warned = 1;
+    }
+
     /* Reset if cache was cleared (perplexity resets between chunks) */
     if (n_kv < rt->n_scored) {
         rt->n_scored = 0;
@@ -181,8 +189,10 @@ int tria_maybe_score(
         }
     }
 
-    fprintf(stderr, "tria_score: n_kv=%d n_old=%d budget=%d new=%d mode=%s (pass %d)\n",
-            n_kv, n_old, budget, n_new,
+    fprintf(stderr, "tria_score: n_kv=%d n_old=%d budget=%d%s new=%d mode=%s (pass %d)\n",
+            n_kv, n_old, budget,
+            absolute_budget ? " (abs)" : " (pct)",
+            n_new,
             full_rescore ? "full" : "incremental", rt->score_pass);
 
     if (!ctx) { rt->n_scored = n_kv; return 0; }
