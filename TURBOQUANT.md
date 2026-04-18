@@ -118,7 +118,7 @@ Models with `partial_rotary_factor < 1.0` (Qwen3.5 family) showed no regression 
 
 **Important:** InnerQ is **automatically disabled** on models with partial RoPE (e.g. Qwen3.5-27B, partial_rotary_factor=0.25). No user action needed. Qwen3.5-27B turbo3 K+V achieves PPL 6.00 vs f16 5.98 (+0.3%).
 
-### Speed (RX 7900 XTX, ROCm 6.4)
+### Speed (RX 7900 XTX, ROCm 7.2.2)
 
 | Model | Context | Config | Prefill (tok/s) | Decode (tok/s) |
 |---|---|---|---|---|
@@ -233,7 +233,7 @@ the KV cache small enough that context isn't reduced.
 
 ## Hardware
 
-Tested on: AMD Ryzen 9 9950X3D, RX 7900 XTX 24GB, ROCm 6.4/7.2.1, openSUSE Tumbleweed.
+Tested on: AMD Ryzen 9 9950X3D, RX 7900 XTX 24GB, ROCm 7.2.2, openSUSE Tumbleweed.
 
 ### KL-Divergence (Qwen3.5-27B, turbo vs f16, 10 prompts)
 
