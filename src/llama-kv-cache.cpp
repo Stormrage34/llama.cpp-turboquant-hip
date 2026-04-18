@@ -18,7 +18,7 @@ extern "C" {
 }
 
 #if (defined(GGML_USE_CUDA) || defined(GGML_USE_HIP)) && !defined(GGML_BACKEND_DL)
-#include "triattention-hip.h"
+#include "triattention-backend.h"
 #endif
 
 static bool ggml_is_power_of_2(int n) {
@@ -1458,9 +1458,10 @@ bool llama_kv_cache::triattention_compact(const std::vector<uint32_t> & keep_pos
 
         const uint32_t n_move = n_kv_new - first_move;
 
-#if defined(GGML_USE_HIP) && !defined(GGML_BACKEND_DL)
-        if (tensor->buffer != nullptr && !ggml_backend_buffer_is_host(tensor->buffer) && row_bytes <= UINT32_MAX) {
-            const int rc = tria_hip_compact_rows(
+#if defined(GGML_USE_HIP)
+        if (g_tria_backend.compact_rows &&
+            tensor->buffer != nullptr && !ggml_backend_buffer_is_host(tensor->buffer) && row_bytes <= UINT32_MAX) {
+            const int rc = g_tria_backend.compact_rows(
                     tensor->data,
                     keep_positions.data(),
                     n_kv_new,

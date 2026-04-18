@@ -5,7 +5,7 @@
 #define _GNU_SOURCE
 #include "triattention-runtime.h"
 #include "triattention.h"
-#include "triattention-hip.h"
+#include "triattention-backend.h"
 
 #include "ggml.h"
 #include "ggml-backend.h"
@@ -46,6 +46,14 @@ struct tria_runtime * tria_runtime_init(
 
     struct tria_runtime * rt = calloc(1, sizeof(*rt));
     if (!rt) return NULL;
+
+    /* Initialize GPU backend (once) */
+    static int backend_initialized = 0;
+    if (!backend_initialized) {
+        tria_backend_init();
+        backend_initialized = 1;
+    }
+
     rt->stats      = stats;
     rt->budget_pct = budget_pct;
     rt->window     = window;
@@ -82,10 +90,10 @@ void tria_runtime_free(struct tria_runtime * rt) {
     free(rt->global_scores);
 
     /* Free GPU scoring stats */
-    tria_hip_stats_free(rt->gpu_omega, rt->gpu_q_mean_real, rt->gpu_q_mean_imag);
-    if (rt->gpu_global_scores) {
-        /* hipFree via stats_free pattern — use direct call */
-        tria_hip_stats_free(rt->gpu_global_scores, NULL, NULL);
+    if (g_tria_backend.stats_free) {
+        g_tria_backend.stats_free(rt->gpu_omega, rt->gpu_q_mean_real, rt->gpu_q_mean_imag);
+        if (rt->gpu_global_scores)
+            g_tria_backend.stats_free(rt->gpu_global_scores, NULL, NULL);
     }
 
     free(rt);
@@ -285,13 +293,15 @@ int tria_maybe_score(
                             }
                         }
                     }
-                    tria_hip_stats_free(rt->gpu_omega, rt->gpu_q_mean_real, rt->gpu_q_mean_imag);
+                    if (g_tria_backend.stats_free)
+                        g_tria_backend.stats_free(rt->gpu_omega, rt->gpu_q_mean_real, rt->gpu_q_mean_imag);
                     rt->gpu_omega = NULL;
                     rt->gpu_q_mean_real = NULL;
                     rt->gpu_q_mean_imag = NULL;
                     rt->gpu_q_mean_layers = 0;
                     rt->gpu_q_mean_kv_heads = 0;
-                    if (tria_hip_stats_upload(rt->stats->omega, fc, qmr, qmi, nl * nkv,
+                    if (g_tria_backend.stats_upload &&
+                        g_tria_backend.stats_upload(rt->stats->omega, fc, qmr, qmi, nl * nkv,
                                               &rt->gpu_omega, &rt->gpu_q_mean_real, &rt->gpu_q_mean_imag) == 0) {
                         rt->gpu_q_mean_layers = nl;
                         rt->gpu_q_mean_kv_heads = nkv;
@@ -313,11 +323,13 @@ int tria_maybe_score(
     /* Upload this pass's global_scores slice once; all GPU layers reuse it. */
     if (use_gpu_scoring) {
         if (rt->gpu_global_scores) {
-            tria_hip_stats_free(rt->gpu_global_scores, NULL, NULL);
+            if (g_tria_backend.stats_free)
+                g_tria_backend.stats_free(rt->gpu_global_scores, NULL, NULL);
             rt->gpu_global_scores = NULL;
             rt->gpu_global_scores_n = 0;
         }
-        if (tria_hip_stats_upload(rt->global_scores + score_start, n_new, NULL, NULL, 0,
+        if (g_tria_backend.stats_upload &&
+            g_tria_backend.stats_upload(rt->global_scores + score_start, n_new, NULL, NULL, 0,
                                   &rt->gpu_global_scores, NULL, NULL) == 0) {
             rt->gpu_global_scores_n = n_new;
         } else {
@@ -347,7 +359,7 @@ int tria_maybe_score(
             if (layer_weight > 4.0f)  layer_weight = 4.0f;
 
             if (rt->gpu_global_scores) {
-                tria_hip_score_q8_0(
+                g_tria_backend.score_q8_0(
                     k_tensor->data,
                     n_new, score_start,
                     n_embd_k_gqa, nkv, hd, fc,
@@ -446,7 +458,7 @@ int tria_maybe_score(
     }
 
     if (use_gpu_scoring && rt->gpu_global_scores) {
-        tria_hip_scores_download(rt->global_scores + score_start, rt->gpu_global_scores, n_new);
+        g_tria_backend.scores_download(rt->global_scores + score_start, rt->gpu_global_scores, n_new);
     }
 
     total_pruned = (n_old - budget) * nl * nkv;
