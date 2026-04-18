@@ -504,46 +504,26 @@ int tria_maybe_score(
                 uint8_t * row_buf = (uint8_t *)malloc(v_row_size);
                 if (!row_buf) continue;
 
-                if (v_tensor->type == GGML_TYPE_F16 || v_tensor->type == GGML_TYPE_F32) {
-                    for (int s = 0; s < n_old; s++) {
-                        ggml_backend_tensor_get(v_tensor, row_buf,
-                                                (size_t)s * v_row_size, v_row_size);
-                        float energy = 0.0f;
-                        if (v_tensor->type == GGML_TYPE_F16) {
-                            const ggml_fp16_t * vf16 = (const ggml_fp16_t *)row_buf;
-                            for (int d = 0; d < n_embd_v; d++) {
-                                float v = ggml_fp16_to_fp32(vf16[d]);
-                                energy += v * v;
-                            }
-                        } else {
-                            const float * vf32 = (const float *)row_buf;
-                            for (int d = 0; d < n_embd_v; d++)
-                                energy += vf32[d] * vf32[d];
-                        }
-                        v_energy[s] += energy;
-                    }
-                    v_layers++;
-                } else if (v_tensor->type == GGML_TYPE_TURBO3_0) {
-                    /* turbo3: block norms as energy proxy (WHT equalizes,
-                       so vstd guard will likely skip the boost) */
-                    int n_blocks = n_embd_v / 128;
-                    if (n_blocks > 0) {
+                {
+                    /* Generic V energy: dequant to f32, compute L2 norm.
+                     * Works for all types including turbo2/3/4. */
+                    const struct ggml_type_traits * vtraits = ggml_get_type_traits(v_tensor->type);
+                    float * v_f32 = (vtraits && vtraits->to_float)
+                        ? (float *)malloc((size_t)n_embd_v * sizeof(float)) : NULL;
+                    if (v_f32) {
                         for (int s = 0; s < n_old; s++) {
                             ggml_backend_tensor_get(v_tensor, row_buf,
                                                     (size_t)s * v_row_size, v_row_size);
+                            vtraits->to_float(row_buf, v_f32, n_embd_v);
                             float energy = 0.0f;
-                            for (int b = 0; b < n_blocks; b++) {
-                                ggml_fp16_t norm_fp16;
-                                memcpy(&norm_fp16, row_buf + b * 14, sizeof(ggml_fp16_t));
-                                float norm = ggml_fp16_to_fp32(norm_fp16);
-                                energy += norm * norm;
-                            }
+                            for (int d = 0; d < n_embd_v; d++)
+                                energy += v_f32[d] * v_f32[d];
                             v_energy[s] += energy;
                         }
+                        free(v_f32);
                         v_layers++;
                     }
                 }
-                /* Other quant types: skip (no safe norm proxy) */
                 free(row_buf);
             }
 
