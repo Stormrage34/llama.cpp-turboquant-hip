@@ -6,8 +6,9 @@
 
 struct tria_backend g_tria_backend;
 
-#if defined(GGML_USE_HIP) && !defined(GGML_BACKEND_DL)
-/* Static linking — wire up directly */
+#if defined(GGML_USE_CUDA)
+/* Static linking — wire up directly (GGML_USE_CUDA is defined for both
+   CUDA and HIP when GGML_BACKEND_DL is OFF) */
 #include "triattention-hip.h"
 
 int tria_backend_init(void) {
