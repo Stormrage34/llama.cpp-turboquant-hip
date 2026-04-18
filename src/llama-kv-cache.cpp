@@ -17,7 +17,7 @@ extern "C" {
 #include "triattention-runtime.h"
 }
 
-#if (defined(GGML_USE_CUDA) || defined(GGML_USE_HIP)) && !defined(GGML_BACKEND_DL)
+#if (defined(GGML_USE_CUDA) || defined(GGML_USE_HIP))
 #include "triattention-backend.h"
 #endif
 
