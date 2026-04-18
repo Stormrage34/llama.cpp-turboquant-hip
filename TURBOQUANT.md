@@ -335,7 +335,7 @@ Decode overhead: 5-9% vs unpatched baseline. Confirmed on RX 7900 XTX (gfx1100, 
 | RX 7900 XTX | gfx1100 | 24GB | domvox | ✅ full validation (PPL, GSM8K, NIAH, VRAM) |
 | RX 6700 XT | gfx1030 | 12GB | LyraMoonDev | ✅ PPL + bench (HSA_OVERRIDE) |
 | MI50 (×2) | gfx906 | 32GB | wtarreau | ✅ bench (PP overhead noted) |
-| RX 9060 XT | gfx1200 | 16GB | Gerporgl | ⚠️ builds, VRAM issue reported (pre-fix) |
+| RX 9060 XT | gfx1200 | 16GB | Gerporgl | ✅ VRAM fix confirmed (f16 OOM@38K, turbo4 runs@42K+) |
 | Strix Halo | gfx1151 | 128GB | rkmth | ⚠️ VRAM savings confirmed, no PPL data |
 
 ## Docker
