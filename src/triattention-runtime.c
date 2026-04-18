@@ -423,7 +423,18 @@ int tria_maybe_score(
             }
             free(k_q8);
         } else {
-            continue;
+            /* Generic dequant path — handles turbo2/3/4 and any future quantized KV type */
+            const struct ggml_type_traits * traits = ggml_get_type_traits(k_tensor->type);
+            if (!traits || !traits->to_float) { continue; }
+            uint8_t * k_raw = (uint8_t *)malloc(read_bytes);
+            if (!k_raw) continue;
+            ggml_backend_tensor_get(k_tensor, k_raw, read_offset, read_bytes);
+            for (int s = 0; s < n_new; s++) {
+                traits->to_float(k_raw + (size_t)s * row_size,
+                                 k_f32 + (size_t)s * n_embd_k_gqa,
+                                 n_embd_k_gqa);
+            }
+            free(k_raw);
         }
 
         for (int kvi = 0; kvi < nkv; kvi++) {
