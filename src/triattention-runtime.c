@@ -244,6 +244,14 @@ int tria_maybe_score(
             n_new,
             full_rescore ? "full" : "incremental", rt->score_pass);
 
+    /* TRIA_RANDOM=1: random scores for A/B testing against faithful scoring */
+    static int tria_random_mode = -1;
+    if (tria_random_mode < 0) {
+        const char *env = getenv("TRIA_RANDOM");
+        tria_random_mode = (env && env[0] == '1') ? 1 : 0;
+        if (tria_random_mode) fprintf(stderr, "tria: RANDOM EVICTION MODE (scoring disabled)\n");
+    }
+
     if (!ctx) { rt->n_scored = n_kv; return 0; }
 
     /* Validate stats dimensions against actual KV tensor.
@@ -408,6 +416,15 @@ int tria_maybe_score(
         }
     }
 
+    /* Random eviction mode: assign random scores, skip all scoring logic */
+    if (tria_random_mode) {
+        for (int s = 0; s < n_new; s++) {
+            uint32_t h = (uint32_t)(score_start + s) * 2654435761u;
+            rt->global_scores[score_start + s] = (float)(h & 0xFFFF) / 65536.0f;
+        }
+        goto scoring_done;
+    }
+
     for (int li = 0; li < nl; li++) {
         if (li % score_stride != 0) continue;  /* sampled-layer skip */
         struct ggml_tensor * k_tensor = tria_get_k_tensor(ctx, li);
@@ -563,6 +580,7 @@ int tria_maybe_score(
 
     total_pruned = (n_old - budget) * nl * nkv;
 
+scoring_done:
     /* ---- Value-aware scoring boost (VATP/OBCache-inspired) ---- */
     /* Compute per-token V energy across all layers, z-normalize,
        and add lambda * v_z to global_scores (bidirectional).
