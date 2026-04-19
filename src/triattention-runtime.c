@@ -518,9 +518,10 @@ int tria_maybe_score(
         for (int kvi = 0; kvi < nkv; kvi++) {
             for (int s = 0; s < n_new; s++) {
                 float * row = k_f32 + s * n_embd_k_gqa + kvi * hd;
+                /* LLaMA-style RoPE: interleaved pairs [r0, i0, r1, i1, ...] */
                 for (int f = 0; f < fc; f++) {
-                    k_real[s * fc + f] = row[f];
-                    k_imag[s * fc + f] = row[fc + f];
+                    k_real[s * fc + f] = row[2*f + 0];
+                    k_imag[s * fc + f] = row[2*f + 1];
                 }
             }
 

@@ -192,6 +192,10 @@ static struct tria_cs_table * tria_cs_precompute(
             t->ka[s * fc + f] = sqrtf(kr[f]*kr[f] + ki[f]*ki[f]);
         }
         for (int o = 0; o < TRIA_N_OFFSETS; o++) {
+            /* When K is post-RoPE (cached after RoPE rotation), the scoring angle
+             * depends on whether calibration stats are pre-RoPE or post-RoPE.
+             * Current: use delta (relative distance) — matches pre-RoPE calibration
+             * with pre-RoPE K. For post-RoPE K, this needs validation. */
             float delta = base_delta + offsets[o];
             int base = (s * TRIA_N_OFFSETS + o) * fc;
             for (int f = 0; f < fc; f++) {
