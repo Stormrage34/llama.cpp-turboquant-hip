@@ -43,6 +43,9 @@ struct tria_runtime {
     int     gpu_q_mean_kv_heads;/* number of KV heads uploaded into gpu_q_mean_* */
     float  *gpu_global_scores;  /* [n_scored] on GPU, for GPU scoring path */
     int     gpu_global_scores_n;/* allocated size */
+
+    /* RoPE layout: 1 = NEOX/IMROPE (split-half), 0 = NORMAL (interleaved) */
+    int     rope_neox;
 };
 
 /*

@@ -3521,6 +3521,10 @@ int32_t llama_decode(
                 int bpct = bp ? atoi(bp) : 50;
                 if (bpct <= 0 || bpct > 100) bpct = 50;
                 g_tria_rt = tria_runtime_init(st, bpct, 128, 128, 4);
+                if (g_tria_rt) {
+                    enum llama_rope_type rt_type = llama_model_rope_type(llama_get_model(ctx));
+                    g_tria_rt->rope_neox = (rt_type != LLAMA_ROPE_TYPE_NORM && rt_type != LLAMA_ROPE_TYPE_NONE);
+                }
             }
         }
     }

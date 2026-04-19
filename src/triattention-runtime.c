@@ -351,8 +351,12 @@ int tria_maybe_score(
         if (sls) score_stride = atoi(sls);
         if (score_stride < 1) score_stride = 1;
 
-        /* GPU scoring path: use for q8_0 if GPU stats are available */
-        if (is_q8_0) {
+        /* GPU scoring path: use for q8_0 if GPU stats are available.
+         * Disabled for GQA models (nh != nkv) — GPU kernel doesn't aggregate
+         * across query heads correctly. Falls back to CPU path which does
+         * proper per-query-head z-normalize + max aggregation (eq 12-13). */
+        int nh = rt->stats->num_heads;
+        if (is_q8_0 && nh == nkv && hd <= 128 && hd % 32 == 0) {
             /* Lazy upload GPU stats on first use */
             if (!rt->gpu_omega || rt->gpu_q_mean_layers != nl || rt->gpu_q_mean_kv_heads != nkv) {
                 /* Build flat q_mean_real/imag arrays [nl * nkv * fc] */
@@ -542,10 +546,19 @@ int tria_maybe_score(
         for (int kvi = 0; kvi < nkv; kvi++) {
             for (int s = 0; s < n_new; s++) {
                 float * row = k_f32 + s * n_embd_k_gqa + kvi * hd;
-                /* LLaMA-style RoPE: interleaved pairs [r0, i0, r1, i1, ...] */
-                for (int f = 0; f < fc; f++) {
-                    k_real[s * fc + f] = row[2*f + 0];
-                    k_imag[s * fc + f] = row[2*f + 1];
+                /* Extract complex pairs from post-RoPE K.
+                 * NEOX/IMROPE: split-half [r0..r_{fc-1}, i0..i_{fc-1}]
+                 * NORMAL:      interleaved [r0, i0, r1, i1, ...] */
+                if (rt->rope_neox) {
+                    for (int f = 0; f < fc; f++) {
+                        k_real[s * fc + f] = row[f];
+                        k_imag[s * fc + f] = row[fc + f];
+                    }
+                } else {
+                    for (int f = 0; f < fc; f++) {
+                        k_real[s * fc + f] = row[2*f + 0];
+                        k_imag[s * fc + f] = row[2*f + 1];
+                    }
                 }
             }
 
@@ -589,6 +602,8 @@ int tria_maybe_score(
 
 scoring_done:
     /* ---- Value-aware scoring boost (VATP/OBCache-inspired) ---- */
+    /* Skip V-energy in random mode — random baseline must be pure random */
+    if (tria_random_mode) goto scoring_final;
     /* Compute per-token V energy across all layers, z-normalize,
        and add lambda * v_z to global_scores (bidirectional).
        Only works with non-transposed V (flash_attn mode).         */
@@ -679,6 +694,7 @@ scoring_done:
         }
     }
 
+scoring_final:
     if (total_pruned > 0) {
         fprintf(stderr, "tria_score: pruned %d tokens across %d×%d heads\n",
                 total_pruned, nl, nkv);

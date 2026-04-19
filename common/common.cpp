@@ -1283,6 +1283,10 @@ common_init_result::common_init_result(common_params & params) :
                 params.triattention_interval,
                 params.triattention_sink
             );
+            if (g_tria_rt && pimpl->model) {
+                enum llama_rope_type rt_type = llama_model_rope_type(pimpl->model.get());
+                g_tria_rt->rope_neox = (rt_type != LLAMA_ROPE_TYPE_NORM && rt_type != LLAMA_ROPE_TYPE_NONE);
+            }
         } else {
             LOG_ERR("%s: failed to load TriAttention stats from %s\n",
                     __func__, tria_path.c_str());
