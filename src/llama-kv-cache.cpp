@@ -604,6 +604,10 @@ void llama_kv_cache::clear(bool data) {
         v_heads[s] = 0;
     }
 
+    // Phase 3B: invalidate indirection state
+    active_kv.clear();
+    active_kv_real_len = 0;
+
     if (data) {
         for (auto & [_, buf] : ctxs_bufs) {
             ggml_backend_buffer_clear(buf.get(), 0);
@@ -1514,6 +1518,69 @@ bool llama_kv_cache::triattention_compact(const std::vector<uint32_t> & keep_pos
     return true;
 }
 
+bool llama_kv_cache::triattention_set_active(const std::vector<uint32_t> & keep_positions) {
+    if (n_stream != 1) {
+        LLAMA_LOG_WARN("%s: TriAttention indirection only supports single-stream KV cache\n", __func__);
+        return false;
+    }
+
+    if (keep_positions.empty()) return false;
+
+    auto & cells = v_cells[0];
+    const uint32_t n_kv_old = cells.used_max_p1();
+
+    /* Validate keep_positions */
+    for (uint32_t pos : keep_positions) {
+        if (pos >= n_kv_old || cells.is_empty(pos)) {
+            LLAMA_LOG_WARN("%s: invalid keep position %u (n_kv_old=%u, empty=%d)\n",
+                           __func__, pos, n_kv_old, pos < n_kv_old ? cells.is_empty(pos) : -1);
+            return false;
+        }
+    }
+
+    /* Mark evicted cells as empty */
+    std::vector<bool> kept(n_kv_old, false);
+    for (uint32_t pos : keep_positions) {
+        if (pos < n_kv_old) kept[pos] = true;
+    }
+
+    int n_evicted = 0;
+    for (uint32_t i = 0; i < n_kv_old; i++) {
+        if (!kept[i] && !cells.is_empty(i)) {
+            cells.rm(i);
+            n_evicted++;
+        }
+    }
+
+    /* Build active_kv with FATTN_KQ_STRIDE alignment (256) */
+    const int stride = 256;
+    int n_active = (int)keep_positions.size();
+    int n_padded = ((n_active + stride - 1) / stride) * stride;
+    uint32_t last_real = keep_positions.back();
+
+    active_kv.resize(n_padded);
+    for (int i = 0; i < n_active; i++) {
+        active_kv[i] = (int32_t)keep_positions[i];
+    }
+    for (int i = n_active; i < n_padded; i++) {
+        active_kv[i] = (int32_t)last_real;
+    }
+    active_kv_real_len = n_active;
+
+    /* Set v_heads to first freed slot for fast find_slot */
+    for (uint32_t i = 0; i < cells.size(); i++) {
+        if (cells.is_empty(i)) {
+            v_heads[0] = i;
+            break;
+        }
+    }
+
+    LLAMA_LOG_INFO("%s: active_kv set: %d logical (%d padded), freed %d rows\n",
+                   __func__, n_active, n_padded, n_evicted);
+
+    return true;
+}
+
 uint32_t llama_kv_cache::get_n_stream() const {
     return n_stream;
 }
@@ -1886,6 +1953,9 @@ struct args_set_input_kq_mask {
     const std::vector<llama_kv_cells> & v_cells;
     const std::vector<uint32_t>       & seq_to_stream;
 
+    const std::vector<int32_t>        & active_kv; // Phase 3B: indirection map (empty = dense)
+    int32_t                             active_kv_real_len; // unpadded length (0 = use active_kv.size())
+
     uint32_t       n_swa;
     llama_swa_type swa_type;
 
@@ -1908,6 +1978,8 @@ static void set_input_kq_mask_impl(const args_set_input_kq_mask & args, float * 
     const int64_t n_kv     = args.n_kv;
     const int64_t n_stream = args.n_stream;
     const int64_t n_tps    = args.n_tps;
+
+    const auto & active_kv_map = args.active_kv;
 
     // the min position in the batch for each sequence
     llama_pos seq_pos_min[LLAMA_MAX_SEQ];
@@ -1981,16 +2053,26 @@ static void set_input_kq_mask_impl(const args_set_input_kq_mask & args, float * 
                     }
                 }
 
-                if (cells.is_empty(j)) {
+                // Phase 3B: map logical position to physical row
+                const uint32_t phys = (!active_kv_map.empty() && j < (uint32_t)active_kv_map.size())
+                                    ? (uint32_t)active_kv_map[j] : j;
+
+                // Phase 3B: mask padding entries beyond real active length
+                if (!active_kv_map.empty() && args.active_kv_real_len > 0
+                    && (int32_t)j >= args.active_kv_real_len) {
+                    goto skip;
+                }
+
+                if (cells.is_empty(phys)) {
                     goto skip;
                 }
 
                 // mask the token if not the same sequence
-                if (!cells.seq_has(j, seq_id)) {
+                if (!cells.seq_has(phys, seq_id)) {
                     goto skip;
                 }
 
-                p0 = cells.pos_get(j);
+                p0 = cells.pos_get(phys);
 
                 if (!alibi) {
                     if (!prev) {
@@ -2010,7 +2092,7 @@ static void set_input_kq_mask_impl(const args_set_input_kq_mask & args, float * 
                     // M-RoPE causal mask
                     if (is_2d) {
                         if (p0 == p1) {
-                            const auto & p0_ext = cells.ext_get(j);
+                            const auto & p0_ext = cells.ext_get(phys);
 
                             if (p0_ext.is_2d_gt(p1_x, p1_y)) {
                                 goto skip;
@@ -2091,6 +2173,8 @@ void llama_kv_cache::set_input_kq_mask(ggml_tensor * dst, const llama_ubatch * u
         /*.ubatch           =*/ ubatch,
         /*.v_cells          =*/ v_cells,
         /*.seq_to_stream    =*/ seq_to_stream,
+        /*.active_kv        =*/ active_kv,
+        /*.active_kv_real_len=*/ active_kv_real_len,
         /*.n_swa            =*/ n_swa,
         /*.swa_type         =*/ swa_type,
         /*.n_kv             =*/ n_kv,
@@ -2908,11 +2992,36 @@ bool llama_kv_cache_context::apply() {
     }
 
     kv->apply_ubatch(sinfos[i_cur], ubatches[i_cur]);
-    n_kv = kv->get_n_kv(sinfos[i_cur]);
+
+    /* Phase 3B: append newly written physical slots to active_kv */
+    if (!kv->active_kv.empty() && kv->active_kv_real_len > 0 && ubatches[i_cur].n_tokens > 0) {
+        /* Truncate to real length (remove old padding) */
+        int real_len = kv->active_kv_real_len;
+        kv->active_kv.resize(real_len);
+
+        const auto & sinfo = sinfos[i_cur];
+        /* sinfo.idxs[stream][token] = physical row index */
+        for (uint32_t s = 0; s < sinfo.n_stream(); ++s) {
+            for (uint32_t t = 0; t < sinfo.idxs[s].size(); ++t) {
+                kv->active_kv.push_back((int32_t)sinfo.idxs[s][t]);
+            }
+        }
+        kv->active_kv_real_len = (int32_t)kv->active_kv.size();
+
+        /* Re-pad to FATTN_KQ_STRIDE */
+        const int stride = 256;
+        int n = kv->active_kv_real_len;
+        int n_padded = ((n + stride - 1) / stride) * stride;
+        int32_t last = kv->active_kv[n - 1];
+        kv->active_kv.resize(n_padded, last);
+    }
+
+    n_kv = kv->active_kv.empty() ? kv->get_n_kv(sinfos[i_cur]) : (uint32_t)kv->active_kv.size();
 
     // TriAttention: prefix-pruning test (TRIA_PREFIX_PRUNE=<percent>)
     // Only active during decode (single token) — VEC kernel path only.
-    {
+    // Skip when Phase 3B indirection is active (active_kv_real_len > 0)
+    if (kv->active_kv_real_len == 0) {
         const char * env = getenv("TRIA_PREFIX_PRUNE");
         if (env && n_kv > 256 && ubatches[i_cur].n_tokens == 1) {
             const int pct = atoi(env);

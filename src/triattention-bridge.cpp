@@ -156,6 +156,25 @@ int tria_compact_kv(struct tria_runtime * rt, void * ctx_void) {
 
     llama_synchronize(ctx);
 
+    /* Phase 3B: use indirection (active_kv) instead of physical compaction.
+     * Set active_kv to the keep_positions list — FA kernel reads through kv_indices.
+     * Evicted physical rows are freed via cells.rm() for reuse by find_slot().
+     * Fallback to physical compaction if TRIA_COMPACT=1 env is set. */
+    static int use_compact = -1;
+    if (use_compact < 0) {
+        const char * env = getenv("TRIA_COMPACT");
+        use_compact = (env && env[0] == '1') ? 1 : 0;
+    }
+
+    if (!use_compact) {
+        if (!kv->triattention_set_active(keep_positions)) {
+            return 0;
+        }
+
+        return n_kv - (int)keep_positions.size();
+    }
+
+    /* Legacy physical compaction path */
     if (!kv->triattention_compact(keep_positions)) {
         return 0;
     }

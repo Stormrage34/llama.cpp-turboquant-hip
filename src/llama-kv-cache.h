@@ -282,7 +282,9 @@ private:
     // TriAttention: active KV indices for sparse cache access.
     // Maps logical positions [0..n_active-1] to physical KV rows.
     // Empty = dense (all positions active, no indirection).
+    // Phase 3B: indirection state
     std::vector<int32_t> active_kv;
+    int32_t active_kv_real_len = 0; // unpadded logical length (padding entries are masked)
 
     friend class llama_kv_cache_context;
 
@@ -305,6 +307,7 @@ public:
     uint32_t get_used_n_kv() const;
     bool get_cell_positions(std::vector<llama_pos> & positions) const;
     bool triattention_compact(const std::vector<uint32_t> & keep_positions);
+    bool triattention_set_active(const std::vector<uint32_t> & keep_positions);
 private:
 
     // TurboQuant rotation matrices (128x128, row-major stored)
