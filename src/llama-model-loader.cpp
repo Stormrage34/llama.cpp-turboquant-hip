@@ -1349,7 +1349,7 @@ void llama_model_loader::init_mappings(bool prefetch, llama_mlocks * mlock_mmaps
             }
 
             std::unique_ptr<llama_mmap> mapping = std::make_unique<llama_mmap>(file.get(), prefetch ? -1 : 0, is_numa, use_hugepages);
-            mmaps_used.emplace_back(mapping->size(), 0);
+            mmaps_used.emplace_back(mapping->mmap_size(), 0);
             if (mlock_mmaps) {
                 std::unique_ptr<llama_mlock> mlock_mmap(new llama_mlock());
                 mlock_mmap->init(mapping->addr());
@@ -1693,7 +1693,7 @@ bool llama_model_loader::load_all_data(
 #endif
                 mapping->unmap_fragment(0, mmap_used.first);
                 if (mmap_used.second != 0) {
-                    mapping->unmap_fragment(mmap_used.second, mapping->size());
+                    mapping->unmap_fragment(mmap_used.second, mapping->mmap_size());
                 }
             }
         }

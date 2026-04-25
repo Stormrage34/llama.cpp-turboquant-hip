@@ -45,6 +45,9 @@
 #ifndef MAP_HUGETLB
 #define MAP_HUGETLB 0x40000
 #endif
+#ifndef MAP_HUGE_SHIFT
+#define MAP_HUGE_SHIFT 26
+#endif
 #ifndef MAP_HUGE_2MB
 #define MAP_HUGE_2MB (21 << MAP_HUGE_SHIFT)
 #endif
