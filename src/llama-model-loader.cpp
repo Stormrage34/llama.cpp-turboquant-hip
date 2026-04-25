@@ -7,11 +7,16 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <cinttypes>
 #include <cstdint>
 #include <cstring>
 #include <future>
 #include <regex>
+
+#ifdef __linux__
+#include <sys/mman.h>
+#endif
 
 static const size_t kiB = 1024;
 static const size_t MiB = 1024*kiB;
@@ -517,6 +522,7 @@ llama_model_loader::llama_model_loader(
         FILE * file,
         bool use_mmap,
         bool use_direct_io,
+        bool use_hugepages,
         bool check_tensors,
         bool no_alloc,
         const llama_model_kv_override * param_overrides_p,
@@ -816,6 +822,7 @@ llama_model_loader::llama_model_loader(
 
     this->use_mmap = use_mmap;
     this->use_direct_io = use_direct_io;
+    this->use_hugepages = use_hugepages;
     this->check_tensors = check_tensors;
     this->no_alloc = no_alloc;
 }
@@ -1341,8 +1348,8 @@ void llama_model_loader::init_mappings(bool prefetch, llama_mlocks * mlock_mmaps
                 }
             }
 
-            std::unique_ptr<llama_mmap> mapping = std::make_unique<llama_mmap>(file.get(), prefetch ? -1 : 0, is_numa);
-            mmaps_used.emplace_back(mapping->size(), 0);
+            std::unique_ptr<llama_mmap> mapping = std::make_unique<llama_mmap>(file.get(), prefetch ? -1 : 0, is_numa, use_hugepages);
+            mmaps_used.emplace_back(mapping->mmap_size(), 0);
             if (mlock_mmaps) {
                 std::unique_ptr<llama_mlock> mlock_mmap(new llama_mlock());
                 mlock_mmap->init(mapping->addr());
@@ -1536,6 +1543,14 @@ bool llama_model_loader::load_all_data(
             }
             uint8_t * data = (uint8_t *) mapping->addr() + weight->offs;
 
+            // Hugetlb mappings are anonymous and zero-filled; populate the
+            // region per-tensor before check_tensors / view alloc consume it.
+            if (mapping->is_hugetlb()) {
+                const auto & file = files.at(weight->idx);
+                file->seek(weight->offs, SEEK_SET);
+                file->read_raw(data, n_size);
+            }
+
             if (check_tensors) {
                 validation_result.emplace_back(std::async(std::launch::async, [cur, data, n_size] {
                     return std::make_pair(cur, ggml_validate_row_data(cur->type, data, n_size));
@@ -1666,9 +1681,19 @@ bool llama_model_loader::load_all_data(
             for (uint32_t idx = 0; idx < mappings.size(); idx++) {
                 const auto & mmap_used = mmaps_used.at(idx);
                 auto & mapping = mappings.at(idx);
+#ifdef __linux__
+                // Downgrade the hugetlb region to PROT_READ while it is still
+                // fully mapped — unmap_fragment below may drop 2 MiB chunks
+                // from the head/tail, so mprotect must come first.
+                if (mapping->is_hugetlb()) {
+                    if (mprotect(mapping->addr(), mapping->mmap_size(), PROT_READ)) {
+                        LLAMA_LOG_WARN("warning: mprotect(PROT_READ) failed: %s\n", strerror(errno));
+                    }
+                }
+#endif
                 mapping->unmap_fragment(0, mmap_used.first);
                 if (mmap_used.second != 0) {
-                    mapping->unmap_fragment(mmap_used.second, mapping->size());
+                    mapping->unmap_fragment(mmap_used.second, mapping->mmap_size());
                 }
             }
         }

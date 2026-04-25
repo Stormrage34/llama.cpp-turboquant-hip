@@ -574,6 +574,21 @@ static bool common_params_parse_ex(int argc, char ** argv, common_params_context
         throw std::invalid_argument("error: --prompt-cache-all not supported in interactive mode yet\n");
     }
 
+    // --hugepages compatibility checks. PR #1 covers weights on the --mmap path only;
+    // --no-mmap and --direct-io both route around the hugetlb branch, so surface the
+    // conflict at the user rather than silently ignoring the request. Linux-only.
+    if (params.use_hugepages) {
+#ifndef __linux__
+        throw std::invalid_argument("error: --hugepages is Linux only.\n");
+#endif
+        if (!params.use_mmap) {
+            throw std::invalid_argument("error: --hugepages requires --mmap. Coverage for --no-mmap is added in a follow-up PR. Drop --no-mmap to use --hugepages.\n");
+        }
+        if (params.use_direct_io) {
+            throw std::invalid_argument("error: --hugepages and --direct-io are incompatible. Drop one.\n");
+        }
+    }
+
     // handle model and download
     if (!skip_model_download) {
         auto res = common_params_handle_model(params.model, params.hf_token, params.offline);
@@ -2225,6 +2240,15 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
             params.use_mmap = value;
         }
     ).set_env("LLAMA_ARG_MMAP"));
+    add_opt(common_arg(
+        {"--hugepages"},
+        "back model weights with anonymous hugetlb 2 MiB pages (Linux only).\n"
+        "reserve the pool first with e.g. `sysctl -w vm.nr_hugepages=N` — no reboot required.\n"
+        "pinned in RAM, bypasses swap and page cache; primary win is vmemmap reclamation via HVO",
+        [](common_params & params) {
+            params.use_hugepages = true;
+        }
+    ).set_env("LLAMA_ARG_HUGEPAGES"));
     add_opt(common_arg(
         {"-dio", "--direct-io"},
         {"-ndio", "--no-direct-io"},
