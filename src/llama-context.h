@@ -1,10 +1,12 @@
 #pragma once
 
 #include "llama.h"
+#include "llama-ext.h"
 #include "llama-cparams.h"
 #include "llama-graph.h"
 #include "llama-adapter.h"
 #include "llama-impl.h"
+#include "llama-mtp.h"
 
 #include "ggml-cpp.h"
 #include "ggml-opt.h"
@@ -21,17 +23,6 @@ class llama_io_write_i;
 // "memory" as in abstract memory for the context
 struct llama_memory_i;
 struct llama_memory_context_i;
-
-// "memory" as in physical memory for a buffer type, in bytes
-struct llama_memory_breakdown_data {
-    size_t model   = 0; // memory allocated for the model
-    size_t context = 0; // memory allocated for the context
-    size_t compute = 0; // memory allocated for temporary compute buffers
-
-    size_t total() const {
-        return model + context + compute;
-    }
-};
 
 struct llama_context {
     // init scheduler and compute buffers, reserve worst-case graphs
@@ -78,6 +69,12 @@ struct llama_context {
     float * get_embeddings();
     float * get_embeddings_ith(int32_t i);
     float * get_embeddings_seq(llama_seq_id seq_id);
+
+    ggml_tensor * get_t_h_pre_norm() const;
+    ggml_tensor * get_t_mtp_out()    const;
+
+    void            set_mtp(llama_context * ctx_mtp_in);
+    llama_context * get_mtp() const { return mtp.ctx_mtp; }
 
     llama_token * get_sampled_tokens() const;
     llama_token   get_sampled_token_ith(int32_t idx);
@@ -172,7 +169,7 @@ struct llama_context {
     llama_perf_context_data perf_get_data() const;
     void perf_reset();
 
-    std::map<ggml_backend_buffer_type_t, llama_memory_breakdown_data> memory_breakdown() const;
+    llama_memory_breakdown memory_breakdown() const;
 
     //
     // training
@@ -243,6 +240,12 @@ private:
 
     llm_graph_cb graph_get_cb() const;
 
+    void handle_mtp_for_ubatch(
+            int32_t                n_tokens,
+            const llama_token    * tokens,
+            const llama_pos      * positions,
+            struct ggml_tensor   * t_h_pre_norm);
+
     // TODO: read/write lora adapters and cvec
     size_t state_write_data(llama_io_write_i & io);
     size_t state_read_data (llama_io_read_i  & io);
@@ -262,6 +265,8 @@ private:
     llama_adapter_loras_ptr loras;
 
     llama_cross cross; // TODO: tmp for handling cross-attention - need something better probably
+
+    llama_mtp mtp;
 
     std::unique_ptr<llama_memory_i> memory;
 
