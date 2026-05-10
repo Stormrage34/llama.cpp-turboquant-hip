@@ -581,6 +581,7 @@ extern "C" {
 
         GGML_OP_GLU,
 
+        GGML_OP_MTP,
         GGML_OP_COUNT,
     };
 
