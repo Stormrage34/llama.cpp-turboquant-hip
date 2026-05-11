@@ -559,20 +559,17 @@ static inline bool runtime_enable_rdn2_opt() {
     const char *e = getenv("RDNA2_OPT_V1");
     if (!e || strcmp(e, "1") != 0) return false;
 
-    // check device name contains gfx1030
+    // Enable only on devices identified as RDNA2 (gfx1030 family).
     const int dev = ggml_cuda_get_device();
     const auto &info = ggml_cuda_info().devices[dev];
-#ifdef __cplusplus
-    std::string nm = info.smpb ? std::string("gfx1030") : std::string();
-    // Fallback: info struct may not expose arch string; check device name if present
-    // Attempt to locate 'gfx1030' in device description if available (ggml_cuda_info may expose it in debug output)
-    // Use device warp_size/sample to avoid build failure if no name field exists
-    // If device struct has no name, conservatively return false
-    (void)nm;
-#endif
-    // Attempt to find gfx1030 in the ASCII representation printed at init (best-effort)
-    // If ggml_cuda_info does not provide name, rely on env gate only
-    return true;
+    const int cc = info.cc;
+
+    // GGML provides a macro to detect RDNA2 range
+    if (GGML_CUDA_CC_IS_RDNA2(cc)) {
+        return true;
+    }
+
+    return false;
 }
 
 // Exposed test wrappers to call baseline and RDNA2 variants directly
