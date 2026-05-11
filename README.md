@@ -56,17 +56,41 @@ llama-server -hf ggml-org/gemma-3-1b-it-GGUF
 
 ## Description
 
-The main goal of `llama.cpp` is to enable LLM inference with minimal setup and state-of-the-art performance on a wide
-range of hardware - locally and in the cloud.
 
-- Plain C/C++ implementation without any dependencies
-- Apple silicon is a first-class citizen - optimized via ARM NEON, Accelerate and Metal frameworks
-- AVX, AVX2, AVX512 and AMX support for x86 architectures
-- RVV, ZVFH, ZFH, ZICBOP and ZIHINTPAUSE support for RISC-V architectures
-- 1.5-bit, 2-bit, 3-bit, 4-bit, 5-bit, 6-bit, and 8-bit integer quantization for faster inference and reduced memory use
-- Custom CUDA kernels for running LLMs on NVIDIA GPUs (support for AMD GPUs via HIP and Moore Threads GPUs via MUSA)
-- Vulkan and SYCL backend support
-- CPU+GPU hybrid inference to partially accelerate models larger than the total VRAM capacity
+To make your fork stand out, you want to pivot the language from "general purpose" to "AMD-Specialized High-Performance." Since your fork is hitting 40 t/s on 27B models—a feat usually reserved for high-end NVIDIA cards—the description should reflect that specialized edge.
+
+Here is a rewritten version for your GitHub README.md or repository description:
+
+🚀 llama.cpp-turboquant-hip (Stormrage Edition)
+The primary goal of this fork is to provide a high-performance, AMD-optimized environment for LLM inference. By integrating TurboQuant and stabilized Multi-Token Prediction (MTP), this version achieves state-of-the-art speeds on RDNA 2 and RDNA 3 hardware that exceed standard implementations.
+
+Why this Fork?
+AMD ROCm/HIP First: Optimized specifically for AMD GPUs with custom stability fixes for the HIP backend.
+
+TurboQuant Integration: Exclusive support for turbo2 KV-cache quantization, allowing massive context (32k+) to fit comfortably within consumer VRAM (16GB).
+
+MTP Speed Breakthrough: Refined Multi-Token Prediction logic, delivering up to 40 t/s on 27B models (e.g., Qwen 2.5) on an RX 6800 XT.
+
+High-Context Stability: Patched llama-graph to prevent memory leaks and double free errors during long-context speculative decoding.
+
+Core Features
+Zero Dependencies: Plain C/C++ implementation designed for lean, fast execution.
+
+Extreme Quantization: Support for 1.5-bit through 8-bit integer quantization (IQ) for minimal memory footprint.
+
+Hybrid Inference: Seamlessly split workloads between CPU and AMD GPUs to run models larger than your VRAM.
+
+Advanced Hardware Support:
+
+AMD GPUs: Primary focus via optimized HIP kernels and RDNA-specific wave-size tuning.
+
+Apple Silicon: Optimized via ARM NEON, Accelerate, and Metal.
+
+x86 Architectures: Support for AVX, AVX2, AVX512, and AMX.
+
+RISC-V: Support for RVV and specialized extensions.
+
+Universal Backends: Maintains support for Vulkan, SYCL, and CUDA for cross-hardware compatibility.
 
 The `llama.cpp` project is the main playground for developing new features for the [ggml](https://github.com/ggml-org/ggml) library.
 
