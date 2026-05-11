@@ -14,6 +14,29 @@
 #define DO_PRAGMA(x) _Pragma(#x)
 #define PRAGMA_UNROLL_2 DO_PRAGMA(unroll 2)
 #define PRAGMA_UNROLL_4 DO_PRAGMA(unroll 4)
+#define PRAGMA_DEQ_UNROLL PRAGMA_UNROLL_2
+
+#ifndef DEQ_UNROLL_LEVEL
+#define DEQ_UNROLL_LEVEL 2
+#endif
+#if DEQ_UNROLL_LEVEL == 4
+#define PRAGMA_DEQ_UNROLL _Pragma("unroll 4")
+#elif DEQ_UNROLL_LEVEL == 2
+#define PRAGMA_DEQ_UNROLL _Pragma("unroll 2")
+#else
+#define PRAGMA_DEQ_UNROLL _Pragma("unroll")
+#endif
+
+// AMD BFE (Bit Field Extract) macro for RDNA2 optimization
+// This pattern is recognized by the AMD LLVM compiler and emitted as v_bfe_u32 instruction
+// Usage: AMD_BFE(value, offset, width) extracts 'width' bits starting at 'offset'
+#if defined(__gfx1030__)
+// RDNA2 specific: use explicit BFE pattern for v_bfe_u32 generation
+#define AMD_BFE(val, offset, width) (((val) >> (offset)) & ((1u << (width)) - 1u))
+#else
+// Fallback for non-RDNA2: use standard shift/mask
+#define AMD_BFE(val, offset, width) (((val) >> (offset)) & ((1u << (width)) - 1u))
+#endif
 
 
 #define FATTN_KQ_STRIDE       256
@@ -337,9 +360,10 @@ static __device__ __forceinline__ float vec_dot_fattn_vec_KQ_turbo3_0(
             const uint8_t   sgn_byte = K_turbo[ib].signs[j0 / 8];   // covers both j0 and j0+1
 
             // Extract 3-bit indices for elem0 and elem1 from shared bytes
+            // Use AMD BFE pattern for RDNA2 v_bfe_u32 instruction optimization
             const int     shift  = (j0 % 4) * 2;                     // 0 or 4
-            const uint8_t idx0   = ((qs_byte >> shift)     & 0x3) | (((sgn_byte >> (j0 % 8))     & 0x1) << 2);
-            const uint8_t idx1   = ((qs_byte >> (shift+2)) & 0x3) | (((sgn_byte >> (j0 % 8 + 1)) & 0x1) << 2);
+            const uint8_t idx0   = AMD_BFE(qs_byte, shift, 2) | (AMD_BFE(sgn_byte, j0 % 8, 1) << 2);
+            const uint8_t idx1   = AMD_BFE(qs_byte, shift+2, 2) | (AMD_BFE(sgn_byte, (j0 % 8) + 1, 1) << 2);
 
             float2 kv;
             kv.x = TURBO_CENTROIDS_3BIT[idx0] * norm;
@@ -386,9 +410,10 @@ static __device__ __forceinline__ float vec_dot_fattn_vec_KQ_turbo2_0(
             const float     norm     = __half2float(K_turbo[ib].norm);
             const uint8_t   qs_byte  = K_turbo[ib].qs[j0 / 4];
 
+            // Use AMD BFE pattern for RDNA2 v_bfe_u32 instruction optimization
             const int     shift  = (j0 % 4) * 2;
-            const uint8_t idx0   = (qs_byte >> shift)     & 0x3;
-            const uint8_t idx1   = (qs_byte >> (shift+2)) & 0x3;
+            const uint8_t idx0   = AMD_BFE(qs_byte, shift, 2);
+            const uint8_t idx1   = AMD_BFE(qs_byte, shift+2, 2);
 
             float2 kv;
             kv.x = TURBO_CENTROIDS_2BIT[idx0] * norm;
@@ -436,8 +461,9 @@ static __device__ __forceinline__ float vec_dot_fattn_vec_KQ_turbo4_0(
             // Both j0 and j0+1 are adjacent nibbles: j0/2 == (j0+1)/2 when j0 is even
             const uint8_t qs_byte = K_turbo[ib].qs[j0 / 2];
 
-            const uint8_t idx0 = (qs_byte >> 0) & 0xF;    // low nibble = j0
-            const uint8_t idx1 = (qs_byte >> 4) & 0xF;    // high nibble = j0+1
+            // Use AMD BFE pattern for RDNA2 v_bfe_u32 instruction optimization (4-bit extraction)
+            const uint8_t idx0 = AMD_BFE(qs_byte, 0, 4);    // low nibble = j0
+            const uint8_t idx1 = AMD_BFE(qs_byte, 4, 4);    // high nibble = j0+1
 
             float2 kv;
             kv.x = TURBO_CENTROIDS_4BIT[idx0] * norm;
@@ -767,10 +793,11 @@ static __device__ __forceinline__ void dequantize_V_turbo3_0(const void * __rest
         const uint8_t sgn_byte = x[ib].signs[j0 / 8];
         const int     shift_s  = j0 % 8;   // 0 or 4
 
-        const uint8_t idx0 = ((qs_byte >> 0) & 0x3) | (((sgn_byte >> (shift_s+0)) & 0x1) << 2);
-        const uint8_t idx1 = ((qs_byte >> 2) & 0x3) | (((sgn_byte >> (shift_s+1)) & 0x1) << 2);
-        const uint8_t idx2 = ((qs_byte >> 4) & 0x3) | (((sgn_byte >> (shift_s+2)) & 0x1) << 2);
-        const uint8_t idx3 = ((qs_byte >> 6) & 0x3) | (((sgn_byte >> (shift_s+3)) & 0x1) << 2);
+        // Use AMD BFE pattern for RDNA2 v_bfe_u32 instruction optimization
+        const uint8_t idx0 = AMD_BFE(qs_byte, 0, 2) | (AMD_BFE(sgn_byte, shift_s+0, 1) << 2);
+        const uint8_t idx1 = AMD_BFE(qs_byte, 2, 2) | (AMD_BFE(sgn_byte, shift_s+1, 1) << 2);
+        const uint8_t idx2 = AMD_BFE(qs_byte, 4, 2) | (AMD_BFE(sgn_byte, shift_s+2, 1) << 2);
+        const uint8_t idx3 = AMD_BFE(qs_byte, 6, 2) | (AMD_BFE(sgn_byte, shift_s+3, 1) << 2);
 
 #ifdef FP16_AVAILABLE
         if constexpr (std::is_same_v<T, half>) {
@@ -806,8 +833,9 @@ static __device__ __forceinline__ void dequantize_V_turbo3_0(const void * __rest
             const uint8_t sgn_byte = x[ib].signs[j0 / 8];
             const int shift = (j0 % 4) * 2;
 
-            const uint8_t idx0 = ((qs_byte >> shift)     & 0x3) | (((sgn_byte >> (j0 % 8))     & 0x1) << 2);
-            const uint8_t idx1 = ((qs_byte >> (shift+2)) & 0x3) | (((sgn_byte >> ((j0 % 8) + 1)) & 0x1) << 2);
+            // Use AMD BFE pattern for RDNA2 v_bfe_u32 instruction optimization
+            const uint8_t idx0 = AMD_BFE(qs_byte, shift, 2) | (AMD_BFE(sgn_byte, j0 % 8, 1) << 2);
+            const uint8_t idx1 = AMD_BFE(qs_byte, shift+2, 2) | (AMD_BFE(sgn_byte, (j0 % 8) + 1, 1) << 2);
 
             // Unrolled stores for 2 elements (keep minimal instruction count)
             ((float *) dst)[0] = TURBO_CENTROIDS_3BIT[idx0] * norm;
@@ -832,10 +860,11 @@ static __device__ __forceinline__ void dequantize_V_turbo2_0(const void * __rest
     if constexpr (ne == 4) {
         const uint8_t qs_byte = x[ib].qs[j0 / 4];
 
-        const uint8_t idx0 = (qs_byte >> 0) & 0x3;
-        const uint8_t idx1 = (qs_byte >> 2) & 0x3;
-        const uint8_t idx2 = (qs_byte >> 4) & 0x3;
-        const uint8_t idx3 = (qs_byte >> 6) & 0x3;
+        // Use AMD BFE pattern for RDNA2 v_bfe_u32 instruction optimization
+        const uint8_t idx0 = AMD_BFE(qs_byte, 0, 2);
+        const uint8_t idx1 = AMD_BFE(qs_byte, 2, 2);
+        const uint8_t idx2 = AMD_BFE(qs_byte, 4, 2);
+        const uint8_t idx3 = AMD_BFE(qs_byte, 6, 2);
 
 #ifdef FP16_AVAILABLE
         if constexpr (std::is_same_v<T, half>) {
@@ -892,10 +921,11 @@ static __device__ __forceinline__ void dequantize_V_turbo4_0(const void * __rest
         const uint8_t qs_byte0 = x[ib].qs[j0 / 2];      // elements j0, j0+1
         const uint8_t qs_byte1 = x[ib].qs[j0 / 2 + 1];  // elements j0+2, j0+3
 
-        const uint8_t idx0 = (qs_byte0 >> 0) & 0xF;
-        const uint8_t idx1 = (qs_byte0 >> 4) & 0xF;
-        const uint8_t idx2 = (qs_byte1 >> 0) & 0xF;
-        const uint8_t idx3 = (qs_byte1 >> 4) & 0xF;
+        // Use AMD BFE pattern for RDNA2 v_bfe_u32 instruction optimization (4-bit extraction)
+        const uint8_t idx0 = AMD_BFE(qs_byte0, 0, 4);
+        const uint8_t idx1 = AMD_BFE(qs_byte0, 4, 4);
+        const uint8_t idx2 = AMD_BFE(qs_byte1, 0, 4);
+        const uint8_t idx3 = AMD_BFE(qs_byte1, 4, 4);
 
 #ifdef FP16_AVAILABLE
         if constexpr (std::is_same_v<T, half>) {
