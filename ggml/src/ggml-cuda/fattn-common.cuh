@@ -792,8 +792,16 @@ static __device__ __forceinline__ void dequantize_V_turbo3_0(const void * __rest
         } else
 #endif // FP16_AVAILABLE
         if constexpr (std::is_same_v<T, float>) {
-            ((float *) dst)[0] = turbo3_dequant_element(&x[ib], j0,   norm);
-            ((float *) dst)[1] = turbo3_dequant_element(&x[ib], j0+1, norm);
+            // Hoist shared byte loads and compute both elements inline to reduce instructions
+            const uint8_t qs_byte  = x[ib].qs[j0 / 4];
+            const uint8_t sgn_byte = x[ib].signs[j0 / 8];
+            const int shift = (j0 % 4) * 2;
+
+            const uint8_t idx0 = ((qs_byte >> shift)     & 0x3) | (((sgn_byte >> (j0 % 8))     & 0x1) << 2);
+            const uint8_t idx1 = ((qs_byte >> (shift+2)) & 0x3) | (((sgn_byte >> ((j0 % 8) + 1)) & 0x1) << 2);
+
+            ((float *) dst)[0] = TURBO_CENTROIDS_3BIT[idx0] * norm;
+            ((float *) dst)[1] = TURBO_CENTROIDS_3BIT[idx1] * norm;
         } else {
             static_assert(std::is_same_v<T, void>, "unsupported type");
         }
