@@ -7,6 +7,15 @@
 
 #include <cstdint>
 
+#ifndef DEQ_UNROLL_FACTOR
+#define DEQ_UNROLL_FACTOR 4
+#endif
+
+#define DO_PRAGMA(x) _Pragma(#x)
+#define PRAGMA_UNROLL_2 DO_PRAGMA(unroll 2)
+#define PRAGMA_UNROLL_4 DO_PRAGMA(unroll 4)
+
+
 #define FATTN_KQ_STRIDE       256
 #define HALF_MAX_HALF         __float2half(65504.0f/2) // Use neg. of this instead of -INFINITY to initialize KQ max vals to avoid NaN upon subtraction.
 #define SOFTMAX_FTZ_THRESHOLD -20.0f                   // Softmax exp. of values smaller than this are flushed to zero to avoid NaNs.
@@ -545,7 +554,7 @@ static __device__ __forceinline__ void dequantize_V_q4_0(const void * __restrict
     if constexpr (std::is_same_v<T, half>) {
         const half2 d = __half2half2(x[ib].d);
 
-#pragma unroll
+#pragma unroll 2
         for (int l0 = 0; l0 < ne; l0 += 2) {
             ((half2 *) dst)[l0/2] = d * make_half2(q8[l0 + 0], q8[l0 + 1]);
         }
@@ -554,7 +563,7 @@ static __device__ __forceinline__ void dequantize_V_q4_0(const void * __restrict
     if constexpr (std::is_same_v<T, float>) {
         const float d = x[ib].d;
 
-#pragma unroll
+#pragma unroll 2
         for (int l = 0; l < ne; ++l) {
             ((float *) dst)[l] = d * q8[l];
         }
@@ -800,6 +809,7 @@ static __device__ __forceinline__ void dequantize_V_turbo3_0(const void * __rest
             const uint8_t idx0 = ((qs_byte >> shift)     & 0x3) | (((sgn_byte >> (j0 % 8))     & 0x1) << 2);
             const uint8_t idx1 = ((qs_byte >> (shift+2)) & 0x3) | (((sgn_byte >> ((j0 % 8) + 1)) & 0x1) << 2);
 
+            // Unrolled stores for 2 elements (keep minimal instruction count)
             ((float *) dst)[0] = TURBO_CENTROIDS_3BIT[idx0] * norm;
             ((float *) dst)[1] = TURBO_CENTROIDS_3BIT[idx1] * norm;
         } else {
