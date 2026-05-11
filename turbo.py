@@ -1,63 +1,37 @@
 import os
-import re
 
-def fix_ggml_h(filepath):
-    """Fixes the GGML Type enum to include TQ and MTP types without overlap."""
-    with open(filepath, 'r') as f:
-        content = f.read()
+def surgical_fix():
+    file_path = 'src/llama-graph.cpp'
 
-    # Pattern to find the conflict block in ggml_type
-    # This replaces the messy conflict with a clean, combined list
-    pattern = r"<<<<<<< HEAD.*?GGML_TYPE_COUNT\s+=\s+\d+,?\n=======\n.*?GGML_TYPE_COUNT\s+=\s+\d+,?\n>>>>>>>.*?"
-    
-    replacement = """        GGML_TYPE_TURBO3_0 = 41,
-        GGML_TYPE_TURBO4_0 = 42,
-        GGML_TYPE_TURBO2_0 = 43,
-        GGML_TYPE_TQ3_1S   = 44,
-        GGML_TYPE_TQ4_1S   = 45,
-        GGML_TYPE_Q1_0     = 46,
-        GGML_TYPE_COUNT    = 47,"""
-
-    new_content = re.sub(pattern, replacement, content, flags=re.DOTALL)
-    
-    with open(filepath, 'w') as f:
-        f.write(new_content)
-    print(f"✓ Fixed Enums in {filepath}")
-
-def clean_conflict_markers(filepath):
-    """Automatically keeps BOTH blocks of code and removes the Git markers."""
-    if not os.path.exists(filepath):
+    if not os.path.exists(file_path):
+        print(f"Error: {file_path} not found. Are you in the root of the repo?")
         return
-    
-    with open(filepath, 'r') as f:
+
+    with open(file_path, 'r') as f:
         lines = f.readlines()
 
-    new_lines = []
-    for line in lines:
-        # We delete the markers but keep everything in between
-        if not any(marker in line for marker in ["<<<<<<<", "=======", ">>>>>>>"]):
-            new_lines.append(line)
-            
-    with open(filepath, 'w') as f:
-        f.writelines(new_lines)
-    print(f"✓ Stripped markers from {filepath}")
+    # The compiler says line 2547 is where the 'inner' function starts.
+    # We need to close the previous block before that line.
+    # Python indices are 0-based, so line 2547 is index 2546.
+    target_index = 2546
 
-# --- Execution ---
-files_to_strip = [
-    "ggml/src/ggml-cuda/ggml-cuda.cu",
-    "include/llama.h",
-    "src/llama-graph.cpp",
-    "src/llama-mmap.cpp",
-    "ggml/src/ggml.c"
-]
+    # Check if we already fixed it to avoid double-bracing
+    if "}" not in lines[target_index - 1]:
+        print(f"Inserting brace before line 2547...")
+        # We insert a newline and a closing brace
+        lines.insert(target_index, "\n}\n")
 
-print("Starting automatic conflict resolution...")
+        # Now, let's clean any lingering conflict markers which usually cause this
+        cleaned_lines = []
+        for line in lines:
+            if not any(m in line for m in ["<<<<<<<", "=======", ">>>>>>>"]):
+                cleaned_lines.append(line)
 
-# 1. Specialized fix for the Header file
-fix_ggml_h("ggml/include/ggml.h")
+        with open(file_path, 'w') as f:
+            f.writelines(cleaned_lines)
+        print("✓ Repair finished. Conflict markers (if any) removed.")
+    else:
+        print("! A brace already exists near that line. Let's try a different approach.")
 
-# 2. General strip for the logic files (keeping both sides)
-for file in files_to_strip:
-    clean_conflict_markers(file)
-
-print("\nAll markers removed. Please verify your files before compiling.")
+if __name__ == "__main__":
+    surgical_fix()
