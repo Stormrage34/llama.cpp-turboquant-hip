@@ -434,7 +434,7 @@ extern "C" {
         GGML_TYPE_TQ3_1S   = 44,
         GGML_TYPE_TQ4_1S   = 45,
         GGML_TYPE_Q1_0     = 46,
-        GGML_TYPE_COUNT    = 47, 5d5f1b46e4f56885801c86363d4677a5f72f83af
+        GGML_TYPE_COUNT    = 47,
     };
 
     // precision
