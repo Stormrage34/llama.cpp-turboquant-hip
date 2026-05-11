@@ -1,5 +1,8 @@
 #include "convert.cuh"
 #include "dequantize.cuh"
+#ifdef RDNA2_OPT_V1
+#include "iq4_dequant_rdn2.cu"
+#endif
 #include "turbo-quant.cuh"
 
 #include <cstdint>
@@ -507,10 +510,47 @@ static void dequantize_block_q8_0_f16_cuda(const void * __restrict__ vx, half * 
     const int num_blocks = (k + CUDA_Q8_0_NE_ALIGN - 1) / CUDA_Q8_0_NE_ALIGN;
     if (k % CUDA_Q8_0_NE_ALIGN == 0) {
         const bool need_check = false;
+        // Runtime & compile-time guarded RDNA2 optimized variant
+#ifdef RDNA2_OPT_V1
+        // runtime check: env var + device arch
+        bool launch_rdn2 = false;
+        const char *e = getenv("RDNA2_OPT_V1");
+        if (e && strcmp(e, "1") == 0) {
+            const int cc = ggml_cuda_info().devices[ggml_cuda_get_device()].cc;
+            // Treat cc>0 as a device; gfx1030 mapping uses warp_size and cc values – keep conservative
+            if (cc != 0) {
+                // We can't easily parse 'gfx1030' here; enable only if env var present (strict gate)
+                launch_rdn2 = true;
+            }
+        }
+        if (launch_rdn2) {
+            dequantize_block_q8_0_f16_rdn2<need_check><<<num_blocks, WARP_SIZE, 0, stream>>>(vx, y, k);
+        } else {
+            dequantize_block_q8_0_f16<need_check><<<num_blocks, WARP_SIZE, 0, stream>>>(vx, y, k);
+        }
+#else
         dequantize_block_q8_0_f16<need_check><<<num_blocks, WARP_SIZE, 0, stream>>>(vx, y, k);
+#endif
     } else {
         const bool need_check = true;
+        // Runtime & compile-time guarded RDNA2 optimized variant
+#ifdef RDNA2_OPT_V1
+        bool launch_rdn2 = false;
+        const char *e = getenv("RDNA2_OPT_V1");
+        if (e && strcmp(e, "1") == 0) {
+            const int cc = ggml_cuda_info().devices[ggml_cuda_get_device()].cc;
+            if (cc != 0) {
+                launch_rdn2 = true;
+            }
+        }
+        if (launch_rdn2) {
+            dequantize_block_q8_0_f16_rdn2<need_check><<<num_blocks, WARP_SIZE, 0, stream>>>(vx, y, k);
+        } else {
+            dequantize_block_q8_0_f16<need_check><<<num_blocks, WARP_SIZE, 0, stream>>>(vx, y, k);
+        }
+#else
         dequantize_block_q8_0_f16<need_check><<<num_blocks, WARP_SIZE, 0, stream>>>(vx, y, k);
+#endif
     }
 }
 
