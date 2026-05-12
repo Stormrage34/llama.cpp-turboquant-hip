@@ -200,6 +200,20 @@ llama_build_and_test(test-chat-auto-parser.cpp WORKING_DIRECTORY ${PROJECT_SOURC
 llama_build_and_test(test-chat-template.cpp)
 llama_build_and_test(test-json-partial.cpp)
 llama_build_and_test(test-log.cpp)
+
+# RDNA2 HIP tests: unit + microbench
+add_executable(test_dequant_rdn2 hip/test_dequant_rdn2.cpp)
+target_include_directories(test_dequant_rdn2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../ggml/src $ENV{ROCM_PATH}/include)
+target_compile_definitions(test_dequant_rdn2 PRIVATE RDNA2_OPT_V1 __HIP_PLATFORM_AMD__)
+set_source_files_properties(hip/test_dequant_rdn2.cpp PROPERTIES LANGUAGE CXX)
+target_link_directories(test_dequant_rdn2 PRIVATE ${CMAKE_BINARY_DIR}/bin $ENV{ROCM_PATH}/lib)
+target_link_libraries(test_dequant_rdn2 PRIVATE llama-common ggml-hip amdhip64)
+add_custom_command(TARGET test_dequant_rdn2 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E echo "Note: iq4_dequant_rdn2.o must be manually linked"
+)
+llama_test(test_dequant_rdn2 NAME test-dequant-rdn2)
+llama_build(hip/dequant_microbench.cu)
+
 llama_build_and_test(
     test-peg-parser.cpp
     peg-parser/simple-tokenize.cpp

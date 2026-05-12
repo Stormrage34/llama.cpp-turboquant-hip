@@ -506,54 +506,6 @@ static void dequantize_block_cont_cuda(const void * __restrict__ vx, dst_t * __r
     dequantize_block_cuda<qk, qr, dequantize_kernel, dst_t>(vx, y, k, 1, 1, 1, k/qk, k/qk, k/qk, stream);
 }
 
-static void dequantize_block_q8_0_f16_cuda(const void * __restrict__ vx, half * __restrict__ y, const int64_t k, cudaStream_t stream) {
-    const int num_blocks = (k + CUDA_Q8_0_NE_ALIGN - 1) / CUDA_Q8_0_NE_ALIGN;
-    if (k % CUDA_Q8_0_NE_ALIGN == 0) {
-        const bool need_check = false;
-        // Runtime & compile-time guarded RDNA2 optimized variant
-#ifdef RDNA2_OPT_V1
-        // runtime check: env var + device arch
-        bool launch_rdn2 = false;
-        const char *e = getenv("RDNA2_OPT_V1");
-        if (e && strcmp(e, "1") == 0) {
-            const int cc = ggml_cuda_info().devices[ggml_cuda_get_device()].cc;
-            // Treat cc>0 as a device; gfx1030 mapping uses warp_size and cc values – keep conservative
-            if (cc != 0) {
-                // We can't easily parse 'gfx1030' here; enable only if env var present (strict gate)
-                launch_rdn2 = true;
-            }
-        }
-        if (runtime_enable_rdn2_opt()) {
-            dequantize_block_q8_0_f16_rdn2<need_check><<<num_blocks, WARP_SIZE, 0, stream>>>(vx, y, k);
-        } else {
-            dequantize_block_q8_0_f16<need_check><<<num_blocks, WARP_SIZE, 0, stream>>>(vx, y, k);
-        }
-#else
-        dequantize_block_q8_0_f16<need_check><<<num_blocks, WARP_SIZE, 0, stream>>>(vx, y, k);
-#endif
-    } else {
-        const bool need_check = true;
-        // Runtime & compile-time guarded RDNA2 optimized variant
-#ifdef RDNA2_OPT_V1
-        bool launch_rdn2 = false;
-        const char *e = getenv("RDNA2_OPT_V1");
-        if (e && strcmp(e, "1") == 0) {
-            const int cc = ggml_cuda_info().devices[ggml_cuda_get_device()].cc;
-            if (cc != 0) {
-                launch_rdn2 = true;
-            }
-        }
-        if (runtime_enable_rdn2_opt()) {
-            dequantize_block_q8_0_f16_rdn2<need_check><<<num_blocks, WARP_SIZE, 0, stream>>>(vx, y, k);
-        } else {
-            dequantize_block_q8_0_f16<need_check><<<num_blocks, WARP_SIZE, 0, stream>>>(vx, y, k);
-        }
-#else
-        dequantize_block_q8_0_f16<need_check><<<num_blocks, WARP_SIZE, 0, stream>>>(vx, y, k);
-#endif
-    }
-}
-
 // Runtime gate helper (explicit gfx1030 check)
 static inline bool runtime_enable_rdn2_opt() {
     const char *e = getenv("RDNA2_OPT_V1");
@@ -572,6 +524,17 @@ static inline bool runtime_enable_rdn2_opt() {
     return false;
 }
 
+static void dequantize_block_q8_0_f16_cuda(const void * __restrict__ vx, half * __restrict__ y, const int64_t k, cudaStream_t stream) {
+    const int num_blocks = (k + CUDA_Q8_0_NE_ALIGN - 1) / CUDA_Q8_0_NE_ALIGN;
+    if (k % CUDA_Q8_0_NE_ALIGN == 0) {
+        const bool need_check = false;
+        dequantize_block_q8_0_f16<need_check><<<num_blocks, WARP_SIZE, 0, stream>>>(vx, y, k);
+    } else {
+        const bool need_check = true;
+        dequantize_block_q8_0_f16<need_check><<<num_blocks, WARP_SIZE, 0, stream>>>(vx, y, k);
+    }
+}
+
 // Exposed test wrappers to call baseline and RDNA2 variants directly
 extern "C" void ggml_dequant_q8_0_baseline(const void * vx, half * y, const int64_t k) {
     const int num_blocks = (k + CUDA_Q8_0_NE_ALIGN - 1) / CUDA_Q8_0_NE_ALIGN;
@@ -584,17 +547,46 @@ extern "C" void ggml_dequant_q8_0_baseline(const void * vx, half * y, const int6
     }
 }
 
+// IQ4_XS baseline wrapper for unit testing
+extern "C" void ggml_dequant_iq4_xs_baseline(const void * vx, half * y, const int64_t k) {
+    const int nb = (k + 256 - 1) / 256;
+    dequantize_block_iq4_xs<<<nb, 32>>>(vx, y);
+}
+
 #ifdef RDNA2_OPT_V1
-extern "C" void ggml_dequant_q8_0_rdn2(const void * vx, half * y, const int64_t k) {
-    const int num_blocks = (k + CUDA_Q8_0_NE_ALIGN - 1) / CUDA_Q8_0_NE_ALIGN;
-    if (k % CUDA_Q8_0_NE_ALIGN == 0) {
-        const bool need_check = false;
-        dequantize_block_q8_0_f16_rdn2<need_check><<<num_blocks, WARP_SIZE>>>(vx, y, k);
+// Include RDNA2 kernel template definition
+#include "iq4_dequant_rdn2.cuh"
+
+// Local host wrapper for convert.cu (avoids extern linkage issues)
+template<typename dst_t>
+static void dequant_iq4_xs_rdn2_local(const void * vx, dst_t * y, const int64_t k, cudaStream_t stream) {
+    const int nb = (k + 256 - 1) / 256;
+    if (k % 256 == 0) {
+        dequantize_block_iq4_xs_rdn2<false><<<nb, 32, 0, stream>>>(vx, (half *)y, k);
     } else {
-        const bool need_check = true;
-        dequantize_block_q8_0_f16_rdn2<need_check><<<num_blocks, WARP_SIZE>>>(vx, y, k);
+        dequantize_block_iq4_xs_rdn2<true><<<nb, 32, 0, stream>>>(vx, (half *)y, k);
     }
 }
+
+#ifdef RDNA2_MODULE_CACHE
+// Module cache dispatch wrapper (Phase 2D)
+template<typename dst_t>
+static void dequant_iq4_xs_rdn2_module_local(const void * vx, dst_t * y, const int64_t k, cudaStream_t stream) {
+    rdn2_module_init();
+    if (!g_dequant_fn) {
+        // Fallback to standard launch
+        dequantize_block_iq4_xs_rdn2<false><<<(k + 255) / 256, 32, 0, stream>>>(vx, (half *)y, k);
+        return;
+    }
+
+    const int nb = (k + 256 - 1) / 256;
+    const void * p_vx = vx;
+    half * p_y = (half *)y;
+    const int64_t p_k = k;
+    void* args[] = { (void*)&p_vx, (void*)&p_y, (void*)&p_k };
+    hipModuleLaunchKernel(g_dequant_fn, nb, 1, 1, 32, 1, 1, 0, stream, args, nullptr);
+}
+#endif
 #endif
 
 template<typename dst_t>
@@ -691,6 +683,52 @@ static void dequantize_row_iq1_m_cuda(const void * vx, dst_t * y, const int64_t 
 
 template<typename dst_t>
 static void dequantize_row_iq4_xs_cuda(const void * vx, dst_t * y, const int64_t k, cudaStream_t stream) {
+#ifdef RDNA2_OPT_V1
+    if (runtime_enable_rdn2_opt()) {
+#ifdef RDNA2_ASYNC_PIPELINE
+        // Async pipeline: dedicated dequant stream + event-based sync
+        static cudaStream_t g_dequant_stream = nullptr;
+        static cudaEvent_t  g_dequant_done   = nullptr;
+        static bool         g_async_init     = false;
+
+        if (!g_async_init) {
+#ifdef RDNA2_MODULE_CACHE
+            rdn2_module_init(); // Pre-load module if caching enabled
+#endif
+            if (hipStreamCreate(&g_dequant_stream) != hipSuccess) {
+                fprintf(stderr, "RDNA2 async: failed to create dequant stream, falling back to sync\n");
+                dequant_iq4_xs_rdn2_local(vx, y, k, stream);
+                return;
+            }
+            if (hipEventCreate(&g_dequant_done) != hipSuccess) {
+                fprintf(stderr, "RDNA2 async: failed to create dequant event, falling back to sync\n");
+                hipStreamDestroy(g_dequant_stream);
+                g_dequant_stream = nullptr;
+                dequant_iq4_xs_rdn2_local(vx, y, k, stream);
+                return;
+            }
+            g_async_init = true;
+        }
+
+        // Launch dequant on dedicated stream (non-blocking to CPU)
+#ifdef RDNA2_MODULE_CACHE
+        dequant_iq4_xs_rdn2_module_local(vx, y, k, g_dequant_stream);
+#else
+        dequant_iq4_xs_rdn2_local(vx, y, k, g_dequant_stream);
+#endif
+
+        // Record completion event
+        hipEventRecord(g_dequant_done, g_dequant_stream);
+
+        // Make caller's stream wait for dequant completion
+        hipStreamWaitEvent(stream, g_dequant_done, 0);
+#else
+        // Synchronous path (Phase 2B behavior)
+        dequant_iq4_xs_rdn2_local(vx, y, k, stream);
+#endif
+        return;
+    }
+#endif
     const int nb = (k + QK_K - 1) / QK_K;
     dequantize_block_iq4_xs<<<nb, 32, 0, stream>>>(vx, y);
 }

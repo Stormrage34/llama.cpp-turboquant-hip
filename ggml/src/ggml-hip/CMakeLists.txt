@@ -61,6 +61,8 @@ file(GLOB   GGML_HEADERS_ROCM "../ggml-cuda/*.cuh")
 list(APPEND GGML_HEADERS_ROCM "../../include/ggml-cuda.h")
 
 file(GLOB   GGML_SOURCES_ROCM "../ggml-cuda/*.cu")
+# iq4_dequant_rdn2.cu is #include'd in convert.cu (compile-time gated), exclude from separate compilation
+list(FILTER GGML_SOURCES_ROCM EXCLUDE REGEX "iq4_dequant_rdn2\\.cu$")
 file(GLOB   SRCS "../ggml-cuda/template-instances/fattn-tile*.cu")
 # Exclude D>=576 tile kernels: exceed HIP local memory limit (67584 > 65536)
 list(FILTER SRCS EXCLUDE REGEX "dkq(576|640)")

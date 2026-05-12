@@ -3482,6 +3482,70 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
 
     constexpr int sz = sizeof(block_q8_1_mmq) / sizeof(int);
 
+#ifdef RDNA2_MATMUL_OPT_V1
+    // RDNA2 optimized: LDS double-buffering for tile_x
+    // Overlap loading of next tile_x with current vec_dot computation
+    // Requires 2x tile_x buffer space (prefetch buffer)
+    int * tile_x_next = tile_x + GGML_PAD(mmq_x*MMQ_TILE_Y_K, nwarps*warp_size);
+
+    // Prefetch first tile_x
+    load_tiles(x, tile_x, offset_x + kb0_start, tile_x_max_i, stride_row_x);
+    __syncthreads();
+
+    for (int kb0 = kb0_start; kb0 < kb0_stop; kb0 += blocks_per_iter) {
+        const int kb0_next = kb0 + blocks_per_iter;
+
+        // Load tile_y for current iteration
+        {
+            const int * by0 = y + ncols_y * (kb0 * qk / ne_block) * sz;
+#pragma unroll
+            for (int l0 = 0; l0 < mmq_x * MMQ_TILE_Y_K; l0 += nwarps * warp_size) {
+                int l = l0 + threadIdx.y*warp_size + threadIdx.x;
+                tile_y[l] = by0[l];
+            }
+        }
+
+        // Prefetch next tile_x while loading tile_y (overlap memory ops)
+        if (kb0_next < kb0_stop) {
+            load_tiles(x, tile_x_next, offset_x + kb0_next, tile_x_max_i, stride_row_x);
+        }
+
+        __syncthreads();
+
+        // Compute vec_dot with current tiles
+        vec_dot(tile_x, tile_y, sum, 0);
+
+        __syncthreads();
+
+        // Load second half of tile_y
+        {
+            const int * by0 = y + ncols_y * ((kb0 * qk / ne_block) * sz + sz);
+#pragma unroll
+            for (int l0 = 0; l0 < mmq_x * MMQ_TILE_Y_K; l0 += nwarps * warp_size) {
+                int l = l0 + threadIdx.y*warp_size + threadIdx.x;
+                tile_y[l] = by0[l];
+            }
+        }
+
+        __syncthreads();
+
+        // Compute second vec_dot
+        vec_dot(tile_x, tile_y, sum, MMQ_TILE_NE_K);
+
+        __syncthreads();
+
+        // Swap buffers: next becomes current
+        if (kb0_next < kb0_stop) {
+#pragma unroll
+            for (int l0 = 0; l0 < mmq_x * MMQ_TILE_Y_K; l0 += nwarps * warp_size) {
+                int l = l0 + threadIdx.y*warp_size + threadIdx.x;
+                tile_x[l] = tile_x_next[l];
+            }
+            __syncthreads();
+        }
+    }
+#else
+    // Original path (baseline)
     for (int kb0 = kb0_start; kb0 < kb0_stop; kb0 += blocks_per_iter) {
         load_tiles(x, tile_x, offset_x + kb0, tile_x_max_i, stride_row_x);
         {
@@ -3516,6 +3580,7 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
 
         __syncthreads();
     }
+#endif // RDNA2_MATMUL_OPT_V1
 
     if (fixup) {
         write_back(sum, ids_dst, tmp_fixup + blockIdx.x*(mmq_x*mmq_y), mmq_y, mmq_y, mmq_x);
