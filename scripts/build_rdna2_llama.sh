@@ -1,120 +1,163 @@
 #!/bin/bash
-# Phase 2E: RDNA2 Build Script for llama-bench and llama-server
-# Compiles with RDNA2 optimizations (Phase 2A-2D) using manual hipcc
-# Zero CMake changes - direct compilation wrapper
+# RDNA2 Build Script for llama.cpp-turboquant-hip
+# Compiles with RDNA2 optimizations for AMD GPUs (gfx1030/gfx1100)
+#
+# Usage:
+#   ./scripts/build_rdna2_llama.sh              # Build with all optimizations
+#   ./scripts/build_rdna2_llama.sh stable       # Build stable features only
+#   ./scripts/build_rdna2_llama.sh baseline     # Build without RDNA2 optimizations
 
 set -e
 
-# Configuration
-ROCM_PATH="/home/stormrage/rocm-7.13-nightly"
+# ─── Configuration ───────────────────────────────────────────────────────────
+# ROCm path — adjust if your installation differs
+ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
 HIPCC="${ROCM_PATH}/bin/hipcc"
-PROJECT_ROOT="/home/stormrage/llama.cpp-turboquant-hip"
+
+# Project paths — works from repo root
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${PROJECT_ROOT}/build"
 BIN_DIR="${BUILD_DIR}/bin"
 
-# RDNA2 optimization flags
-RDNA2_FLAGS="-DRDNA2_OPT_V1=1 -DRDNA2_ASYNC_PIPELINE=1 -DRDNA2_MATMUL_OPT_V1=1"
-OFFLOAD_ARCH="--offload-arch=gfx1030"
-OPT_LEVEL="-O3 -DNDEBUG"
+# Offload architecture (default: gfx1030 = RDNA2)
+OFFLOAD_ARCH="${OFFLOAD_ARCH:---offload-arch=gfx1030}"
 
-# Include paths (from compile_commands.json)
-INCLUDES_COMMON="-I${PROJECT_ROOT}/ggml/src/../include -I${PROJECT_ROOT}/src/../include -I${PROJECT_ROOT}/common/. -I${PROJECT_ROOT}/common/../vendor -I${PROJECT_ROOT}/tools/server -I${PROJECT_ROOT}/tools/server/../mtmd -I${PROJECT_ROOT}/tools/mtmd/. -I${PROJECT_ROOT} -I${ROCM_PATH}/include"
-
-INCLUDES_BENCH="${INCLUDES_COMMON}"
-INCLUDES_SERVER="${INCLUDES_COMMON}"
-
-# Library paths
-LIBS="-L${BIN_DIR} -lggml-hip -lggml-base -lggml-cpu -lggml -lllama -lllama-common -lamdhip64 -lpthread"
-
-# Colors for output
+# Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
-NC='\033[0m' # No Color
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
 
-echo -e "${GREEN}=== Phase 2E: RDNA2 Build Script ===${NC}"
-echo "ROCm Path: ${ROCM_PATH}"
-echo "HIPCC: ${HIPCC}"
-echo "Build Dir: ${BUILD_DIR}"
+# ─── Header ──────────────────────────────────────────────────────────────────
+echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════════════════╗${NC}"
+echo -e "${BOLD}${CYAN}║   llama.cpp-turboquant-hip — RDNA2 Build Script    ║${NC}"
+echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════════════════╝${NC}"
 echo ""
 
-# Verify prerequisites
-if [ ! -x "${HIPCC}" ]; then
-    echo -e "${RED}ERROR: hipcc not found at ${HIPCC}${NC}"
-    exit 1
-fi
-
-if [ ! -d "${BUILD_DIR}" ]; then
-    echo -e "${RED}ERROR: Build directory not found. Run CMake build first.${NC}"
-    exit 1
-fi
-
-# Check if baseline libraries exist
-for lib in libggml-hip.so libggml-base.so libggml.so libllama.so; do
-    if [ ! -f "${BIN_DIR}/${lib}" ]; then
-        echo -e "${YELLOW}WARNING: ${lib} not found in ${BIN_DIR}${NC}"
-        echo "Ensure baseline CMake build completed first."
-    fi
-done
-
-echo -e "${GREEN}Prerequisites verified.${NC}"
-echo ""
-
-# Build mode
-MODE="${1:-optimized}"
+# ─── Parse Mode ──────────────────────────────────────────────────────────────
+MODE="${1:-all}"
 
 case "${MODE}" in
+    all|optimized)
+        echo -e "${GREEN}Mode: ${BOLD}All optimizations${NC}"
+        echo "  - BFE dequantization kernel (stable)"
+        echo "  - Async pipeline (stable)"
+        echo "  - LDS double-buffer matmul (experimental)"
+        RDNA2_FLAGS="-DRDNA2_OPT_V1=1 -DRDNA2_ASYNC_PIPELINE=1 -DRDNA2_MATMUL_OPT_V1=1"
+        ;;
+    stable)
+        echo -e "${GREEN}Mode: ${BOLD}Stable only${NC}"
+        echo "  - BFE dequantization kernel"
+        echo "  - Async pipeline"
+        RDNA2_FLAGS="-DRDNA2_OPT_V1=1 -DRDNA2_ASYNC_PIPELINE=1"
+        ;;
     baseline)
-        echo -e "${YELLOW}Building BASELINE (no RDNA2 optimizations)...${NC}"
+        echo -e "${YELLOW}Mode: ${BOLD}Baseline (no RDNA2 optimizations)${NC}"
         RDNA2_FLAGS=""
         ;;
-    optimized)
-        echo -e "${GREEN}Building OPTIMIZED (RDNA2 Phase 2A-2D)...${NC}"
-        ;;
     *)
-        echo "Usage: $0 [baseline|optimized]"
+        echo "Usage: $0 [all|stable|baseline]"
+        echo ""
+        echo "  all       - Build with all RDNA2 optimizations (default)"
+        echo "  stable    - Build stable features only (production-ready)"
+        echo "  baseline  - Build without RDNA2 optimizations"
         exit 1
         ;;
 esac
 
 echo ""
-echo "Compiling llama-bench with RDNA2 flags: ${RDNA2_FLAGS}"
-echo ""
 
-# Compile llama-bench
-${HIPCC} ${OPT_LEVEL} ${OFFLOAD_ARCH} ${RDNA2_FLAGS} \
-    ${INCLUDES_BENCH} \
-    -o ${BIN_DIR}/llama-bench-rdna2 \
-    ${PROJECT_ROOT}/tools/llama-bench/llama-bench.cpp \
-    ${LIBS} \
-    -Wl,-rpath,${BIN_DIR} \
-    2>&1
+# ─── Prerequisites ───────────────────────────────────────────────────────────
+echo -e "${CYAN}Checking prerequisites...${NC}"
 
-if [ $? -eq 0 ]; then
-    echo -e "${GREEN}✓ llama-bench-rdna2 compiled successfully${NC}"
-else
-    echo -e "${RED}✗ llama-bench compilation failed${NC}"
+if [ ! -x "${HIPCC}" ]; then
+    echo -e "${RED}✗ hipcc not found at ${HIPCC}${NC}"
+    echo "  Set ROCM_PATH environment variable or install ROCm."
     exit 1
 fi
+echo -e "${GREEN}✓ hipcc: ${HIPCC}${NC}"
 
-echo ""
-echo "Compiling llama-server with RDNA2 flags: ${RDNA2_FLAGS}"
-echo ""
-echo "NOTE: llama-server requires full CMake build due to multi-file linking."
-echo "Using CMake-built server from ${BIN_DIR}/llama-server"
-echo ""
+if [ ! -d "${BUILD_DIR}" ]; then
+    echo -e "${RED}✗ Build directory not found: ${BUILD_DIR}${NC}"
+    echo "  Run CMake build first: cmake -S . -B build && cmake --build build"
+    exit 1
+fi
+echo -e "${GREEN}✓ Build dir: ${BUILD_DIR}${NC}"
 
-# Check if CMake-built server exists
-if [ -f "${BIN_DIR}/llama-server" ]; then
-    echo -e "${GREEN}✓ Using existing CMake-built llama-server${NC}"
-else
-    echo -e "${YELLOW}WARNING: llama-server not found. Run CMake build first.${NC}"
+MISSING_LIBS=0
+for lib in libggml-hip.so libggml-base.so libggml-cpu.so libggml.so libllama.so; do
+    if [ ! -f "${BIN_DIR}/${lib}" ] && [ ! -L "${BIN_DIR}/${lib}" ]; then
+        echo -e "${YELLOW}⚠ ${lib} not found in ${BIN_DIR}${NC}"
+        MISSING_LIBS=1
+    fi
+done
+if [ "${MISSING_LIBS}" -eq 0 ]; then
+    echo -e "${GREEN}✓ All baseline libraries present${NC}"
 fi
 
 echo ""
-echo -e "${GREEN}=== Build Complete ===${NC}"
-echo "Binaries:"
-echo "  ${BIN_DIR}/llama-bench-rdna2"
-echo "  ${BIN_DIR}/llama-server-rdna2"
+
+# ─── Build ───────────────────────────────────────────────────────────────────
+echo -e "${CYAN}Compiling llama-bench-rdna2...${NC}"
+echo "  Flags: ${RDNA2_FLAGS:-none}"
+echo "  Arch:  ${OFFLOAD_ARCH}"
 echo ""
-echo "Run with: RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 ${BIN_DIR}/llama-bench-rdna2 ..."
+
+# Include paths
+INCLUDES="-I${PROJECT_ROOT}/ggml/src/../include \
+-I${PROJECT_ROOT}/src/../include \
+-I${PROJECT_ROOT}/common/. \
+-I${PROJECT_ROOT}/common/../vendor \
+-I${PROJECT_ROOT}/tools/server \
+-I${PROJECT_ROOT}/tools/server/../mtmd \
+-I${PROJECT_ROOT}/tools/mtmd/. \
+-I${PROJECT_ROOT} \
+-I${ROCM_PATH}/include"
+
+LIBS="-L${BIN_DIR} -lggml-hip -lggml-base -lggml-cpu -lggml -lllama -lllama-common -lamdhip64 -lpthread"
+
+${HIPCC} -O3 -DNDEBUG ${OFFLOAD_ARCH} ${RDNA2_FLAGS} \
+    ${INCLUDES} \
+    -o "${BIN_DIR}/llama-bench-rdna2" \
+    "${PROJECT_ROOT}/tools/llama-bench/llama-bench.cpp" \
+    ${LIBS} \
+    -Wl,-rpath,"${BIN_DIR}" \
+    2>&1
+
+echo -e "${GREEN}✓ llama-bench-rdna2 compiled${NC}"
+
+# Check for llama-server
+if [ -f "${BIN_DIR}/llama-server" ]; then
+    echo -e "${GREEN}✓ llama-server found (CMake-built)${NC}"
+else
+    echo -e "${YELLOW}⚠ llama-server not found — run full CMake build:${NC}"
+    echo "  cmake --build build --target llama-server"
+fi
+
+# ─── Summary ─────────────────────────────────────────────────────────────────
+echo ""
+echo -e "${BOLD}${GREEN}╔══════════════════════════════════════════════════════╗${NC}"
+echo -e "${BOLD}${GREEN}║              Build Complete                          ║${NC}"
+echo -e "${BOLD}${GREEN}╚══════════════════════════════════════════════════════╝${NC}"
+echo ""
+echo -e "${BOLD}Binaries:${NC}"
+echo "  ${BIN_DIR}/llama-bench-rdna2"
+[ -f "${BIN_DIR}/llama-server" ] && echo "  ${BIN_DIR}/llama-server"
+echo ""
+
+if [ "${MODE}" != "baseline" ]; then
+    echo -e "${BOLD}Run with:${NC}"
+    if [ "${MODE}" = "stable" ]; then
+        echo "  RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 ${BIN_DIR}/llama-server -m model.gguf -ngl 99"
+    else
+        echo "  # Stable (production):"
+        echo "  RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 ${BIN_DIR}/llama-server -m model.gguf -ngl 99"
+        echo ""
+        echo "  # + Experimental MoE prefill (benchmark first):"
+        echo "  RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 RDNA2_MATMUL_OPT_V1=1 ${BIN_DIR}/llama-server -m model.gguf -ngl 99"
+    fi
+    echo ""
+    echo -e "${YELLOW}See docs/rdna2-experimental.md for details.${NC}"
+fi
