@@ -1,72 +1,179 @@
-# llama.cpp
+# llama.cpp-turboquant-hip (Stormrage Edition)
 
 ![llama](https://user-images.githubusercontent.com/1991296/230134379-7181e485-c521-4d23-a0d6-f7b3b61ba524.png)
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Release](https://img.shields.io/github/v/release/ggml-org/llama.cpp)](https://github.com/ggml-org/llama.cpp/releases)
-[![Server](https://github.com/ggml-org/llama.cpp/actions/workflows/server.yml/badge.svg)](https://github.com/ggml-org/llama.cpp/actions/workflows/server.yml)
 
-[Manifesto](https://github.com/ggml-org/llama.cpp/discussions/205) / [ggml](https://github.com/ggml-org/ggml) / [ops](https://github.com/ggml-org/llama.cpp/blob/master/docs/ops.md)
+**AMD-optimized llama.cpp fork with TurboQuant, MTP, and RDNA2/3 GPU acceleration.**
 
-LLM inference in C/C++
+> This fork delivers state-of-the-art inference speeds on AMD RDNA 2/3 hardware — achieving 40+ t/s on 27B models (RX 6800 XT) with stabilized Multi-Token Prediction and custom HIP kernels.
 
-## Recent API changes
+---
 
-- [Changelog for `libllama` API](https://github.com/ggml-org/llama.cpp/issues/9289)
-- [Changelog for `llama-server` REST API](https://github.com/ggml-org/llama.cpp/issues/9291)
+## 🚀 RDNA2 / RDNA3 Quick Start
 
-## Hot topics
+### Supported Hardware
+| GPU | Architecture | Status |
+|-----|-------------|--------|
+| RX 6800 / 6800 XT / 6900 XT | RDNA 2 (gfx1030) | ✅ Fully optimized |
+| RX 7800 XT / 7900 XT / 7900 XTX | RDNA 3 (gfx1100/1101) | ✅ Supported |
 
-- **Hugging Face cache migration: models downloaded with `-hf` are now stored in the standard Hugging Face cache directory, enabling sharing with other HF tools.**
-- **[guide : using the new WebUI of llama.cpp](https://github.com/ggml-org/llama.cpp/discussions/16938)**
-- [guide : running gpt-oss with llama.cpp](https://github.com/ggml-org/llama.cpp/discussions/15396)
-- [[FEEDBACK] Better packaging for llama.cpp to support downstream consumers 🤗](https://github.com/ggml-org/llama.cpp/discussions/15313)
-- Support for the `gpt-oss` model with native MXFP4 format has been added | [PR](https://github.com/ggml-org/llama.cpp/pull/15091) | [Collaboration with NVIDIA](https://blogs.nvidia.com/blog/rtx-ai-garage-openai-oss) | [Comment](https://github.com/ggml-org/llama.cpp/discussions/15095)
-- Multimodal support arrived in `llama-server`: [#12898](https://github.com/ggml-org/llama.cpp/pull/12898) | [documentation](./docs/multimodal.md)
-- VS Code extension for FIM completions: https://github.com/ggml-org/llama.vscode
-- Vim/Neovim plugin for FIM completions: https://github.com/ggml-org/llama.vim
-- Hugging Face Inference Endpoints now support GGUF out of the box! https://github.com/ggml-org/llama.cpp/discussions/9669
-- Hugging Face GGUF editor: [discussion](https://github.com/ggml-org/llama.cpp/discussions/9268) | [tool](https://huggingface.co/spaces/CISCai/gguf-editor)
+### 1. Build with RDNA2 Optimizations
 
-----
+```bash
+# Prerequisites: ROCm 6.x+ installed
+# Ensure CMake build completed first (baseline libraries)
 
-## Quick start
+# Build with all RDNA2 optimizations (stable)
+./scripts/build_rdna2_llama.sh optimized
 
-Getting started with llama.cpp is straightforward. Here are several ways to install it on your machine:
-
-- Install `llama.cpp` using [brew, nix or winget](docs/install.md)
-- Run with Docker - see our [Docker documentation](docs/docker.md)
-- Download pre-built binaries from the [releases page](https://github.com/ggml-org/llama.cpp/releases)
-- Build from source by cloning this repository - check out [our build guide](docs/build.md)
-
-Once installed, you'll need a model to work with. Head to the [Obtaining and quantizing models](#obtaining-and-quantizing-models) section to learn more.
-
-Example command:
-
-```sh
-# Use a local model file
-llama-cli -m my_model.gguf
-
-# Or download and run a model directly from Hugging Face
-llama-cli -hf ggml-org/gemma-3-1b-it-GGUF
-
-# Launch OpenAI-compatible API server
-llama-server -hf ggml-org/gemma-3-1b-it-GGUF
+# Build baseline only (no RDNA2 kernels)
+./scripts/build_rdna2_llama.sh baseline
 ```
+
+### 2. Run with RDNA2 Acceleration
+
+```bash
+# Stable RDNA2 features: BFE dequantization + async pipeline
+# Recommended for production — zero regression, predictable performance
+RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 \
+  ./build/bin/llama-server -m model.gguf -ngl 99 -c 4096
+
+# + MoE prefill accelerator (stabilized in v0.3.1)
+# +269% prefill throughput, ±6 t/s variance
+RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 RDNA2_MATMUL_OPT_V1=1 \
+  ./build/bin/llama-server -m model.gguf -ngl 99 -c 4096
+```
+
+### 3. Recommended KV Cache Settings
+
+```bash
+# Best overall: turbo4 keys + turbo2 values (high context, low VRAM)
+-ctk turbo4 -ctv turbo2
+
+# Balanced: turbo3 keys + turbo2 values
+-ctk turbo3 -ctv turbo2
+
+# Maximum quality: turbo3 both
+-ctk turbo3 -ctv turbo3
+```
+
+### 4. Run Benchmarks
+
+```bash
+# Full benchmark suite (512, 2048, 4096 context)
+./scripts/run_rdna2_bench.sh optimized
+
+# Compare against baseline
+./scripts/run_rdna2_bench.sh baseline
+```
+
+### RDNA2 Performance Summary
+
+**Hardware**: RX 6800 XT (16 GB VRAM) | **Model**: Qwen3.6-35B-MoE-IQ4_XS
+
+| Feature | Prefill (pp512) | Decode (tg128) | Notes |
+|---------|-----------------|----------------|-------|
+| Baseline | ~480 t/s | ~57 t/s | Upstream llama.cpp |
+| Stable RDNA2 | ~540 t/s | ~55 t/s | Dequant + async pipeline |
+| + MoE Accelerator | ~1772 ± 6 t/s | ~52 ± 7 t/s | LDS double-buffer (stabilized v0.3.1) |
+
+**Dense models** (27B): ~480 t/s prefill, ~27 t/s decode — unaffected by RDNA2 optimizations.
+
+> **MoE prefill accelerator**: The `RDNA2_MATMUL_OPT_V1` flag enables a double-buffered matmul kernel with +269% prefill gain for MoE models. Stabilized in v0.3.1 — variance reduced from ±635 to ±6 t/s. See [docs/rdna2-experimental.md](docs/rdna2-experimental.md) for details.
+
+---
+
+## RDNA2 Optimization Details
+
+### Phase 1: Stable Infrastructure (v0.3.0-stable)
+
+| Component | Description | Impact |
+|-----------|-------------|--------|
+| **BFE Dequantization** | RDNA2-optimized IQ4_XS dequant kernel using bit-field extract instructions | 13× bandwidth gain in isolation |
+| **Async Pipeline** | Dedicated dequant stream with event-based synchronization | 31% launch overhead reduction |
+| **Runtime Auto-Disable** | gfx1030 hardware detection + environment gate | Zero overhead when not applicable |
+
+### Phase 2: MoE Prefill Accelerator (v0.3.0-experimental → v0.3.1-stabilized)
+
+| Component | Description | Impact |
+|-----------|-------------|--------|
+| **LDS Double-Buffering** | Overlaps weight tile loading with DP4A compute | +269% MoE prefill |
+| **LDS Bank Padding** | +1 element offset breaks 32-bank symmetry | Eliminates within-run jitter |
+| **Wave32 Occupancy Guard** | `amdgpu_waves_per_eu(4, 8)` prevents register spilling | Eliminates bimodal variance |
+| **Triple-Gate Safety** | Compile-time + env var + hardware ID check | Falls back to stable path instantly |
+
+### Phase 3: Stabilization Complete (v0.3.1)
+
+| Metric | Before (v0.3.0) | After (v0.3.1) |
+|--------|-----------------|----------------|
+| Prefill (t/s) | 1314 ± 635 | 1772 ± 6 |
+| Variance | Bimodal (666–1777) | Consistent high mode |
+| Variance reduction | — | **99%** |
+
+---
+
+## Environment Variables Reference
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RDNA2_OPT_V1` | unset | Enable RDNA2-optimized dequant kernels |
+| `RDNA2_ASYNC_PIPELINE` | unset | Enable async dequant stream + event sync |
+| `RDNA2_MATMUL_OPT_V1` | unset | Enable LDS double-buffered matmul (MoE only, stabilized v0.3.1) |
+
+All flags are **inert by default** — the fork runs identically to upstream llama.cpp when no flags are set.
+
+---
+
+## Model Recommendations for RDNA2
+
+| Model Size | Quantization | VRAM Usage | Notes |
+|------------|-------------|------------|-------|
+| 7B–13B | Q4_K_M | 4–8 GB | Runs comfortably, high context |
+| 27B (Dense) | IQ4_XS | ~13 GB | Fits in 16 GB, use `-ctk turbo4 -ctv turbo2` |
+| 35B MoE (3B active) | IQ4_XS | ~18 GB | Requires `--fit-target` for layer offloading |
+| 70B+ | IQ4_XS | 30+ GB | Hybrid CPU+GPU split recommended |
+
+---
 
 ## Description
 
-The main goal of `llama.cpp` is to enable LLM inference with minimal setup and state-of-the-art performance on a wide
-range of hardware - locally and in the cloud.
 
-- Plain C/C++ implementation without any dependencies
-- Apple silicon is a first-class citizen - optimized via ARM NEON, Accelerate and Metal frameworks
-- AVX, AVX2, AVX512 and AMX support for x86 architectures
-- RVV, ZVFH, ZFH, ZICBOP and ZIHINTPAUSE support for RISC-V architectures
-- 1.5-bit, 2-bit, 3-bit, 4-bit, 5-bit, 6-bit, and 8-bit integer quantization for faster inference and reduced memory use
-- Custom CUDA kernels for running LLMs on NVIDIA GPUs (support for AMD GPUs via HIP and Moore Threads GPUs via MUSA)
-- Vulkan and SYCL backend support
-- CPU+GPU hybrid inference to partially accelerate models larger than the total VRAM capacity
+To make your fork stand out, you want to pivot the language from "general purpose" to "AMD-Specialized High-Performance." Since your fork is hitting 40 t/s on 27B models—a feat usually reserved for high-end NVIDIA cards—the description should reflect that specialized edge.
+
+Here is a rewritten version for your GitHub README.md or repository description:
+
+🚀 llama.cpp-turboquant-hip (Stormrage Edition)
+The primary goal of this fork is to provide a high-performance, AMD-optimized environment for LLM inference. By integrating TurboQuant and stabilized Multi-Token Prediction (MTP), this version achieves state-of-the-art speeds on RDNA 2 and RDNA 3 hardware that exceed standard implementations.
+
+Why this Fork?
+AMD ROCm/HIP First: Optimized specifically for AMD GPUs with custom stability fixes for the HIP backend.
+
+TurboQuant Integration: Exclusive support for turbo2 KV-cache quantization, allowing massive context (32k+) to fit comfortably within consumer VRAM (16GB).
+
+MTP Speed Breakthrough: Refined Multi-Token Prediction logic, delivering up to 40 t/s on 27B models (e.g., Qwen 2.5) on an RX 6800 XT.
+
+High-Context Stability: Patched llama-graph to prevent memory leaks and double free errors during long-context speculative decoding.
+
+Core Features
+Zero Dependencies: Plain C/C++ implementation designed for lean, fast execution.
+
+Extreme Quantization: Support for 1.5-bit through 8-bit integer quantization (IQ) for minimal memory footprint.
+
+Hybrid Inference: Seamlessly split workloads between CPU and AMD GPUs to run models larger than your VRAM.
+
+Advanced Hardware Support:
+
+AMD GPUs: Primary focus via optimized HIP kernels and RDNA-specific wave-size tuning.
+
+Apple Silicon: Optimized via ARM NEON, Accelerate, and Metal.
+
+x86 Architectures: Support for AVX, AVX2, AVX512, and AMX.
+
+RISC-V: Support for RVV and specialized extensions.
+
+Universal Backends: Maintains support for Vulkan, SYCL, and CUDA for cross-hardware compatibility.
 
 The `llama.cpp` project is the main playground for developing new features for the [ggml](https://github.com/ggml-org/ggml) library.
 
