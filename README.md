@@ -140,10 +140,6 @@ All flags are **inert by default** — the fork runs identically to upstream lla
 ## Description
 
 
-To make your fork stand out, you want to pivot the language from "general purpose" to "AMD-Specialized High-Performance." Since your fork is hitting 40 t/s on 27B models—a feat usually reserved for high-end NVIDIA cards—the description should reflect that specialized edge.
-
-Here is a rewritten version for your GitHub README.md or repository description:
-
 🚀 llama.cpp-turboquant-hip (Stormrage Edition)
 The primary goal of this fork is to provide a high-performance, AMD-optimized environment for LLM inference. By integrating TurboQuant and stabilized Multi-Token Prediction (MTP), this version achieves state-of-the-art speeds on RDNA 2 and RDNA 3 hardware that exceed standard implementations.
 
