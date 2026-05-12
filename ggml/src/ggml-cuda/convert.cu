@@ -568,25 +568,6 @@ static void dequant_iq4_xs_rdn2_local(const void * vx, dst_t * y, const int64_t 
     }
 }
 
-#ifdef RDNA2_MODULE_CACHE
-// Module cache dispatch wrapper (Phase 2D)
-template<typename dst_t>
-static void dequant_iq4_xs_rdn2_module_local(const void * vx, dst_t * y, const int64_t k, cudaStream_t stream) {
-    rdn2_module_init();
-    if (!g_dequant_fn) {
-        // Fallback to standard launch
-        dequantize_block_iq4_xs_rdn2<false><<<(k + 255) / 256, 32, 0, stream>>>(vx, (half *)y, k);
-        return;
-    }
-
-    const int nb = (k + 256 - 1) / 256;
-    const void * p_vx = vx;
-    half * p_y = (half *)y;
-    const int64_t p_k = k;
-    void* args[] = { (void*)&p_vx, (void*)&p_y, (void*)&p_k };
-    hipModuleLaunchKernel(g_dequant_fn, nb, 1, 1, 32, 1, 1, 0, stream, args, nullptr);
-}
-#endif
 #endif
 
 template<typename dst_t>
@@ -690,11 +671,9 @@ static void dequantize_row_iq4_xs_cuda(const void * vx, dst_t * y, const int64_t
         static cudaStream_t g_dequant_stream = nullptr;
         static cudaEvent_t  g_dequant_done   = nullptr;
         static bool         g_async_init     = false;
+        static bool         g_teardown_registered = false;
 
         if (!g_async_init) {
-#ifdef RDNA2_MODULE_CACHE
-            rdn2_module_init(); // Pre-load module if caching enabled
-#endif
             if (hipStreamCreate(&g_dequant_stream) != hipSuccess) {
                 fprintf(stderr, "RDNA2 async: failed to create dequant stream, falling back to sync\n");
                 dequant_iq4_xs_rdn2_local(vx, y, k, stream);
@@ -708,14 +687,20 @@ static void dequantize_row_iq4_xs_cuda(const void * vx, dst_t * y, const int64_t
                 return;
             }
             g_async_init = true;
+            if (!g_teardown_registered) {
+                // Capture pointers via lambda for atexit cleanup
+                static cudaStream_t* p_stream = &g_dequant_stream;
+                static cudaEvent_t*  p_event  = &g_dequant_done;
+                atexit([](){
+                    if (*p_stream) { hipStreamDestroy(*p_stream); *p_stream = nullptr; }
+                    if (*p_event)  { hipEventDestroy(*p_event);   *p_event  = nullptr; }
+                });
+                g_teardown_registered = true;
+            }
         }
 
         // Launch dequant on dedicated stream (non-blocking to CPU)
-#ifdef RDNA2_MODULE_CACHE
-        dequant_iq4_xs_rdn2_module_local(vx, y, k, g_dequant_stream);
-#else
         dequant_iq4_xs_rdn2_local(vx, y, k, g_dequant_stream);
-#endif
 
         // Record completion event
         hipEventRecord(g_dequant_done, g_dequant_stream);

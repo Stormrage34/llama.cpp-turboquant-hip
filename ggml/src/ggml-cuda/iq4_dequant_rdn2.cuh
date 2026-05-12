@@ -36,68 +36,14 @@ static __global__ void dequantize_block_iq4_xs_rdn2(const void * __restrict__ vx
     }
 }
 
-#ifdef RDNA2_MODULE_CACHE
-// Module-based launch for reduced overhead (Phase 2D)
-static hipModule_t g_rdn2_module = nullptr;
-static hipFunction_t g_dequant_fn = nullptr;
-static bool g_rdn2_module_init = false;
-
-static void rdn2_module_init() {
-    if (g_rdn2_module_init) return;
-
-    const char* module_path = getenv("RDNA2_MODULE_PATH");
-    if (module_path) {
-        hipError_t err = hipModuleLoad(&g_rdn2_module, module_path);
-        if (err == hipSuccess) {
-            // Try both possible mangled names
-            err = hipModuleGetFunction(&g_dequant_fn, g_rdn2_module,
-                                       "_Z32dequantize_block_iq4_xs_rdn2ILb0EEvPKvP5__halfx");
-            if (err != hipSuccess) {
-                err = hipModuleGetFunction(&g_dequant_fn, g_rdn2_module,
-                                           "_Z32dequantize_block_iq4_xs_rdn2ILb0EEvPKvP6__halfx");
-            }
-            if (err != hipSuccess) {
-                fprintf(stderr, "RDNA2 module: failed to get function, falling back to launch\n");
-                hipModuleUnload(g_rdn2_module);
-                g_rdn2_module = nullptr;
-            }
-        } else {
-            fprintf(stderr, "RDNA2 module: failed to load %s, falling back to launch\n", module_path);
-        }
-    }
-    g_rdn2_module_init = true;
-}
-
-static void dequant_iq4_xs_rdn2_module(const void * vx, half * y, const int64_t k, cudaStream_t stream) {
-    rdn2_module_init();
-    if (!g_dequant_fn) {
-        // Fallback to standard launch
-        const int nb = (k + 255) / 256;
-        dequantize_block_iq4_xs_rdn2<false><<<nb, 32, 0, stream>>>(vx, y, k);
-        return;
-    }
-
-    const int nb = (k + 256 - 1) / 256;
-    const void * p_vx = vx;
-    half * p_y = y;
-    const int64_t p_k = k;
-    void* args[] = { (void*)&p_vx, (void*)&p_y, (void*)&p_k };
-    hipModuleLaunchKernel(g_dequant_fn, nb, 1, 1, 32, 1, 1, 0, stream, args, nullptr);
-}
-#endif
-
 // Host wrapper: launches the RDNA2 IQ4_XS dequant kernel
 static void ggml_dequant_iq4_xs_rdn2(const void * vx, half * y, const int64_t k, cudaStream_t stream) {
-#ifdef RDNA2_MODULE_CACHE
-    dequant_iq4_xs_rdn2_module(vx, y, k, stream);
-#else
     const int nb = (k + 256 - 1) / 256;
     if (k % 256 == 0) {
         dequantize_block_iq4_xs_rdn2<false><<<nb, 32, 0, stream>>>(vx, y, k);
     } else {
         dequantize_block_iq4_xs_rdn2<true><<<nb, 32, 0, stream>>>(vx, y, k);
     }
-#endif
 }
 
 #endif // GGML_CUDA_IQ4_DEQUANT_RDN2_CUH

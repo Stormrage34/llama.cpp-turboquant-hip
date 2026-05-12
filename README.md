@@ -5,19 +5,19 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Release](https://img.shields.io/github/v/release/ggml-org/llama.cpp)](https://github.com/ggml-org/llama.cpp/releases)
 
-**AMD-optimized llama.cpp fork with TurboQuant, MTP, and RDNA2/3 GPU acceleration.**
+**AMD-optimized llama.cpp fork with TurboQuant, MTP, and RDNA2 GPU acceleration.**
 
-> This fork delivers state-of-the-art inference speeds on AMD RDNA 2/3 hardware — achieving 40+ t/s on 27B models (RX 6800 XT) with stabilized Multi-Token Prediction and custom HIP kernels.
+> This fork delivers state-of-the-art inference speeds on AMD RDNA 2 hardware — achieving 40+ t/s on 27B models (RX 6800 XT) with stabilized Multi-Token Prediction and custom HIP kernels.
 
 ---
 
-## 🚀 RDNA2 / RDNA3 Quick Start
+## 🚀 RDNA2 Quick Start
 
 ### Supported Hardware
 | GPU | Architecture | Status |
 |-----|-------------|--------|
 | RX 6800 / 6800 XT / 6900 XT | RDNA 2 (gfx1030) | ✅ Fully optimized |
-| RX 7800 XT / 7900 XT / 7900 XTX | RDNA 3 (gfx1100/1101) | ✅ Supported |
+| RX 7800 XT / 7900 XT / 7900 XTX | RDNA 3 (gfx1100/1101) | 🟡 Untested — gfx1030 only |
 
 ### 1. Build with RDNA2 Optimizations
 
@@ -71,17 +71,19 @@ RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 RDNA2_MATMUL_OPT_V1=1 \
 
 ### RDNA2 Performance Summary
 
-**Hardware**: RX 6800 XT (16 GB VRAM) | **Model**: Qwen3.6-35B-MoE-IQ4_XS
+**Hardware**: RX 6800 XT (16 GB VRAM) | **Model**: Qwen3.6-35B-MoE-IQ4_XS | `-ngl 30 -fitt 1024 -fitc 2048`
 
 | Feature | Prefill (pp512) | Decode (tg128) | Notes |
-|---------|-----------------|----------------|-------|
-| Baseline | ~480 t/s | ~57 t/s | Upstream llama.cpp |
-| Stable RDNA2 | ~540 t/s | ~55 t/s | Dequant + async pipeline |
-| + MoE Accelerator | ~1772 ± 6 t/s | ~52 ± 7 t/s | LDS double-buffer (stabilized v0.3.1) |
+|---------|---------------|----------------|-------|
+| Baseline (original upstream) | ~1325 t/s | ~66 t/s | No RDNA2 optimizations |
+| Stable RDNA2 | ~1320 t/s | ~66 t/s | Dequant + async pipeline, ngl=30 |
+| + MoE Accelerator | **2781 ± 5 t/s** | **~66 t/s** | LDS double-buffer (stabilized v0.3.1) |
 
-**Dense models** (27B): ~480 t/s prefill, ~27 t/s decode — unaffected by RDNA2 optimizations.
+**Context independence**: +110% gain holds at 2k, 8k, and 16k context — KV cache bandwidth is not the bottleneck.
 
-> **MoE prefill accelerator**: The `RDNA2_MATMUL_OPT_V1` flag enables a double-buffered matmul kernel with +269% prefill gain for MoE models. Stabilized in v0.3.1 — variance reduced from ±635 to ±6 t/s. See [docs/rdna2-experimental.md](docs/rdna2-experimental.md) for details.
+**Dense models** (27B): ~547 t/s prefill, ~27 t/s decode — auto-disabled for non-MoE models via triple gate.
+
+> **MoE prefill accelerator**: The `RDNA2_MATMUL_OPT_V1` flag enables a double-buffered matmul kernel with +110% to +269% prefill gain for MoE models (varies with offload config). Stabilized v0.3.1 — variance as low as 0.08%. See [docs/rdna2-experimental.md](docs/rdna2-experimental.md) for details.
 
 ---
 
@@ -99,18 +101,20 @@ RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 RDNA2_MATMUL_OPT_V1=1 \
 
 | Component | Description | Impact |
 |-----------|-------------|--------|
-| **LDS Double-Buffering** | Overlaps weight tile loading with DP4A compute | +269% MoE prefill |
+| **LDS Double-Buffering** | Overlaps weight tile loading with DP4A compute | +110–269% MoE prefill |
 | **LDS Bank Padding** | +1 element offset breaks 32-bank symmetry | Eliminates within-run jitter |
 | **Wave32 Occupancy Guard** | `amdgpu_waves_per_eu(4, 8)` prevents register spilling | Eliminates bimodal variance |
 | **Triple-Gate Safety** | Compile-time + env var + hardware ID check | Falls back to stable path instantly |
 
-### Phase 3: Stabilization Complete (v0.3.1)
+### Phase 3: Stabilization & Context Validation (v0.3.1)
 
-| Metric | Before (v0.3.0) | After (v0.3.1) |
-|--------|-----------------|----------------|
-| Prefill (t/s) | 1314 ± 635 | 1772 ± 6 |
-| Variance | Bimodal (666–1777) | Consistent high mode |
-| Variance reduction | — | **99%** |
+| Metric | Baseline (original upstream) | Turboquant (v0.3.1) |
+|--------|----------------------------|---------------------|
+| MoE Prefill 2k (t/s) | 1325 ± 29 (2.2%) | **2781 ± 5 (0.17%)** |
+| MoE Prefill 8k (t/s) | 1328 ± 30 (2.3%) | **2780 ± 2 (0.08%)** |
+| MoE Prefill 16k (t/s) | 1319 ± 3 (0.26%) | **2780 ± 5 (0.17%)** |
+| Decode (t/s) | ~66 | **~66** |
+| Gain vs baseline | — | **+110% across 2k→16k** |
 
 ---
 
@@ -145,7 +149,7 @@ To make your fork stand out, you want to pivot the language from "general purpos
 Here is a rewritten version for your GitHub README.md or repository description:
 
 🚀 llama.cpp-turboquant-hip (Stormrage Edition)
-The primary goal of this fork is to provide a high-performance, AMD-optimized environment for LLM inference. By integrating TurboQuant and stabilized Multi-Token Prediction (MTP), this version achieves state-of-the-art speeds on RDNA 2 and RDNA 3 hardware that exceed standard implementations.
+The primary goal of this fork is to provide a high-performance, AMD-optimized environment for LLM inference. By integrating TurboQuant and stabilized Multi-Token Prediction (MTP), this version achieves state-of-the-art speeds on RDNA 2 hardware that exceed standard implementations.
 
 Why this Fork?
 AMD ROCm/HIP First: Optimized specifically for AMD GPUs with custom stability fixes for the HIP backend.
