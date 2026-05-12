@@ -9,7 +9,7 @@ The `RDNA2_MATMUL_OPT_V1` flag enables an LDS (Local Data Share) double-buffered
 ## Performance Profile
 
 **Hardware**: AMD Radeon RX 6800 XT (gfx1030, 16 GB VRAM)
-**Model**: Qwen3.6-35B-MoE-IQ4_XS @ pp512, batch=256, ubatch=128
+**Model**: Qwen3.6-35B-MoE-IQ4_XS @ pp512, tg128, batch=2048, ubatch=512
 
 ### Before Stabilization (v0.3.0-experimental)
 
@@ -18,26 +18,30 @@ The `RDNA2_MATMUL_OPT_V1` flag enables an LDS (Local Data Share) double-buffered
 | Prefill (t/s) | ~480 ± 100 | ~1314 ± 635 | **+170%** (unstable) |
 | Variance | Low | High (bimodal: 666–1777) | 3–6× baseline |
 
-### After Stabilization (v0.3.1)
+### After Stabilization & Context Validation (v0.3.1)
 
-| Metric | Baseline | Stabilized (v0.3.1) | Delta |
-|--------|----------|---------------------|-------|
-| Prefill (t/s) | ~480 ± 100 | **1772 ± 6** | **+269%** (stable) |
-| Variance | Low | ±6 t/s | Within noise |
-| Decode (t/s) | ~57 ± 4 | ~52 ± 7 | No regression |
-| Dense Models | ~480 t/s | ~480 t/s | Auto-disabled |
+| Context | Original Prefill | Turboquant Prefill | Speedup | Variance |
+|---------|-----------------|-------------------|---------|----------|
+| 2k | 1325 ± 29 (2.2%) | **2781 ± 5 (0.17%)** | **2.10×** | 13× lower |
+| 8k | 1328 ± 30 (2.3%) | **2780 ± 2 (0.08%)** | **2.09×** | 28× lower |
+| 16k | 1319 ± 3 (0.26%) | **2780 ± 5 (0.17%)** | **2.11×** | 1.5× lower |
 
-### 10-Run Stress Test (v0.3.1)
+**Decode**: ~66 t/s flat across all contexts — compute-bound, no regression vs baseline.
 
-| Run | Prefill (t/s) | Run | Prefill (t/s) |
-|-----|---------------|-----|---------------|
-| 1 | 1776 | 6 | 1776 |
-| 2 | 1774 | 7 | 1757 |
-| 3 | 1775 | 8 | 1770 |
-| 4 | 1773 | 9 | 1769 |
-| 5 | 1776 | 10 | 1773 |
+> Gain is **context-independent**: KV cache bandwidth does not bottleneck prefill up to 16k on RDNA2 (128 MB Infinity Cache absorbs KV traffic). The +110% prefill advantage is structural, not narrow-window.
 
-**Mean: 1772 t/s | Std dev: ±6 t/s | Variance reduction: 99%**
+### Recommended Configuration (v0.3.1)
+
+```bash
+export RDNA2_OPT_V1=1
+export RDNA2_ASYNC_PIPELINE=1
+export RDNA2_MATMUL_OPT_V1=1
+./llama-bench -m MoE.gguf -p 512 -n 128 -fitt 1024 -fitc 2048 -ngl 30
+```
+
+- `-ngl 30`: Partial GPU offload (30/42 layers) — leaves 1 GB VRAM for system headroom
+- `-fitt 1024`: 1 GB breathing room for context creation
+- `-fitc 2048`: Minimum context length (auto-scales up)
 
 ## Usage
 

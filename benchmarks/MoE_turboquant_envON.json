@@ -1,0 +1,1915 @@
+ggml_cuda_init: found 1 ROCm devices (Total VRAM: 16368 MiB):
+  Device 0: AMD Radeon RX 6800 XT, gfx1030 (0x1030), VMM: no, Wave Size: 32, VRAM: 16368 MiB
+common_params_fit_impl: getting device memory data for initial parameters:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16116 + (19081 = 18522 +      65 +     493) +      -18829 |
+common_memory_breakdown_print: |   - Host               |                    266 =   257 +       0 +       9                |
+common_params_fit_impl: projected to use 19081 MiB of device memory vs. 16116 MiB of free device memory
+common_params_fit_impl: cannot meet free memory target of 1024 MiB, need to reduce device memory by 3989 MiB
+common_params_fit_impl: context size set by user to 512 -> no change
+common_params_fit_impl: getting device memory data with all MoE tensors moved to system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16114 + ( 1953 =  1386 +      65 +     501) +       -1699 |
+common_memory_breakdown_print: |   - Host               |                  17402 = 17393 +       0 +       9                |
+common_params_fit_impl: with only dense weights in device memory there is a total surplus of 13136 MiB
+common_params_fit_impl: id=0, target=15092 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16176 + (  894 =     0 +       0 +     894) +        -702 |
+common_memory_breakdown_print: |   - Host               |                  18867 = 18780 +      65 +      21                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer= 0, n_part= 0, overflow_type=4, mem=   894 MiB
+common_params_fit_impl: filling dense-only layers back-to-front:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16112 + ( 2361 =  1794 +      65 +     501) +       -2105 |
+common_memory_breakdown_print: |   - Host               |                  16994 = 16985 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=41, overflow_type=4, mem=  2361 MiB
+common_params_fit_impl: set ngl_per_device[0].n_layer=42
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers,   2361 MiB used,  13754 MiB free
+common_params_fit_impl: converting dense-only layers to full layers and filling them front-to-back with overflow to next device/system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16112 + (19081 = 18522 +      65 +     493) +      -18825 |
+common_memory_breakdown_print: |   - Host               |                    266 =   257 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part= 0, overflow_type=4, mem= 19081 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16112 + (15001 = 14442 +      65 +     493) +      -14745 |
+common_memory_breakdown_print: |   - Host               |                   4346 =  4337 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=4, mem= 15001 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part)=(42, 10), id_dense_start=0
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16112 + (15409 = 14850 +      65 +     493) +      -15153 |
+common_memory_breakdown_print: |   - Host               |                   3938 =  3929 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part= 9, overflow_type=4, mem= 15409 MiB
+common_params_fit_impl: set ngl_per_device_high[0].(n_layer, n_part)=(42, 9), id_dense_start_high=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_UP
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16112 + (15134 = 14575 +      65 +     493) +      -14878 |
+common_memory_breakdown_print: |   - Host               |                   4213 =  4204 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=2, mem= 15134 MiB
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_ATTN
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16112 + (14997 = 14439 +      65 +     493) +      -14741 |
+common_memory_breakdown_print: |   - Host               |                   4350 =  4341 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=1, mem= 14997 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 10, ATTN), id_dense_start=0
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers (10 overflowing),  14997 MiB used,   1118 MiB free
+common_fit_params: successfully fit params to free device memory
+common_fit_params: fitting params to free memory took 3.28 seconds
+[
+  {
+    "build_commit": "7fb76fc42",
+    "build_number": 9067,
+    "cpu_info": "AMD Ryzen 7 5700X 8-Core Processor",
+    "gpu_info": "AMD Radeon RX 6800 XT",
+    "backends": "ROCm",
+    "model_filename": "/home/stormrage/models/Qwen3_35BMTPIQ4.gguf",
+    "model_type": "qwen35moe 35B.A3B IQ4_XS - 4.25 bpw",
+    "model_size": 19692919424,
+    "model_n_params": 35505251456,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "n_threads": 8,
+    "cpu_mask": "0x0",
+    "cpu_strict": false,
+    "poll": 50,
+    "type_k": "turbo4",
+    "type_v": "turbo4",
+    "n_gpu_layers": 30,
+    "n_cpu_moe": 0,
+    "split_mode": "layer",
+    "main_gpu": 0,
+    "no_kv_offload": false,
+    "flash_attn": true,
+    "devices": "auto",
+    "tensor_split": "0.00",
+    "tensor_buft_overrides": "none",
+    "use_mmap": true,
+    "use_direct_io": false,
+    "embeddings": false,
+    "no_op_offload": 0,
+    "no_host": false,
+    "fit_target": 1024,
+    "fit_min_ctx": 2048,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 0,
+    "test_time": "2026-05-12T22:20:14Z",
+    "avg_ns": 186206634,
+    "stddev_ns": 3056477,
+    "avg_ts": 2750.003979,
+    "stddev_ts": 45.139774,
+    "samples_ns": [ 188367890, 184045378 ],
+    "samples_ts": [ 2718.09, 2781.92 ]
+  }common_params_fit_impl: getting device memory data for initial parameters:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16032 + (18710 = 18522 +      64 +     123) +      -18374 |
+common_memory_breakdown_print: |   - Host               |                    259 =   257 +       0 +       2                |
+common_params_fit_impl: projected to use 18710 MiB of device memory vs. 16032 MiB of free device memory
+common_params_fit_impl: cannot meet free memory target of 1024 MiB, need to reduce device memory by 3702 MiB
+common_params_fit_impl: context size set by user to 128 -> no change
+common_params_fit_impl: getting device memory data with all MoE tensors moved to system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16032 + ( 1601 =  1386 +      64 +     150) +       -1265 |
+common_memory_breakdown_print: |   - Host               |                  17395 = 17393 +       0 +       2                |
+common_params_fit_impl: with only dense weights in device memory there is a total surplus of 13406 MiB
+common_params_fit_impl: id=0, target=15008 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16096 + (  522 =     0 +       0 +     522) +        -250 |
+common_memory_breakdown_print: |   - Host               |                  18850 = 18780 +      64 +       5                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer= 0, n_part= 0, overflow_type=4, mem=   522 MiB
+common_params_fit_impl: filling dense-only layers back-to-front:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16032 + ( 2009 =  1794 +      64 +     150) +       -1673 |
+common_memory_breakdown_print: |   - Host               |                  16987 = 16985 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=41, overflow_type=4, mem=  2009 MiB
+common_params_fit_impl: set ngl_per_device[0].n_layer=42
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers,   2009 MiB used,  14022 MiB free
+common_params_fit_impl: converting dense-only layers to full layers and filling them front-to-back with overflow to next device/system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16032 + (18710 = 18522 +      64 +     123) +      -18374 |
+common_memory_breakdown_print: |   - Host               |                    259 =   257 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part= 0, overflow_type=4, mem= 18710 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16032 + (14656 = 14442 +      64 +     149) +      -14320 |
+common_memory_breakdown_print: |   - Host               |                   4339 =  4337 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=4, mem= 14656 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part)=(42, 10), id_dense_start=0
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16032 + (15064 = 14850 +      64 +     149) +      -14728 |
+common_memory_breakdown_print: |   - Host               |                   3931 =  3929 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part= 9, overflow_type=4, mem= 15064 MiB
+common_params_fit_impl: set ngl_per_device_high[0].(n_layer, n_part)=(42, 9), id_dense_start_high=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_UP
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16032 + (14791 = 14575 +      64 +     151) +      -14455 |
+common_memory_breakdown_print: |   - Host               |                   4206 =  4204 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=2, mem= 14791 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 10, UP), id_dense_start=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_GATE
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16032 + (14931 = 14714 +      64 +     153) +      -14595 |
+common_memory_breakdown_print: |   - Host               |                   4068 =  4066 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=3, mem= 14931 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 10, GATE), id_dense_start=0
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers (10 overflowing),  14931 MiB used,   1100 MiB free
+common_fit_params: successfully fit params to free device memory
+common_fit_params: fitting params to free memory took 3.57 seconds
+,
+  {
+    "build_commit": "7fb76fc42",
+    "build_number": 9067,
+    "cpu_info": "AMD Ryzen 7 5700X 8-Core Processor",
+    "gpu_info": "AMD Radeon RX 6800 XT",
+    "backends": "ROCm",
+    "model_filename": "/home/stormrage/models/Qwen3_35BMTPIQ4.gguf",
+    "model_type": "qwen35moe 35B.A3B IQ4_XS - 4.25 bpw",
+    "model_size": 19692919424,
+    "model_n_params": 35505251456,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "n_threads": 8,
+    "cpu_mask": "0x0",
+    "cpu_strict": false,
+    "poll": 50,
+    "type_k": "turbo4",
+    "type_v": "turbo4",
+    "n_gpu_layers": 30,
+    "n_cpu_moe": 0,
+    "split_mode": "layer",
+    "main_gpu": 0,
+    "no_kv_offload": false,
+    "flash_attn": true,
+    "devices": "auto",
+    "tensor_split": "0.00",
+    "tensor_buft_overrides": "none",
+    "use_mmap": true,
+    "use_direct_io": false,
+    "embeddings": false,
+    "no_op_offload": 0,
+    "no_host": false,
+    "fit_target": 1024,
+    "fit_min_ctx": 2048,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 0,
+    "test_time": "2026-05-12T22:20:23Z",
+    "avg_ns": 2125150793,
+    "stddev_ns": 30970398,
+    "avg_ts": 60.237417,
+    "stddev_ts": 0.877854,
+    "samples_ns": [ 2147050124, 2103251463 ],
+    "samples_ts": [ 59.6167, 60.8582 ]
+  }common_params_fit_impl: getting device memory data for initial parameters:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16014 + (19081 = 18522 +      65 +     493) +      -18727 |
+common_memory_breakdown_print: |   - Host               |                    266 =   257 +       0 +       9                |
+common_params_fit_impl: projected to use 19081 MiB of device memory vs. 16014 MiB of free device memory
+common_params_fit_impl: cannot meet free memory target of 1024 MiB, need to reduce device memory by 4091 MiB
+common_params_fit_impl: context size set by user to 512 -> no change
+common_params_fit_impl: getting device memory data with all MoE tensors moved to system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16030 + ( 1953 =  1386 +      65 +     501) +       -1615 |
+common_memory_breakdown_print: |   - Host               |                  17402 = 17393 +       0 +       9                |
+common_params_fit_impl: with only dense weights in device memory there is a total surplus of 13052 MiB
+common_params_fit_impl: id=0, target=14990 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16094 + (  894 =     0 +       0 +     894) +        -620 |
+common_memory_breakdown_print: |   - Host               |                  18866 = 18780 +      65 +      21                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer= 0, n_part= 0, overflow_type=4, mem=   894 MiB
+common_params_fit_impl: filling dense-only layers back-to-front:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16030 + ( 2361 =  1794 +      65 +     501) +       -2023 |
+common_memory_breakdown_print: |   - Host               |                  16994 = 16985 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=41, overflow_type=4, mem=  2361 MiB
+common_params_fit_impl: set ngl_per_device[0].n_layer=42
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers,   2361 MiB used,  13652 MiB free
+common_params_fit_impl: converting dense-only layers to full layers and filling them front-to-back with overflow to next device/system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16030 + (19081 = 18522 +      65 +     493) +      -18743 |
+common_memory_breakdown_print: |   - Host               |                    266 =   257 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part= 0, overflow_type=4, mem= 19081 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16030 + (14593 = 14034 +      65 +     493) +      -14255 |
+common_memory_breakdown_print: |   - Host               |                   4754 =  4745 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=11, overflow_type=4, mem= 14593 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part)=(42, 11), id_dense_start=0
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16030 + (15001 = 14442 +      65 +     493) +      -14663 |
+common_memory_breakdown_print: |   - Host               |                   4346 =  4337 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=4, mem= 15001 MiB
+common_params_fit_impl: set ngl_per_device_high[0].(n_layer, n_part)=(42, 10), id_dense_start_high=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_UP
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16030 + (14725 = 14166 +      65 +     493) +      -14387 |
+common_memory_breakdown_print: |   - Host               |                   4622 =  4613 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=11, overflow_type=2, mem= 14725 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 11, UP), id_dense_start=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_GATE
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16030 + (14864 = 14305 +      65 +     493) +      -14526 |
+common_memory_breakdown_print: |   - Host               |                   4483 =  4474 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=11, overflow_type=3, mem= 14864 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 11, GATE), id_dense_start=0
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers (11 overflowing),  14864 MiB used,   1149 MiB free
+common_fit_params: successfully fit params to free device memory
+common_fit_params: fitting params to free memory took 3.79 seconds
+,
+  {
+    "build_commit": "7fb76fc42",
+    "build_number": 9067,
+    "cpu_info": "AMD Ryzen 7 5700X 8-Core Processor",
+    "gpu_info": "AMD Radeon RX 6800 XT",
+    "backends": "ROCm",
+    "model_filename": "/home/stormrage/models/Qwen3_35BMTPIQ4.gguf",
+    "model_type": "qwen35moe 35B.A3B IQ4_XS - 4.25 bpw",
+    "model_size": 19692919424,
+    "model_n_params": 35505251456,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "n_threads": 8,
+    "cpu_mask": "0x0",
+    "cpu_strict": false,
+    "poll": 50,
+    "type_k": "turbo4",
+    "type_v": "turbo3",
+    "n_gpu_layers": 30,
+    "n_cpu_moe": 0,
+    "split_mode": "layer",
+    "main_gpu": 0,
+    "no_kv_offload": false,
+    "flash_attn": true,
+    "devices": "auto",
+    "tensor_split": "0.00",
+    "tensor_buft_overrides": "none",
+    "use_mmap": true,
+    "use_direct_io": false,
+    "embeddings": false,
+    "no_op_offload": 0,
+    "no_host": false,
+    "fit_target": 1024,
+    "fit_min_ctx": 2048,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 0,
+    "test_time": "2026-05-12T22:20:36Z",
+    "avg_ns": 184457911,
+    "stddev_ns": 588087,
+    "avg_ts": 2775.715064,
+    "stddev_ts": 8.849524,
+    "samples_ns": [ 184873752, 184042070 ],
+    "samples_ts": [ 2769.46, 2781.97 ]
+  }common_params_fit_impl: getting device memory data for initial parameters:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16030 + (18710 = 18522 +      64 +     123) +      -18372 |
+common_memory_breakdown_print: |   - Host               |                    259 =   257 +       0 +       2                |
+common_params_fit_impl: projected to use 18710 MiB of device memory vs. 16030 MiB of free device memory
+common_params_fit_impl: cannot meet free memory target of 1024 MiB, need to reduce device memory by 3704 MiB
+common_params_fit_impl: context size set by user to 128 -> no change
+common_params_fit_impl: getting device memory data with all MoE tensors moved to system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16030 + ( 1601 =  1386 +      64 +     150) +       -1263 |
+common_memory_breakdown_print: |   - Host               |                  17395 = 17393 +       0 +       2                |
+common_params_fit_impl: with only dense weights in device memory there is a total surplus of 13404 MiB
+common_params_fit_impl: id=0, target=15006 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16094 + (  522 =     0 +       0 +     522) +        -248 |
+common_memory_breakdown_print: |   - Host               |                  18849 = 18780 +      64 +       5                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer= 0, n_part= 0, overflow_type=4, mem=   522 MiB
+common_params_fit_impl: filling dense-only layers back-to-front:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16030 + ( 2009 =  1794 +      64 +     150) +       -1671 |
+common_memory_breakdown_print: |   - Host               |                  16987 = 16985 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=41, overflow_type=4, mem=  2009 MiB
+common_params_fit_impl: set ngl_per_device[0].n_layer=42
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers,   2009 MiB used,  14020 MiB free
+common_params_fit_impl: converting dense-only layers to full layers and filling them front-to-back with overflow to next device/system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16030 + (18710 = 18522 +      64 +     123) +      -18372 |
+common_memory_breakdown_print: |   - Host               |                    259 =   257 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part= 0, overflow_type=4, mem= 18710 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16030 + (14656 = 14442 +      64 +     149) +      -14318 |
+common_memory_breakdown_print: |   - Host               |                   4339 =  4337 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=4, mem= 14656 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part)=(42, 10), id_dense_start=0
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16030 + (15064 = 14850 +      64 +     149) +      -14726 |
+common_memory_breakdown_print: |   - Host               |                   3931 =  3929 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part= 9, overflow_type=4, mem= 15064 MiB
+common_params_fit_impl: set ngl_per_device_high[0].(n_layer, n_part)=(42, 9), id_dense_start_high=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_UP
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16030 + (14791 = 14575 +      64 +     151) +      -14453 |
+common_memory_breakdown_print: |   - Host               |                   4206 =  4204 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=2, mem= 14791 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 10, UP), id_dense_start=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_GATE
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16030 + (14931 = 14714 +      64 +     153) +      -14593 |
+common_memory_breakdown_print: |   - Host               |                   4068 =  4066 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=3, mem= 14931 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 10, GATE), id_dense_start=0
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers (10 overflowing),  14931 MiB used,   1098 MiB free
+common_fit_params: successfully fit params to free device memory
+common_fit_params: fitting params to free memory took 3.09 seconds
+,
+  {
+    "build_commit": "7fb76fc42",
+    "build_number": 9067,
+    "cpu_info": "AMD Ryzen 7 5700X 8-Core Processor",
+    "gpu_info": "AMD Radeon RX 6800 XT",
+    "backends": "ROCm",
+    "model_filename": "/home/stormrage/models/Qwen3_35BMTPIQ4.gguf",
+    "model_type": "qwen35moe 35B.A3B IQ4_XS - 4.25 bpw",
+    "model_size": 19692919424,
+    "model_n_params": 35505251456,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "n_threads": 8,
+    "cpu_mask": "0x0",
+    "cpu_strict": false,
+    "poll": 50,
+    "type_k": "turbo4",
+    "type_v": "turbo3",
+    "n_gpu_layers": 30,
+    "n_cpu_moe": 0,
+    "split_mode": "layer",
+    "main_gpu": 0,
+    "no_kv_offload": false,
+    "flash_attn": true,
+    "devices": "auto",
+    "tensor_split": "0.00",
+    "tensor_buft_overrides": "none",
+    "use_mmap": true,
+    "use_direct_io": false,
+    "embeddings": false,
+    "no_op_offload": 0,
+    "no_host": false,
+    "fit_target": 1024,
+    "fit_min_ctx": 2048,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 0,
+    "test_time": "2026-05-12T22:20:44Z",
+    "avg_ns": 2016878994,
+    "stddev_ns": 31519018,
+    "avg_ts": 63.472143,
+    "stddev_ts": 0.991917,
+    "samples_ns": [ 1994591728, 2039166261 ],
+    "samples_ts": [ 64.1735, 62.7708 ]
+  }common_params_fit_impl: getting device memory data for initial parameters:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16028 + (19080 = 18522 +      64 +     493) +      -18740 |
+common_memory_breakdown_print: |   - Host               |                    266 =   257 +       0 +       9                |
+common_params_fit_impl: projected to use 19080 MiB of device memory vs. 16028 MiB of free device memory
+common_params_fit_impl: cannot meet free memory target of 1024 MiB, need to reduce device memory by 4076 MiB
+common_params_fit_impl: context size set by user to 512 -> no change
+common_params_fit_impl: getting device memory data with all MoE tensors moved to system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16028 + ( 1952 =  1386 +      64 +     501) +       -1612 |
+common_memory_breakdown_print: |   - Host               |                  17402 = 17393 +       0 +       9                |
+common_params_fit_impl: with only dense weights in device memory there is a total surplus of 13051 MiB
+common_params_fit_impl: id=0, target=15004 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16092 + (  894 =     0 +       0 +     894) +        -618 |
+common_memory_breakdown_print: |   - Host               |                  18866 = 18780 +      64 +      21                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer= 0, n_part= 0, overflow_type=4, mem=   894 MiB
+common_params_fit_impl: filling dense-only layers back-to-front:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16028 + ( 2360 =  1794 +      64 +     501) +       -2020 |
+common_memory_breakdown_print: |   - Host               |                  16994 = 16985 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=41, overflow_type=4, mem=  2360 MiB
+common_params_fit_impl: set ngl_per_device[0].n_layer=42
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers,   2360 MiB used,  13667 MiB free
+common_params_fit_impl: converting dense-only layers to full layers and filling them front-to-back with overflow to next device/system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16028 + (19080 = 18522 +      64 +     493) +      -18740 |
+common_memory_breakdown_print: |   - Host               |                    266 =   257 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part= 0, overflow_type=4, mem= 19080 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16028 + (15000 = 14442 +      64 +     493) +      -14660 |
+common_memory_breakdown_print: |   - Host               |                   4346 =  4337 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=4, mem= 15000 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part)=(42, 10), id_dense_start=0
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16028 + (15408 = 14850 +      64 +     493) +      -15068 |
+common_memory_breakdown_print: |   - Host               |                   3938 =  3929 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part= 9, overflow_type=4, mem= 15408 MiB
+common_params_fit_impl: set ngl_per_device_high[0].(n_layer, n_part)=(42, 9), id_dense_start_high=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_UP
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16028 + (15133 = 14575 +      64 +     493) +      -14793 |
+common_memory_breakdown_print: |   - Host               |                   4213 =  4204 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=2, mem= 15133 MiB
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_ATTN
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16028 + (14997 = 14439 +      64 +     493) +      -14657 |
+common_memory_breakdown_print: |   - Host               |                   4350 =  4341 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=1, mem= 14997 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 10, ATTN), id_dense_start=0
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers (10 overflowing),  14997 MiB used,   1030 MiB free
+common_fit_params: successfully fit params to free device memory
+common_fit_params: fitting params to free memory took 3.30 seconds
+,
+  {
+    "build_commit": "7fb76fc42",
+    "build_number": 9067,
+    "cpu_info": "AMD Ryzen 7 5700X 8-Core Processor",
+    "gpu_info": "AMD Radeon RX 6800 XT",
+    "backends": "ROCm",
+    "model_filename": "/home/stormrage/models/Qwen3_35BMTPIQ4.gguf",
+    "model_type": "qwen35moe 35B.A3B IQ4_XS - 4.25 bpw",
+    "model_size": 19692919424,
+    "model_n_params": 35505251456,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "n_threads": 8,
+    "cpu_mask": "0x0",
+    "cpu_strict": false,
+    "poll": 50,
+    "type_k": "turbo4",
+    "type_v": "turbo2",
+    "n_gpu_layers": 30,
+    "n_cpu_moe": 0,
+    "split_mode": "layer",
+    "main_gpu": 0,
+    "no_kv_offload": false,
+    "flash_attn": true,
+    "devices": "auto",
+    "tensor_split": "0.00",
+    "tensor_buft_overrides": "none",
+    "use_mmap": true,
+    "use_direct_io": false,
+    "embeddings": false,
+    "no_op_offload": 0,
+    "no_host": false,
+    "fit_target": 1024,
+    "fit_min_ctx": 2048,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 0,
+    "test_time": "2026-05-12T22:20:56Z",
+    "avg_ns": 185421308,
+    "stddev_ns": 1692123,
+    "avg_ts": 2761.394180,
+    "stddev_ts": 25.200016,
+    "samples_ns": [ 186617820, 184224796 ],
+    "samples_ts": [ 2743.58, 2779.21 ]
+  }common_params_fit_impl: getting device memory data for initial parameters:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16028 + (18710 = 18522 +      63 +     123) +      -18370 |
+common_memory_breakdown_print: |   - Host               |                    259 =   257 +       0 +       2                |
+common_params_fit_impl: projected to use 18710 MiB of device memory vs. 16028 MiB of free device memory
+common_params_fit_impl: cannot meet free memory target of 1024 MiB, need to reduce device memory by 3706 MiB
+common_params_fit_impl: context size set by user to 128 -> no change
+common_params_fit_impl: getting device memory data with all MoE tensors moved to system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16028 + ( 1600 =  1386 +      63 +     150) +       -1260 |
+common_memory_breakdown_print: |   - Host               |                  17395 = 17393 +       0 +       2                |
+common_params_fit_impl: with only dense weights in device memory there is a total surplus of 13403 MiB
+common_params_fit_impl: id=0, target=15004 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16092 + (  522 =     0 +       0 +     522) +        -246 |
+common_memory_breakdown_print: |   - Host               |                  18849 = 18780 +      63 +       5                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer= 0, n_part= 0, overflow_type=4, mem=   522 MiB
+common_params_fit_impl: filling dense-only layers back-to-front:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16028 + ( 2008 =  1794 +      63 +     150) +       -1668 |
+common_memory_breakdown_print: |   - Host               |                  16987 = 16985 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=41, overflow_type=4, mem=  2008 MiB
+common_params_fit_impl: set ngl_per_device[0].n_layer=42
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers,   2008 MiB used,  14019 MiB free
+common_params_fit_impl: converting dense-only layers to full layers and filling them front-to-back with overflow to next device/system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16028 + (18710 = 18522 +      63 +     123) +      -18370 |
+common_memory_breakdown_print: |   - Host               |                    259 =   257 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part= 0, overflow_type=4, mem= 18710 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16028 + (14656 = 14442 +      63 +     149) +      -14316 |
+common_memory_breakdown_print: |   - Host               |                   4339 =  4337 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=4, mem= 14656 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part)=(42, 10), id_dense_start=0
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16028 + (15064 = 14850 +      63 +     149) +      -14724 |
+common_memory_breakdown_print: |   - Host               |                   3931 =  3929 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part= 9, overflow_type=4, mem= 15064 MiB
+common_params_fit_impl: set ngl_per_device_high[0].(n_layer, n_part)=(42, 9), id_dense_start_high=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_UP
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16028 + (14791 = 14575 +      63 +     151) +      -14451 |
+common_memory_breakdown_print: |   - Host               |                   4206 =  4204 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=2, mem= 14791 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 10, UP), id_dense_start=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_GATE
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16028 + (14931 = 14714 +      63 +     153) +      -14591 |
+common_memory_breakdown_print: |   - Host               |                   4068 =  4066 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=3, mem= 14931 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 10, GATE), id_dense_start=0
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers (10 overflowing),  14931 MiB used,   1096 MiB free
+common_fit_params: successfully fit params to free device memory
+common_fit_params: fitting params to free memory took 2.98 seconds
+,
+  {
+    "build_commit": "7fb76fc42",
+    "build_number": 9067,
+    "cpu_info": "AMD Ryzen 7 5700X 8-Core Processor",
+    "gpu_info": "AMD Radeon RX 6800 XT",
+    "backends": "ROCm",
+    "model_filename": "/home/stormrage/models/Qwen3_35BMTPIQ4.gguf",
+    "model_type": "qwen35moe 35B.A3B IQ4_XS - 4.25 bpw",
+    "model_size": 19692919424,
+    "model_n_params": 35505251456,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "n_threads": 8,
+    "cpu_mask": "0x0",
+    "cpu_strict": false,
+    "poll": 50,
+    "type_k": "turbo4",
+    "type_v": "turbo2",
+    "n_gpu_layers": 30,
+    "n_cpu_moe": 0,
+    "split_mode": "layer",
+    "main_gpu": 0,
+    "no_kv_offload": false,
+    "flash_attn": true,
+    "devices": "auto",
+    "tensor_split": "0.00",
+    "tensor_buft_overrides": "none",
+    "use_mmap": true,
+    "use_direct_io": false,
+    "embeddings": false,
+    "no_op_offload": 0,
+    "no_host": false,
+    "fit_target": 1024,
+    "fit_min_ctx": 2048,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 0,
+    "test_time": "2026-05-12T22:21:04Z",
+    "avg_ns": 2026909990,
+    "stddev_ns": 33424683,
+    "avg_ts": 63.158900,
+    "stddev_ts": 1.041518,
+    "samples_ns": [ 2050544768, 2003275213 ],
+    "samples_ts": [ 62.4224, 63.8954 ]
+  }common_params_fit_impl: getting device memory data for initial parameters:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16026 + (19081 = 18522 +      65 +     493) +      -18739 |
+common_memory_breakdown_print: |   - Host               |                    266 =   257 +       0 +       9                |
+common_params_fit_impl: projected to use 19081 MiB of device memory vs. 16026 MiB of free device memory
+common_params_fit_impl: cannot meet free memory target of 1024 MiB, need to reduce device memory by 4079 MiB
+common_params_fit_impl: context size set by user to 512 -> no change
+common_params_fit_impl: getting device memory data with all MoE tensors moved to system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16026 + ( 1953 =  1386 +      65 +     501) +       -1611 |
+common_memory_breakdown_print: |   - Host               |                  17402 = 17393 +       0 +       9                |
+common_params_fit_impl: with only dense weights in device memory there is a total surplus of 13048 MiB
+common_params_fit_impl: id=0, target=15002 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16090 + (  894 =     0 +       0 +     894) +        -616 |
+common_memory_breakdown_print: |   - Host               |                  18866 = 18780 +      65 +      21                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer= 0, n_part= 0, overflow_type=4, mem=   894 MiB
+common_params_fit_impl: filling dense-only layers back-to-front:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16026 + ( 2361 =  1794 +      65 +     501) +       -2019 |
+common_memory_breakdown_print: |   - Host               |                  16994 = 16985 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=41, overflow_type=4, mem=  2361 MiB
+common_params_fit_impl: set ngl_per_device[0].n_layer=42
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers,   2361 MiB used,  13664 MiB free
+common_params_fit_impl: converting dense-only layers to full layers and filling them front-to-back with overflow to next device/system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16026 + (19081 = 18522 +      65 +     493) +      -18739 |
+common_memory_breakdown_print: |   - Host               |                    266 =   257 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part= 0, overflow_type=4, mem= 19081 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16026 + (14593 = 14034 +      65 +     493) +      -14251 |
+common_memory_breakdown_print: |   - Host               |                   4754 =  4745 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=11, overflow_type=4, mem= 14593 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part)=(42, 11), id_dense_start=0
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16026 + (15001 = 14442 +      65 +     493) +      -14659 |
+common_memory_breakdown_print: |   - Host               |                   4346 =  4337 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=4, mem= 15001 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part)=(42, 10), id_dense_start=0
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16026 + (15409 = 14850 +      65 +     493) +      -15067 |
+common_memory_breakdown_print: |   - Host               |                   3938 =  3929 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part= 9, overflow_type=4, mem= 15409 MiB
+common_params_fit_impl: set ngl_per_device_high[0].(n_layer, n_part)=(42, 9), id_dense_start_high=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_UP
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16026 + (15134 = 14575 +      65 +     493) +      -14792 |
+common_memory_breakdown_print: |   - Host               |                   4213 =  4204 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=2, mem= 15134 MiB
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_ATTN
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16026 + (14997 = 14439 +      65 +     493) +      -14655 |
+common_memory_breakdown_print: |   - Host               |                   4350 =  4341 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=1, mem= 14997 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 10, ATTN), id_dense_start=0
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers (10 overflowing),  14997 MiB used,   1028 MiB free
+common_fit_params: successfully fit params to free device memory
+common_fit_params: fitting params to free memory took 3.31 seconds
+,
+  {
+    "build_commit": "7fb76fc42",
+    "build_number": 9067,
+    "cpu_info": "AMD Ryzen 7 5700X 8-Core Processor",
+    "gpu_info": "AMD Radeon RX 6800 XT",
+    "backends": "ROCm",
+    "model_filename": "/home/stormrage/models/Qwen3_35BMTPIQ4.gguf",
+    "model_type": "qwen35moe 35B.A3B IQ4_XS - 4.25 bpw",
+    "model_size": 19692919424,
+    "model_n_params": 35505251456,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "n_threads": 8,
+    "cpu_mask": "0x0",
+    "cpu_strict": false,
+    "poll": 50,
+    "type_k": "turbo3",
+    "type_v": "turbo4",
+    "n_gpu_layers": 30,
+    "n_cpu_moe": 0,
+    "split_mode": "layer",
+    "main_gpu": 0,
+    "no_kv_offload": false,
+    "flash_attn": true,
+    "devices": "auto",
+    "tensor_split": "0.00",
+    "tensor_buft_overrides": "none",
+    "use_mmap": true,
+    "use_direct_io": false,
+    "embeddings": false,
+    "no_op_offload": 0,
+    "no_host": false,
+    "fit_target": 1024,
+    "fit_min_ctx": 2048,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 0,
+    "test_time": "2026-05-12T22:21:16Z",
+    "avg_ns": 184664541,
+    "stddev_ns": 551389,
+    "avg_ts": 2772.607451,
+    "stddev_ts": 8.278718,
+    "samples_ns": [ 185054432, 184274650 ],
+    "samples_ts": [ 2766.75, 2778.46 ]
+  }common_params_fit_impl: getting device memory data for initial parameters:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16026 + (18710 = 18522 +      64 +     123) +      -18368 |
+common_memory_breakdown_print: |   - Host               |                    259 =   257 +       0 +       2                |
+common_params_fit_impl: projected to use 18710 MiB of device memory vs. 16026 MiB of free device memory
+common_params_fit_impl: cannot meet free memory target of 1024 MiB, need to reduce device memory by 3708 MiB
+common_params_fit_impl: context size set by user to 128 -> no change
+common_params_fit_impl: getting device memory data with all MoE tensors moved to system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16026 + ( 1601 =  1386 +      64 +     150) +       -1259 |
+common_memory_breakdown_print: |   - Host               |                  17395 = 17393 +       0 +       2                |
+common_params_fit_impl: with only dense weights in device memory there is a total surplus of 13400 MiB
+common_params_fit_impl: id=0, target=15002 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16090 + (  522 =     0 +       0 +     522) +        -244 |
+common_memory_breakdown_print: |   - Host               |                  18849 = 18780 +      64 +       5                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer= 0, n_part= 0, overflow_type=4, mem=   522 MiB
+common_params_fit_impl: filling dense-only layers back-to-front:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16026 + ( 2009 =  1794 +      64 +     150) +       -1667 |
+common_memory_breakdown_print: |   - Host               |                  16987 = 16985 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=41, overflow_type=4, mem=  2009 MiB
+common_params_fit_impl: set ngl_per_device[0].n_layer=42
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers,   2009 MiB used,  14016 MiB free
+common_params_fit_impl: converting dense-only layers to full layers and filling them front-to-back with overflow to next device/system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16026 + (18710 = 18522 +      64 +     123) +      -18368 |
+common_memory_breakdown_print: |   - Host               |                    259 =   257 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part= 0, overflow_type=4, mem= 18710 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16026 + (14656 = 14442 +      64 +     149) +      -14314 |
+common_memory_breakdown_print: |   - Host               |                   4339 =  4337 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=4, mem= 14656 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part)=(42, 10), id_dense_start=0
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16026 + (15064 = 14850 +      64 +     149) +      -14722 |
+common_memory_breakdown_print: |   - Host               |                   3931 =  3929 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part= 9, overflow_type=4, mem= 15064 MiB
+common_params_fit_impl: set ngl_per_device_high[0].(n_layer, n_part)=(42, 9), id_dense_start_high=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_UP
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16026 + (14791 = 14575 +      64 +     151) +      -14449 |
+common_memory_breakdown_print: |   - Host               |                   4206 =  4204 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=2, mem= 14791 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 10, UP), id_dense_start=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_GATE
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16026 + (14931 = 14714 +      64 +     153) +      -14589 |
+common_memory_breakdown_print: |   - Host               |                   4068 =  4066 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=3, mem= 14931 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 10, GATE), id_dense_start=0
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers (10 overflowing),  14931 MiB used,   1094 MiB free
+common_fit_params: successfully fit params to free device memory
+common_fit_params: fitting params to free memory took 2.80 seconds
+,
+  {
+    "build_commit": "7fb76fc42",
+    "build_number": 9067,
+    "cpu_info": "AMD Ryzen 7 5700X 8-Core Processor",
+    "gpu_info": "AMD Radeon RX 6800 XT",
+    "backends": "ROCm",
+    "model_filename": "/home/stormrage/models/Qwen3_35BMTPIQ4.gguf",
+    "model_type": "qwen35moe 35B.A3B IQ4_XS - 4.25 bpw",
+    "model_size": 19692919424,
+    "model_n_params": 35505251456,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "n_threads": 8,
+    "cpu_mask": "0x0",
+    "cpu_strict": false,
+    "poll": 50,
+    "type_k": "turbo3",
+    "type_v": "turbo4",
+    "n_gpu_layers": 30,
+    "n_cpu_moe": 0,
+    "split_mode": "layer",
+    "main_gpu": 0,
+    "no_kv_offload": false,
+    "flash_attn": true,
+    "devices": "auto",
+    "tensor_split": "0.00",
+    "tensor_buft_overrides": "none",
+    "use_mmap": true,
+    "use_direct_io": false,
+    "embeddings": false,
+    "no_op_offload": 0,
+    "no_host": false,
+    "fit_target": 1024,
+    "fit_min_ctx": 2048,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 0,
+    "test_time": "2026-05-12T22:21:23Z",
+    "avg_ns": 1968131261,
+    "stddev_ns": 5724858,
+    "avg_ts": 65.036588,
+    "stddev_ts": 0.189177,
+    "samples_ns": [ 1972179347, 1964083175 ],
+    "samples_ts": [ 64.9028, 65.1704 ]
+  }common_params_fit_impl: getting device memory data for initial parameters:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16024 + (19080 = 18522 +      64 +     493) +      -18736 |
+common_memory_breakdown_print: |   - Host               |                    266 =   257 +       0 +       9                |
+common_params_fit_impl: projected to use 19080 MiB of device memory vs. 16024 MiB of free device memory
+common_params_fit_impl: cannot meet free memory target of 1024 MiB, need to reduce device memory by 4080 MiB
+common_params_fit_impl: context size set by user to 512 -> no change
+common_params_fit_impl: getting device memory data with all MoE tensors moved to system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16024 + ( 1952 =  1386 +      64 +     501) +       -1608 |
+common_memory_breakdown_print: |   - Host               |                  17402 = 17393 +       0 +       9                |
+common_params_fit_impl: with only dense weights in device memory there is a total surplus of 13047 MiB
+common_params_fit_impl: id=0, target=15000 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16088 + (  894 =     0 +       0 +     894) +        -614 |
+common_memory_breakdown_print: |   - Host               |                  18866 = 18780 +      64 +      21                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer= 0, n_part= 0, overflow_type=4, mem=   894 MiB
+common_params_fit_impl: filling dense-only layers back-to-front:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16024 + ( 2360 =  1794 +      64 +     501) +       -2016 |
+common_memory_breakdown_print: |   - Host               |                  16994 = 16985 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=41, overflow_type=4, mem=  2360 MiB
+common_params_fit_impl: set ngl_per_device[0].n_layer=42
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers,   2360 MiB used,  13663 MiB free
+common_params_fit_impl: converting dense-only layers to full layers and filling them front-to-back with overflow to next device/system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16024 + (19080 = 18522 +      64 +     493) +      -18736 |
+common_memory_breakdown_print: |   - Host               |                    266 =   257 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part= 0, overflow_type=4, mem= 19080 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16024 + (14592 = 14034 +      64 +     493) +      -14248 |
+common_memory_breakdown_print: |   - Host               |                   4754 =  4745 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=11, overflow_type=4, mem= 14592 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part)=(42, 11), id_dense_start=0
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16024 + (15000 = 14442 +      64 +     493) +      -14656 |
+common_memory_breakdown_print: |   - Host               |                   4346 =  4337 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=4, mem= 15000 MiB
+common_params_fit_impl: set ngl_per_device_high[0].(n_layer, n_part)=(42, 10), id_dense_start_high=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_UP
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16024 + (14724 = 14166 +      64 +     493) +      -14380 |
+common_memory_breakdown_print: |   - Host               |                   4622 =  4613 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=11, overflow_type=2, mem= 14724 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 11, UP), id_dense_start=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_GATE
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16024 + (14863 = 14305 +      64 +     493) +      -14519 |
+common_memory_breakdown_print: |   - Host               |                   4483 =  4474 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=11, overflow_type=3, mem= 14863 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 11, GATE), id_dense_start=0
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers (11 overflowing),  14863 MiB used,   1160 MiB free
+common_fit_params: successfully fit params to free device memory
+common_fit_params: fitting params to free memory took 2.88 seconds
+,
+  {
+    "build_commit": "7fb76fc42",
+    "build_number": 9067,
+    "cpu_info": "AMD Ryzen 7 5700X 8-Core Processor",
+    "gpu_info": "AMD Radeon RX 6800 XT",
+    "backends": "ROCm",
+    "model_filename": "/home/stormrage/models/Qwen3_35BMTPIQ4.gguf",
+    "model_type": "qwen35moe 35B.A3B IQ4_XS - 4.25 bpw",
+    "model_size": 19692919424,
+    "model_n_params": 35505251456,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "n_threads": 8,
+    "cpu_mask": "0x0",
+    "cpu_strict": false,
+    "poll": 50,
+    "type_k": "turbo3",
+    "type_v": "turbo3",
+    "n_gpu_layers": 30,
+    "n_cpu_moe": 0,
+    "split_mode": "layer",
+    "main_gpu": 0,
+    "no_kv_offload": false,
+    "flash_attn": true,
+    "devices": "auto",
+    "tensor_split": "0.00",
+    "tensor_buft_overrides": "none",
+    "use_mmap": true,
+    "use_direct_io": false,
+    "embeddings": false,
+    "no_op_offload": 0,
+    "no_host": false,
+    "fit_target": 1024,
+    "fit_min_ctx": 2048,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 0,
+    "test_time": "2026-05-12T22:21:35Z",
+    "avg_ns": 184138552,
+    "stddev_ns": 304074,
+    "avg_ts": 2780.518759,
+    "stddev_ts": 4.591566,
+    "samples_ns": [ 184353565, 183923539 ],
+    "samples_ts": [ 2777.27, 2783.77 ]
+  }common_params_fit_impl: getting device memory data for initial parameters:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16024 + (18710 = 18522 +      63 +     123) +      -18366 |
+common_memory_breakdown_print: |   - Host               |                    259 =   257 +       0 +       2                |
+common_params_fit_impl: projected to use 18710 MiB of device memory vs. 16024 MiB of free device memory
+common_params_fit_impl: cannot meet free memory target of 1024 MiB, need to reduce device memory by 3710 MiB
+common_params_fit_impl: context size set by user to 128 -> no change
+common_params_fit_impl: getting device memory data with all MoE tensors moved to system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16024 + ( 1600 =  1386 +      63 +     150) +       -1256 |
+common_memory_breakdown_print: |   - Host               |                  17395 = 17393 +       0 +       2                |
+common_params_fit_impl: with only dense weights in device memory there is a total surplus of 13399 MiB
+common_params_fit_impl: id=0, target=15000 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16088 + (  522 =     0 +       0 +     522) +        -242 |
+common_memory_breakdown_print: |   - Host               |                  18849 = 18780 +      63 +       5                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer= 0, n_part= 0, overflow_type=4, mem=   522 MiB
+common_params_fit_impl: filling dense-only layers back-to-front:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16024 + ( 2008 =  1794 +      63 +     150) +       -1664 |
+common_memory_breakdown_print: |   - Host               |                  16987 = 16985 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=41, overflow_type=4, mem=  2008 MiB
+common_params_fit_impl: set ngl_per_device[0].n_layer=42
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers,   2008 MiB used,  14015 MiB free
+common_params_fit_impl: converting dense-only layers to full layers and filling them front-to-back with overflow to next device/system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16024 + (18710 = 18522 +      63 +     123) +      -18366 |
+common_memory_breakdown_print: |   - Host               |                    259 =   257 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part= 0, overflow_type=4, mem= 18710 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16024 + (14656 = 14442 +      63 +     149) +      -14312 |
+common_memory_breakdown_print: |   - Host               |                   4339 =  4337 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=4, mem= 14656 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part)=(42, 10), id_dense_start=0
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16024 + (15064 = 14850 +      63 +     149) +      -14720 |
+common_memory_breakdown_print: |   - Host               |                   3931 =  3929 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part= 9, overflow_type=4, mem= 15064 MiB
+common_params_fit_impl: set ngl_per_device_high[0].(n_layer, n_part)=(42, 9), id_dense_start_high=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_UP
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16024 + (14791 = 14575 +      63 +     151) +      -14447 |
+common_memory_breakdown_print: |   - Host               |                   4206 =  4204 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=2, mem= 14791 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 10, UP), id_dense_start=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_GATE
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16024 + (14931 = 14714 +      63 +     153) +      -14587 |
+common_memory_breakdown_print: |   - Host               |                   4068 =  4066 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=3, mem= 14931 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 10, GATE), id_dense_start=0
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers (10 overflowing),  14931 MiB used,   1092 MiB free
+common_fit_params: successfully fit params to free device memory
+common_fit_params: fitting params to free memory took 2.89 seconds
+,
+  {
+    "build_commit": "7fb76fc42",
+    "build_number": 9067,
+    "cpu_info": "AMD Ryzen 7 5700X 8-Core Processor",
+    "gpu_info": "AMD Radeon RX 6800 XT",
+    "backends": "ROCm",
+    "model_filename": "/home/stormrage/models/Qwen3_35BMTPIQ4.gguf",
+    "model_type": "qwen35moe 35B.A3B IQ4_XS - 4.25 bpw",
+    "model_size": 19692919424,
+    "model_n_params": 35505251456,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "n_threads": 8,
+    "cpu_mask": "0x0",
+    "cpu_strict": false,
+    "poll": 50,
+    "type_k": "turbo3",
+    "type_v": "turbo3",
+    "n_gpu_layers": 30,
+    "n_cpu_moe": 0,
+    "split_mode": "layer",
+    "main_gpu": 0,
+    "no_kv_offload": false,
+    "flash_attn": true,
+    "devices": "auto",
+    "tensor_split": "0.00",
+    "tensor_buft_overrides": "none",
+    "use_mmap": true,
+    "use_direct_io": false,
+    "embeddings": false,
+    "no_op_offload": 0,
+    "no_host": false,
+    "fit_target": 1024,
+    "fit_min_ctx": 2048,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 0,
+    "test_time": "2026-05-12T22:21:42Z",
+    "avg_ns": 1967386342,
+    "stddev_ns": 2156864,
+    "avg_ts": 65.060977,
+    "stddev_ts": 0.071297,
+    "samples_ns": [ 1965861854, 1968910831 ],
+    "samples_ts": [ 65.1114, 65.0106 ]
+  }common_params_fit_impl: getting device memory data for initial parameters:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16022 + (19080 = 18522 +      64 +     493) +      -18734 |
+common_memory_breakdown_print: |   - Host               |                    266 =   257 +       0 +       9                |
+common_params_fit_impl: projected to use 19080 MiB of device memory vs. 16022 MiB of free device memory
+common_params_fit_impl: cannot meet free memory target of 1024 MiB, need to reduce device memory by 4082 MiB
+common_params_fit_impl: context size set by user to 512 -> no change
+common_params_fit_impl: getting device memory data with all MoE tensors moved to system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16022 + ( 1952 =  1386 +      64 +     501) +       -1606 |
+common_memory_breakdown_print: |   - Host               |                  17402 = 17393 +       0 +       9                |
+common_params_fit_impl: with only dense weights in device memory there is a total surplus of 13045 MiB
+common_params_fit_impl: id=0, target=14998 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16086 + (  894 =     0 +       0 +     894) +        -612 |
+common_memory_breakdown_print: |   - Host               |                  18866 = 18780 +      64 +      21                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer= 0, n_part= 0, overflow_type=4, mem=   894 MiB
+common_params_fit_impl: filling dense-only layers back-to-front:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16022 + ( 2360 =  1794 +      64 +     501) +       -2014 |
+common_memory_breakdown_print: |   - Host               |                  16994 = 16985 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=41, overflow_type=4, mem=  2360 MiB
+common_params_fit_impl: set ngl_per_device[0].n_layer=42
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers,   2360 MiB used,  13661 MiB free
+common_params_fit_impl: converting dense-only layers to full layers and filling them front-to-back with overflow to next device/system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16022 + (19080 = 18522 +      64 +     493) +      -18734 |
+common_memory_breakdown_print: |   - Host               |                    266 =   257 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part= 0, overflow_type=4, mem= 19080 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16022 + (14592 = 14034 +      64 +     493) +      -14246 |
+common_memory_breakdown_print: |   - Host               |                   4754 =  4745 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=11, overflow_type=4, mem= 14592 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part)=(42, 11), id_dense_start=0
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16022 + (15000 = 14442 +      64 +     493) +      -14654 |
+common_memory_breakdown_print: |   - Host               |                   4346 =  4337 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=4, mem= 15000 MiB
+common_params_fit_impl: set ngl_per_device_high[0].(n_layer, n_part)=(42, 10), id_dense_start_high=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_UP
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16022 + (14724 = 14166 +      64 +     493) +      -14378 |
+common_memory_breakdown_print: |   - Host               |                   4622 =  4613 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=11, overflow_type=2, mem= 14724 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 11, UP), id_dense_start=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_GATE
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16022 + (14863 = 14305 +      64 +     493) +      -14517 |
+common_memory_breakdown_print: |   - Host               |                   4483 =  4474 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=11, overflow_type=3, mem= 14863 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 11, GATE), id_dense_start=0
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers (11 overflowing),  14863 MiB used,   1158 MiB free
+common_fit_params: successfully fit params to free device memory
+common_fit_params: fitting params to free memory took 2.80 seconds
+,
+  {
+    "build_commit": "7fb76fc42",
+    "build_number": 9067,
+    "cpu_info": "AMD Ryzen 7 5700X 8-Core Processor",
+    "gpu_info": "AMD Radeon RX 6800 XT",
+    "backends": "ROCm",
+    "model_filename": "/home/stormrage/models/Qwen3_35BMTPIQ4.gguf",
+    "model_type": "qwen35moe 35B.A3B IQ4_XS - 4.25 bpw",
+    "model_size": 19692919424,
+    "model_n_params": 35505251456,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "n_threads": 8,
+    "cpu_mask": "0x0",
+    "cpu_strict": false,
+    "poll": 50,
+    "type_k": "turbo3",
+    "type_v": "turbo2",
+    "n_gpu_layers": 30,
+    "n_cpu_moe": 0,
+    "split_mode": "layer",
+    "main_gpu": 0,
+    "no_kv_offload": false,
+    "flash_attn": true,
+    "devices": "auto",
+    "tensor_split": "0.00",
+    "tensor_buft_overrides": "none",
+    "use_mmap": true,
+    "use_direct_io": false,
+    "embeddings": false,
+    "no_op_offload": 0,
+    "no_host": false,
+    "fit_target": 1024,
+    "fit_min_ctx": 2048,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 0,
+    "test_time": "2026-05-12T22:21:53Z",
+    "avg_ns": 184248418,
+    "stddev_ns": 162876,
+    "avg_ts": 2778.858053,
+    "stddev_ts": 2.456522,
+    "samples_ns": [ 184363589, 184133247 ],
+    "samples_ts": [ 2777.12, 2780.6 ]
+  }common_params_fit_impl: getting device memory data for initial parameters:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16022 + (18709 = 18522 +      63 +     123) +      -18363 |
+common_memory_breakdown_print: |   - Host               |                    259 =   257 +       0 +       2                |
+common_params_fit_impl: projected to use 18709 MiB of device memory vs. 16022 MiB of free device memory
+common_params_fit_impl: cannot meet free memory target of 1024 MiB, need to reduce device memory by 3711 MiB
+common_params_fit_impl: context size set by user to 128 -> no change
+common_params_fit_impl: getting device memory data with all MoE tensors moved to system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16022 + ( 1600 =  1386 +      63 +     150) +       -1254 |
+common_memory_breakdown_print: |   - Host               |                  17395 = 17393 +       0 +       2                |
+common_params_fit_impl: with only dense weights in device memory there is a total surplus of 13397 MiB
+common_params_fit_impl: id=0, target=14998 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16086 + (  522 =     0 +       0 +     522) +        -240 |
+common_memory_breakdown_print: |   - Host               |                  18849 = 18780 +      63 +       5                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer= 0, n_part= 0, overflow_type=4, mem=   522 MiB
+common_params_fit_impl: filling dense-only layers back-to-front:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16022 + ( 2008 =  1794 +      63 +     150) +       -1662 |
+common_memory_breakdown_print: |   - Host               |                  16987 = 16985 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=41, overflow_type=4, mem=  2008 MiB
+common_params_fit_impl: set ngl_per_device[0].n_layer=42
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers,   2008 MiB used,  14013 MiB free
+common_params_fit_impl: converting dense-only layers to full layers and filling them front-to-back with overflow to next device/system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16022 + (18709 = 18522 +      63 +     123) +      -18363 |
+common_memory_breakdown_print: |   - Host               |                    259 =   257 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part= 0, overflow_type=4, mem= 18709 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16022 + (14655 = 14442 +      63 +     149) +      -14309 |
+common_memory_breakdown_print: |   - Host               |                   4339 =  4337 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=4, mem= 14655 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part)=(42, 10), id_dense_start=0
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16022 + (15063 = 14850 +      63 +     149) +      -14717 |
+common_memory_breakdown_print: |   - Host               |                   3931 =  3929 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part= 9, overflow_type=4, mem= 15063 MiB
+common_params_fit_impl: set ngl_per_device_high[0].(n_layer, n_part)=(42, 9), id_dense_start_high=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_UP
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16022 + (14790 = 14575 +      63 +     151) +      -14444 |
+common_memory_breakdown_print: |   - Host               |                   4206 =  4204 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=2, mem= 14790 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 10, UP), id_dense_start=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_GATE
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16022 + (14931 = 14714 +      63 +     153) +      -14585 |
+common_memory_breakdown_print: |   - Host               |                   4068 =  4066 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=3, mem= 14931 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 10, GATE), id_dense_start=0
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers (10 overflowing),  14931 MiB used,   1090 MiB free
+common_fit_params: successfully fit params to free device memory
+common_fit_params: fitting params to free memory took 2.85 seconds
+,
+  {
+    "build_commit": "7fb76fc42",
+    "build_number": 9067,
+    "cpu_info": "AMD Ryzen 7 5700X 8-Core Processor",
+    "gpu_info": "AMD Radeon RX 6800 XT",
+    "backends": "ROCm",
+    "model_filename": "/home/stormrage/models/Qwen3_35BMTPIQ4.gguf",
+    "model_type": "qwen35moe 35B.A3B IQ4_XS - 4.25 bpw",
+    "model_size": 19692919424,
+    "model_n_params": 35505251456,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "n_threads": 8,
+    "cpu_mask": "0x0",
+    "cpu_strict": false,
+    "poll": 50,
+    "type_k": "turbo3",
+    "type_v": "turbo2",
+    "n_gpu_layers": 30,
+    "n_cpu_moe": 0,
+    "split_mode": "layer",
+    "main_gpu": 0,
+    "no_kv_offload": false,
+    "flash_attn": true,
+    "devices": "auto",
+    "tensor_split": "0.00",
+    "tensor_buft_overrides": "none",
+    "use_mmap": true,
+    "use_direct_io": false,
+    "embeddings": false,
+    "no_op_offload": 0,
+    "no_host": false,
+    "fit_target": 1024,
+    "fit_min_ctx": 2048,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 0,
+    "test_time": "2026-05-12T22:22:01Z",
+    "avg_ns": 1959459589,
+    "stddev_ns": 5322577,
+    "avg_ts": 65.324375,
+    "stddev_ts": 0.177432,
+    "samples_ns": [ 1955696219, 1963222960 ],
+    "samples_ts": [ 65.4498, 65.1989 ]
+  }common_params_fit_impl: getting device memory data for initial parameters:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16020 + (19080 = 18522 +      64 +     493) +      -18732 |
+common_memory_breakdown_print: |   - Host               |                    266 =   257 +       0 +       9                |
+common_params_fit_impl: projected to use 19080 MiB of device memory vs. 16020 MiB of free device memory
+common_params_fit_impl: cannot meet free memory target of 1024 MiB, need to reduce device memory by 4084 MiB
+common_params_fit_impl: context size set by user to 512 -> no change
+common_params_fit_impl: getting device memory data with all MoE tensors moved to system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16020 + ( 1952 =  1386 +      64 +     501) +       -1604 |
+common_memory_breakdown_print: |   - Host               |                  17402 = 17393 +       0 +       9                |
+common_params_fit_impl: with only dense weights in device memory there is a total surplus of 13043 MiB
+common_params_fit_impl: id=0, target=14996 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16084 + (  894 =     0 +       0 +     894) +        -610 |
+common_memory_breakdown_print: |   - Host               |                  18866 = 18780 +      64 +      21                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer= 0, n_part= 0, overflow_type=4, mem=   894 MiB
+common_params_fit_impl: filling dense-only layers back-to-front:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16020 + ( 2360 =  1794 +      64 +     501) +       -2012 |
+common_memory_breakdown_print: |   - Host               |                  16994 = 16985 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=41, overflow_type=4, mem=  2360 MiB
+common_params_fit_impl: set ngl_per_device[0].n_layer=42
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers,   2360 MiB used,  13659 MiB free
+common_params_fit_impl: converting dense-only layers to full layers and filling them front-to-back with overflow to next device/system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16020 + (19080 = 18522 +      64 +     493) +      -18732 |
+common_memory_breakdown_print: |   - Host               |                    266 =   257 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part= 0, overflow_type=4, mem= 19080 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16020 + (14592 = 14034 +      64 +     493) +      -14244 |
+common_memory_breakdown_print: |   - Host               |                   4754 =  4745 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=11, overflow_type=4, mem= 14592 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part)=(42, 11), id_dense_start=0
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16020 + (15000 = 14442 +      64 +     493) +      -14652 |
+common_memory_breakdown_print: |   - Host               |                   4346 =  4337 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=4, mem= 15000 MiB
+common_params_fit_impl: set ngl_per_device_high[0].(n_layer, n_part)=(42, 10), id_dense_start_high=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_UP
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16020 + (14724 = 14166 +      64 +     493) +      -14376 |
+common_memory_breakdown_print: |   - Host               |                   4622 =  4613 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=11, overflow_type=2, mem= 14724 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 11, UP), id_dense_start=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_GATE
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16020 + (14863 = 14305 +      64 +     493) +      -14515 |
+common_memory_breakdown_print: |   - Host               |                   4483 =  4474 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=11, overflow_type=3, mem= 14863 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 11, GATE), id_dense_start=0
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers (11 overflowing),  14863 MiB used,   1156 MiB free
+common_fit_params: successfully fit params to free device memory
+common_fit_params: fitting params to free memory took 2.87 seconds
+,
+  {
+    "build_commit": "7fb76fc42",
+    "build_number": 9067,
+    "cpu_info": "AMD Ryzen 7 5700X 8-Core Processor",
+    "gpu_info": "AMD Radeon RX 6800 XT",
+    "backends": "ROCm",
+    "model_filename": "/home/stormrage/models/Qwen3_35BMTPIQ4.gguf",
+    "model_type": "qwen35moe 35B.A3B IQ4_XS - 4.25 bpw",
+    "model_size": 19692919424,
+    "model_n_params": 35505251456,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "n_threads": 8,
+    "cpu_mask": "0x0",
+    "cpu_strict": false,
+    "poll": 50,
+    "type_k": "turbo2",
+    "type_v": "turbo4",
+    "n_gpu_layers": 30,
+    "n_cpu_moe": 0,
+    "split_mode": "layer",
+    "main_gpu": 0,
+    "no_kv_offload": false,
+    "flash_attn": true,
+    "devices": "auto",
+    "tensor_split": "0.00",
+    "tensor_buft_overrides": "none",
+    "use_mmap": true,
+    "use_direct_io": false,
+    "embeddings": false,
+    "no_op_offload": 0,
+    "no_host": false,
+    "fit_target": 1024,
+    "fit_min_ctx": 2048,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 0,
+    "test_time": "2026-05-12T22:22:12Z",
+    "avg_ns": 184831186,
+    "stddev_ns": 217134,
+    "avg_ts": 2770.097213,
+    "stddev_ts": 3.254227,
+    "samples_ns": [ 184984723, 184677649 ],
+    "samples_ts": [ 2767.8, 2772.4 ]
+  }common_params_fit_impl: getting device memory data for initial parameters:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16020 + (18710 = 18522 +      63 +     123) +      -18362 |
+common_memory_breakdown_print: |   - Host               |                    259 =   257 +       0 +       2                |
+common_params_fit_impl: projected to use 18710 MiB of device memory vs. 16020 MiB of free device memory
+common_params_fit_impl: cannot meet free memory target of 1024 MiB, need to reduce device memory by 3714 MiB
+common_params_fit_impl: context size set by user to 128 -> no change
+common_params_fit_impl: getting device memory data with all MoE tensors moved to system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16020 + ( 1600 =  1386 +      63 +     150) +       -1252 |
+common_memory_breakdown_print: |   - Host               |                  17395 = 17393 +       0 +       2                |
+common_params_fit_impl: with only dense weights in device memory there is a total surplus of 13395 MiB
+common_params_fit_impl: id=0, target=14996 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16084 + (  522 =     0 +       0 +     522) +        -238 |
+common_memory_breakdown_print: |   - Host               |                  18849 = 18780 +      63 +       5                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer= 0, n_part= 0, overflow_type=4, mem=   522 MiB
+common_params_fit_impl: filling dense-only layers back-to-front:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16020 + ( 2008 =  1794 +      63 +     150) +       -1660 |
+common_memory_breakdown_print: |   - Host               |                  16987 = 16985 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=41, overflow_type=4, mem=  2008 MiB
+common_params_fit_impl: set ngl_per_device[0].n_layer=42
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers,   2008 MiB used,  14011 MiB free
+common_params_fit_impl: converting dense-only layers to full layers and filling them front-to-back with overflow to next device/system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16020 + (18710 = 18522 +      63 +     123) +      -18362 |
+common_memory_breakdown_print: |   - Host               |                    259 =   257 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part= 0, overflow_type=4, mem= 18710 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16020 + (14656 = 14442 +      63 +     149) +      -14308 |
+common_memory_breakdown_print: |   - Host               |                   4339 =  4337 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=4, mem= 14656 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part)=(42, 10), id_dense_start=0
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16020 + (15064 = 14850 +      63 +     149) +      -14716 |
+common_memory_breakdown_print: |   - Host               |                   3931 =  3929 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part= 9, overflow_type=4, mem= 15064 MiB
+common_params_fit_impl: set ngl_per_device_high[0].(n_layer, n_part)=(42, 9), id_dense_start_high=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_UP
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16020 + (14791 = 14575 +      63 +     151) +      -14443 |
+common_memory_breakdown_print: |   - Host               |                   4206 =  4204 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=2, mem= 14791 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 10, UP), id_dense_start=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_GATE
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16020 + (14931 = 14714 +      63 +     153) +      -14583 |
+common_memory_breakdown_print: |   - Host               |                   4068 =  4066 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=3, mem= 14931 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 10, GATE), id_dense_start=0
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers (10 overflowing),  14931 MiB used,   1088 MiB free
+common_fit_params: successfully fit params to free device memory
+common_fit_params: fitting params to free memory took 2.83 seconds
+,
+  {
+    "build_commit": "7fb76fc42",
+    "build_number": 9067,
+    "cpu_info": "AMD Ryzen 7 5700X 8-Core Processor",
+    "gpu_info": "AMD Radeon RX 6800 XT",
+    "backends": "ROCm",
+    "model_filename": "/home/stormrage/models/Qwen3_35BMTPIQ4.gguf",
+    "model_type": "qwen35moe 35B.A3B IQ4_XS - 4.25 bpw",
+    "model_size": 19692919424,
+    "model_n_params": 35505251456,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "n_threads": 8,
+    "cpu_mask": "0x0",
+    "cpu_strict": false,
+    "poll": 50,
+    "type_k": "turbo2",
+    "type_v": "turbo4",
+    "n_gpu_layers": 30,
+    "n_cpu_moe": 0,
+    "split_mode": "layer",
+    "main_gpu": 0,
+    "no_kv_offload": false,
+    "flash_attn": true,
+    "devices": "auto",
+    "tensor_split": "0.00",
+    "tensor_buft_overrides": "none",
+    "use_mmap": true,
+    "use_direct_io": false,
+    "embeddings": false,
+    "no_op_offload": 0,
+    "no_host": false,
+    "fit_target": 1024,
+    "fit_min_ctx": 2048,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 0,
+    "test_time": "2026-05-12T22:22:20Z",
+    "avg_ns": 1958845009,
+    "stddev_ns": 2589040,
+    "avg_ts": 65.344686,
+    "stddev_ts": 0.086367,
+    "samples_ns": [ 1957014281, 1960675737 ],
+    "samples_ts": [ 65.4058, 65.2836 ]
+  }common_params_fit_impl: getting device memory data for initial parameters:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16018 + (19080 = 18522 +      64 +     493) +      -18730 |
+common_memory_breakdown_print: |   - Host               |                    266 =   257 +       0 +       9                |
+common_params_fit_impl: projected to use 19080 MiB of device memory vs. 16018 MiB of free device memory
+common_params_fit_impl: cannot meet free memory target of 1024 MiB, need to reduce device memory by 4086 MiB
+common_params_fit_impl: context size set by user to 512 -> no change
+common_params_fit_impl: getting device memory data with all MoE tensors moved to system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16018 + ( 1952 =  1386 +      64 +     501) +       -1602 |
+common_memory_breakdown_print: |   - Host               |                  17402 = 17393 +       0 +       9                |
+common_params_fit_impl: with only dense weights in device memory there is a total surplus of 13041 MiB
+common_params_fit_impl: id=0, target=14994 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16082 + (  894 =     0 +       0 +     894) +        -608 |
+common_memory_breakdown_print: |   - Host               |                  18866 = 18780 +      64 +      21                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer= 0, n_part= 0, overflow_type=4, mem=   894 MiB
+common_params_fit_impl: filling dense-only layers back-to-front:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16018 + ( 2360 =  1794 +      64 +     501) +       -2010 |
+common_memory_breakdown_print: |   - Host               |                  16994 = 16985 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=41, overflow_type=4, mem=  2360 MiB
+common_params_fit_impl: set ngl_per_device[0].n_layer=42
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers,   2360 MiB used,  13657 MiB free
+common_params_fit_impl: converting dense-only layers to full layers and filling them front-to-back with overflow to next device/system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16018 + (19080 = 18522 +      64 +     493) +      -18730 |
+common_memory_breakdown_print: |   - Host               |                    266 =   257 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part= 0, overflow_type=4, mem= 19080 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16018 + (14592 = 14034 +      64 +     493) +      -14242 |
+common_memory_breakdown_print: |   - Host               |                   4754 =  4745 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=11, overflow_type=4, mem= 14592 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part)=(42, 11), id_dense_start=0
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16018 + (15000 = 14442 +      64 +     493) +      -14650 |
+common_memory_breakdown_print: |   - Host               |                   4346 =  4337 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=4, mem= 15000 MiB
+common_params_fit_impl: set ngl_per_device_high[0].(n_layer, n_part)=(42, 10), id_dense_start_high=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_UP
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16018 + (14724 = 14166 +      64 +     493) +      -14374 |
+common_memory_breakdown_print: |   - Host               |                   4622 =  4613 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=11, overflow_type=2, mem= 14724 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 11, UP), id_dense_start=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_GATE
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16018 + (14863 = 14305 +      64 +     493) +      -14513 |
+common_memory_breakdown_print: |   - Host               |                   4483 =  4474 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=11, overflow_type=3, mem= 14863 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 11, GATE), id_dense_start=0
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers (11 overflowing),  14863 MiB used,   1154 MiB free
+common_fit_params: successfully fit params to free device memory
+common_fit_params: fitting params to free memory took 2.86 seconds
+,
+  {
+    "build_commit": "7fb76fc42",
+    "build_number": 9067,
+    "cpu_info": "AMD Ryzen 7 5700X 8-Core Processor",
+    "gpu_info": "AMD Radeon RX 6800 XT",
+    "backends": "ROCm",
+    "model_filename": "/home/stormrage/models/Qwen3_35BMTPIQ4.gguf",
+    "model_type": "qwen35moe 35B.A3B IQ4_XS - 4.25 bpw",
+    "model_size": 19692919424,
+    "model_n_params": 35505251456,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "n_threads": 8,
+    "cpu_mask": "0x0",
+    "cpu_strict": false,
+    "poll": 50,
+    "type_k": "turbo2",
+    "type_v": "turbo3",
+    "n_gpu_layers": 30,
+    "n_cpu_moe": 0,
+    "split_mode": "layer",
+    "main_gpu": 0,
+    "no_kv_offload": false,
+    "flash_attn": true,
+    "devices": "auto",
+    "tensor_split": "0.00",
+    "tensor_buft_overrides": "none",
+    "use_mmap": true,
+    "use_direct_io": false,
+    "embeddings": false,
+    "no_op_offload": 0,
+    "no_host": false,
+    "fit_target": 1024,
+    "fit_min_ctx": 2048,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 0,
+    "test_time": "2026-05-12T22:22:31Z",
+    "avg_ns": 187186079,
+    "stddev_ns": 4128288,
+    "avg_ts": 2735.911513,
+    "stddev_ts": 60.339064,
+    "samples_ns": [ 184266938, 190105220 ],
+    "samples_ts": [ 2778.58, 2693.25 ]
+  }common_params_fit_impl: getting device memory data for initial parameters:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16018 + (18709 = 18522 +      63 +     123) +      -18359 |
+common_memory_breakdown_print: |   - Host               |                    259 =   257 +       0 +       2                |
+common_params_fit_impl: projected to use 18709 MiB of device memory vs. 16018 MiB of free device memory
+common_params_fit_impl: cannot meet free memory target of 1024 MiB, need to reduce device memory by 3715 MiB
+common_params_fit_impl: context size set by user to 128 -> no change
+common_params_fit_impl: getting device memory data with all MoE tensors moved to system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16018 + ( 1600 =  1386 +      63 +     150) +       -1250 |
+common_memory_breakdown_print: |   - Host               |                  17395 = 17393 +       0 +       2                |
+common_params_fit_impl: with only dense weights in device memory there is a total surplus of 13393 MiB
+common_params_fit_impl: id=0, target=14994 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16082 + (  522 =     0 +       0 +     522) +        -236 |
+common_memory_breakdown_print: |   - Host               |                  18849 = 18780 +      63 +       5                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer= 0, n_part= 0, overflow_type=4, mem=   522 MiB
+common_params_fit_impl: filling dense-only layers back-to-front:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16018 + ( 2008 =  1794 +      63 +     150) +       -1658 |
+common_memory_breakdown_print: |   - Host               |                  16987 = 16985 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=41, overflow_type=4, mem=  2008 MiB
+common_params_fit_impl: set ngl_per_device[0].n_layer=42
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers,   2008 MiB used,  14009 MiB free
+common_params_fit_impl: converting dense-only layers to full layers and filling them front-to-back with overflow to next device/system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16018 + (18709 = 18522 +      63 +     123) +      -18359 |
+common_memory_breakdown_print: |   - Host               |                    259 =   257 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part= 0, overflow_type=4, mem= 18709 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16018 + (14655 = 14442 +      63 +     149) +      -14305 |
+common_memory_breakdown_print: |   - Host               |                   4339 =  4337 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=4, mem= 14655 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part)=(42, 10), id_dense_start=0
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16018 + (15063 = 14850 +      63 +     149) +      -14713 |
+common_memory_breakdown_print: |   - Host               |                   3931 =  3929 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part= 9, overflow_type=4, mem= 15063 MiB
+common_params_fit_impl: set ngl_per_device_high[0].(n_layer, n_part)=(42, 9), id_dense_start_high=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_UP
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16018 + (14790 = 14575 +      63 +     151) +      -14440 |
+common_memory_breakdown_print: |   - Host               |                   4206 =  4204 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=2, mem= 14790 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 10, UP), id_dense_start=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_GATE
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16018 + (14931 = 14714 +      63 +     153) +      -14581 |
+common_memory_breakdown_print: |   - Host               |                   4068 =  4066 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=3, mem= 14931 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 10, GATE), id_dense_start=0
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers (10 overflowing),  14931 MiB used,   1086 MiB free
+common_fit_params: successfully fit params to free device memory
+common_fit_params: fitting params to free memory took 2.83 seconds
+,
+  {
+    "build_commit": "7fb76fc42",
+    "build_number": 9067,
+    "cpu_info": "AMD Ryzen 7 5700X 8-Core Processor",
+    "gpu_info": "AMD Radeon RX 6800 XT",
+    "backends": "ROCm",
+    "model_filename": "/home/stormrage/models/Qwen3_35BMTPIQ4.gguf",
+    "model_type": "qwen35moe 35B.A3B IQ4_XS - 4.25 bpw",
+    "model_size": 19692919424,
+    "model_n_params": 35505251456,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "n_threads": 8,
+    "cpu_mask": "0x0",
+    "cpu_strict": false,
+    "poll": 50,
+    "type_k": "turbo2",
+    "type_v": "turbo3",
+    "n_gpu_layers": 30,
+    "n_cpu_moe": 0,
+    "split_mode": "layer",
+    "main_gpu": 0,
+    "no_kv_offload": false,
+    "flash_attn": true,
+    "devices": "auto",
+    "tensor_split": "0.00",
+    "tensor_buft_overrides": "none",
+    "use_mmap": true,
+    "use_direct_io": false,
+    "embeddings": false,
+    "no_op_offload": 0,
+    "no_host": false,
+    "fit_target": 1024,
+    "fit_min_ctx": 2048,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 0,
+    "test_time": "2026-05-12T22:22:39Z",
+    "avg_ns": 1953643590,
+    "stddev_ns": 3154606,
+    "avg_ts": 65.518689,
+    "stddev_ts": 0.105795,
+    "samples_ns": [ 1951412946, 1955874234 ],
+    "samples_ts": [ 65.5935, 65.4439 ]
+  }common_params_fit_impl: getting device memory data for initial parameters:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16016 + (19080 = 18522 +      64 +     493) +      -18728 |
+common_memory_breakdown_print: |   - Host               |                    266 =   257 +       0 +       9                |
+common_params_fit_impl: projected to use 19080 MiB of device memory vs. 16016 MiB of free device memory
+common_params_fit_impl: cannot meet free memory target of 1024 MiB, need to reduce device memory by 4088 MiB
+common_params_fit_impl: context size set by user to 512 -> no change
+common_params_fit_impl: getting device memory data with all MoE tensors moved to system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16016 + ( 1952 =  1386 +      64 +     501) +       -1600 |
+common_memory_breakdown_print: |   - Host               |                  17402 = 17393 +       0 +       9                |
+common_params_fit_impl: with only dense weights in device memory there is a total surplus of 13039 MiB
+common_params_fit_impl: id=0, target=14992 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16080 + (  894 =     0 +       0 +     894) +        -606 |
+common_memory_breakdown_print: |   - Host               |                  18866 = 18780 +      64 +      21                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer= 0, n_part= 0, overflow_type=4, mem=   894 MiB
+common_params_fit_impl: filling dense-only layers back-to-front:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16016 + ( 2360 =  1794 +      64 +     501) +       -2008 |
+common_memory_breakdown_print: |   - Host               |                  16994 = 16985 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=41, overflow_type=4, mem=  2360 MiB
+common_params_fit_impl: set ngl_per_device[0].n_layer=42
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers,   2360 MiB used,  13655 MiB free
+common_params_fit_impl: converting dense-only layers to full layers and filling them front-to-back with overflow to next device/system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16016 + (19080 = 18522 +      64 +     493) +      -18728 |
+common_memory_breakdown_print: |   - Host               |                    266 =   257 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part= 0, overflow_type=4, mem= 19080 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16016 + (14592 = 14034 +      64 +     493) +      -14240 |
+common_memory_breakdown_print: |   - Host               |                   4754 =  4745 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=11, overflow_type=4, mem= 14592 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part)=(42, 11), id_dense_start=0
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16016 + (15000 = 14442 +      64 +     493) +      -14648 |
+common_memory_breakdown_print: |   - Host               |                   4346 =  4337 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=4, mem= 15000 MiB
+common_params_fit_impl: set ngl_per_device_high[0].(n_layer, n_part)=(42, 10), id_dense_start_high=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_UP
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16016 + (14724 = 14166 +      64 +     493) +      -14372 |
+common_memory_breakdown_print: |   - Host               |                   4622 =  4613 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=11, overflow_type=2, mem= 14724 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 11, UP), id_dense_start=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_GATE
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16000 + (14863 = 14305 +      64 +     493) +      -14495 |
+common_memory_breakdown_print: |   - Host               |                   4483 =  4474 +       0 +       9                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=11, overflow_type=3, mem= 14863 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 11, GATE), id_dense_start=0
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers (11 overflowing),  14863 MiB used,   1152 MiB free
+common_fit_params: successfully fit params to free device memory
+common_fit_params: fitting params to free memory took 2.92 seconds
+,
+  {
+    "build_commit": "7fb76fc42",
+    "build_number": 9067,
+    "cpu_info": "AMD Ryzen 7 5700X 8-Core Processor",
+    "gpu_info": "AMD Radeon RX 6800 XT",
+    "backends": "ROCm",
+    "model_filename": "/home/stormrage/models/Qwen3_35BMTPIQ4.gguf",
+    "model_type": "qwen35moe 35B.A3B IQ4_XS - 4.25 bpw",
+    "model_size": 19692919424,
+    "model_n_params": 35505251456,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "n_threads": 8,
+    "cpu_mask": "0x0",
+    "cpu_strict": false,
+    "poll": 50,
+    "type_k": "turbo2",
+    "type_v": "turbo2",
+    "n_gpu_layers": 30,
+    "n_cpu_moe": 0,
+    "split_mode": "layer",
+    "main_gpu": 0,
+    "no_kv_offload": false,
+    "flash_attn": true,
+    "devices": "auto",
+    "tensor_split": "0.00",
+    "tensor_buft_overrides": "none",
+    "use_mmap": true,
+    "use_direct_io": false,
+    "embeddings": false,
+    "no_op_offload": 0,
+    "no_host": false,
+    "fit_target": 1024,
+    "fit_min_ctx": 2048,
+    "n_prompt": 512,
+    "n_gen": 0,
+    "n_depth": 0,
+    "test_time": "2026-05-12T22:22:50Z",
+    "avg_ns": 186590870,
+    "stddev_ns": 2743985,
+    "avg_ts": 2744.268062,
+    "stddev_ts": 40.355911,
+    "samples_ns": [ 184650628, 188531113 ],
+    "samples_ts": [ 2772.8, 2715.73 ]
+  }common_params_fit_impl: getting device memory data for initial parameters:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16016 + (18709 = 18522 +      63 +     123) +      -18357 |
+common_memory_breakdown_print: |   - Host               |                    259 =   257 +       0 +       2                |
+common_params_fit_impl: projected to use 18709 MiB of device memory vs. 16016 MiB of free device memory
+common_params_fit_impl: cannot meet free memory target of 1024 MiB, need to reduce device memory by 3717 MiB
+common_params_fit_impl: context size set by user to 128 -> no change
+common_params_fit_impl: getting device memory data with all MoE tensors moved to system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16016 + ( 1600 =  1386 +      63 +     150) +       -1248 |
+common_memory_breakdown_print: |   - Host               |                  17395 = 17393 +       0 +       2                |
+common_params_fit_impl: with only dense weights in device memory there is a total surplus of 13391 MiB
+common_params_fit_impl: id=0, target=14992 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16080 + (  522 =     0 +       0 +     522) +        -234 |
+common_memory_breakdown_print: |   - Host               |                  18849 = 18780 +      63 +       5                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer= 0, n_part= 0, overflow_type=4, mem=   522 MiB
+common_params_fit_impl: filling dense-only layers back-to-front:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16016 + ( 2008 =  1794 +      63 +     150) +       -1656 |
+common_memory_breakdown_print: |   - Host               |                  16987 = 16985 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=41, overflow_type=4, mem=  2008 MiB
+common_params_fit_impl: set ngl_per_device[0].n_layer=42
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers,   2008 MiB used,  14007 MiB free
+common_params_fit_impl: converting dense-only layers to full layers and filling them front-to-back with overflow to next device/system memory:
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16000 + (18709 = 18522 +      63 +     123) +      -18341 |
+common_memory_breakdown_print: |   - Host               |                    259 =   257 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part= 0, overflow_type=4, mem= 18709 MiB
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16016 + (14655 = 14442 +      63 +     149) +      -14303 |
+common_memory_breakdown_print: |   - Host               |                   4339 =  4337 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=4, mem= 14655 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part)=(42, 10), id_dense_start=0
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16016 + (15063 = 14850 +      63 +     149) +      -14711 |
+common_memory_breakdown_print: |   - Host               |                   3931 =  3929 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part= 9, overflow_type=4, mem= 15063 MiB
+common_params_fit_impl: set ngl_per_device_high[0].(n_layer, n_part)=(42, 9), id_dense_start_high=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_UP
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16016 + (14790 = 14575 +      63 +     151) +      -14438 |
+common_memory_breakdown_print: |   - Host               |                   4206 =  4204 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=2, mem= 14790 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 10, UP), id_dense_start=0
+common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_GATE
+common_memory_breakdown_print: | memory breakdown [MiB] | total    free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - ROCm0 (RX 6800 XT) | 16368 = 16016 + (14931 = 14714 +      63 +     153) +      -14579 |
+common_memory_breakdown_print: |   - Host               |                   4068 =  4066 +       0 +       2                |
+common_params_fit_impl: memory for test allocation by device:
+common_params_fit_impl: id=0, n_layer=42, n_part=10, overflow_type=3, mem= 14931 MiB
+common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(42, 10, GATE), id_dense_start=0
+common_params_fit_impl:   - ROCm0 (AMD Radeon RX 6800 XT): 42 layers (10 overflowing),  14931 MiB used,   1084 MiB free
+common_fit_params: successfully fit params to free device memory
+common_fit_params: fitting params to free memory took 3.13 seconds
+,
+  {
+    "build_commit": "7fb76fc42",
+    "build_number": 9067,
+    "cpu_info": "AMD Ryzen 7 5700X 8-Core Processor",
+    "gpu_info": "AMD Radeon RX 6800 XT",
+    "backends": "ROCm",
+    "model_filename": "/home/stormrage/models/Qwen3_35BMTPIQ4.gguf",
+    "model_type": "qwen35moe 35B.A3B IQ4_XS - 4.25 bpw",
+    "model_size": 19692919424,
+    "model_n_params": 35505251456,
+    "n_batch": 2048,
+    "n_ubatch": 512,
+    "n_threads": 8,
+    "cpu_mask": "0x0",
+    "cpu_strict": false,
+    "poll": 50,
+    "type_k": "turbo2",
+    "type_v": "turbo2",
+    "n_gpu_layers": 30,
+    "n_cpu_moe": 0,
+    "split_mode": "layer",
+    "main_gpu": 0,
+    "no_kv_offload": false,
+    "flash_attn": true,
+    "devices": "auto",
+    "tensor_split": "0.00",
+    "tensor_buft_overrides": "none",
+    "use_mmap": true,
+    "use_direct_io": false,
+    "embeddings": false,
+    "no_op_offload": 0,
+    "no_host": false,
+    "fit_target": 1024,
+    "fit_min_ctx": 2048,
+    "n_prompt": 0,
+    "n_gen": 128,
+    "n_depth": 0,
+    "test_time": "2026-05-12T22:22:58Z",
+    "avg_ns": 2158085820,
+    "stddev_ns": 67172622,
+    "avg_ts": 59.340566,
+    "stddev_ts": 1.847035,
+    "samples_ns": [ 2110587626, 2205584015 ],
+    "samples_ts": [ 60.6466, 58.0345 ]
+  }
+]
