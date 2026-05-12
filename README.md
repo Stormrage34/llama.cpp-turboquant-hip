@@ -25,7 +25,7 @@
 # Prerequisites: ROCm 6.x+ installed
 # Ensure CMake build completed first (baseline libraries)
 
-# Build with all RDNA2 optimizations (stable + experimental)
+# Build with all RDNA2 optimizations (stable)
 ./scripts/build_rdna2_llama.sh optimized
 
 # Build baseline only (no RDNA2 kernels)
@@ -120,7 +120,7 @@ RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 RDNA2_MATMUL_OPT_V1=1 \
 |----------|---------|-------------|
 | `RDNA2_OPT_V1` | unset | Enable RDNA2-optimized dequant kernels |
 | `RDNA2_ASYNC_PIPELINE` | unset | Enable async dequant stream + event sync |
-| `RDNA2_MATMUL_OPT_V1` | unset | Enable experimental LDS double-buffered matmul (MoE only) |
+| `RDNA2_MATMUL_OPT_V1` | unset | Enable LDS double-buffered matmul (MoE only, stabilized v0.3.1) |
 
 All flags are **inert by default** — the fork runs identically to upstream llama.cpp when no flags are set.
 

@@ -116,7 +116,7 @@ INCLUDES="-I${PROJECT_ROOT}/ggml/src/../include \
 -I${PROJECT_ROOT} \
 -I${ROCM_PATH}/include"
 
-LIBS="-L${BIN_DIR} -lggml-hip -lggml-base -lgml-cpu -lggml -lllama -lllama-common -lamdhip64 -lpthread"
+LIBS="-L${BIN_DIR} -lggml-hip -lggml-base -lggml-cpu -lggml -lllama -lllama-common -lamdhip64 -lpthread"
 
 ${HIPCC} -O3 -DNDEBUG ${OFFLOAD_ARCH} ${RDNA2_FLAGS} \
     ${INCLUDES} \
