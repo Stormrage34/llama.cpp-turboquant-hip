@@ -3488,7 +3488,9 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
     // RDNA2 experimental: LDS double-buffering for tile_x (gfx1030 only)
     // Overlap loading of next tile_x with current vec_dot computation
     // Requires 2x tile_x buffer space (prefetch buffer)
-    int * tile_x_next = tile_x + GGML_PAD(mmq_x*MMQ_TILE_Y_K, nwarps*warp_size);
+    // Phase 3: +1 LDS padding to break 32-bank symmetry (kills variance from bank conflicts)
+    constexpr int lds_bank_pad = 1;
+    int * tile_x_next = tile_x + GGML_PAD(mmq_x*MMQ_TILE_Y_K, nwarps*warp_size) + lds_bank_pad;
 
     // Prefetch first tile_x
     load_tiles(x, tile_x, offset_x + kb0_start, tile_x_max_i, stride_row_x);
@@ -3635,6 +3637,8 @@ template <ggml_type type, int mmq_x, bool need_check>
 #if defined(GGML_USE_HIP)
 #if defined(RDNA4) || defined(RDNA3) || defined(RDNA2) || defined(CDNA) || defined(GCN)
     __launch_bounds__(ggml_cuda_get_physical_warp_size()*mmq_get_nwarps_device(), 2)
+    // Phase 3: Wave occupancy guard prevents register spilling (bimodal variance fix)
+    __attribute__((amdgpu_waves_per_eu(4, 8)))
 #endif // defined(RDNA4) || defined(RDNA3) || defined(RDNA2) || defined(CDNA) || defined(GCN)
 #else
 #if __CUDA_ARCH__ >= GGML_CUDA_CC_VOLTA
