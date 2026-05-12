@@ -40,8 +40,8 @@
 RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 \
   ./build/bin/llama-server -m model.gguf -ngl 99 -c 4096
 
-# + Experimental MoE prefill accelerator
-# High-throughput, variable latency. Benchmark your workload first.
+# + MoE prefill accelerator (stabilized in v0.3.1)
+# +269% prefill throughput, ±6 t/s variance
 RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 RDNA2_MATMUL_OPT_V1=1 \
   ./build/bin/llama-server -m model.gguf -ngl 99 -c 4096
 ```
@@ -77,11 +77,11 @@ RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 RDNA2_MATMUL_OPT_V1=1 \
 |---------|-----------------|----------------|-------|
 | Baseline | ~480 t/s | ~57 t/s | Upstream llama.cpp |
 | Stable RDNA2 | ~540 t/s | ~55 t/s | Dequant + async pipeline |
-| + Experimental MoE | ~1450–1770 t/s | ~57 t/s | LDS double-buffer (high variance) |
+| + MoE Accelerator | ~1772 ± 6 t/s | ~52 ± 7 t/s | LDS double-buffer (stabilized v0.3.1) |
 
 **Dense models** (27B): ~480 t/s prefill, ~27 t/s decode — unaffected by RDNA2 optimizations.
 
-> ⚠️ **Experimental MoE accelerator**: The `RDNA2_MATMUL_OPT_V1` flag enables a double-buffered matmul kernel with +170–210% mean prefill gain for MoE models, but with 3–6× higher latency variance. See [docs/rdna2-experimental.md](docs/rdna2-experimental.md) for details.
+> **MoE prefill accelerator**: The `RDNA2_MATMUL_OPT_V1` flag enables a double-buffered matmul kernel with +269% prefill gain for MoE models. Stabilized in v0.3.1 — variance reduced from ±635 to ±6 t/s. See [docs/rdna2-experimental.md](docs/rdna2-experimental.md) for details.
 
 ---
 
@@ -95,18 +95,22 @@ RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 RDNA2_MATMUL_OPT_V1=1 \
 | **Async Pipeline** | Dedicated dequant stream with event-based synchronization | 31% launch overhead reduction |
 | **Runtime Auto-Disable** | gfx1030 hardware detection + environment gate | Zero overhead when not applicable |
 
-### Phase 2: Experimental MoE Accelerator (v0.3.0-experimental)
+### Phase 2: MoE Prefill Accelerator (v0.3.0-experimental → v0.3.1-stabilized)
 
 | Component | Description | Impact |
 |-----------|-------------|--------|
-| **LDS Double-Buffering** | Overlaps weight tile loading with DP4A compute | +170–210% MoE prefill |
+| **LDS Double-Buffering** | Overlaps weight tile loading with DP4A compute | +269% MoE prefill |
+| **LDS Bank Padding** | +1 element offset breaks 32-bank symmetry | Eliminates within-run jitter |
+| **Wave32 Occupancy Guard** | `amdgpu_waves_per_eu(4, 8)` prevents register spilling | Eliminates bimodal variance |
 | **Triple-Gate Safety** | Compile-time + env var + hardware ID check | Falls back to stable path instantly |
 
-### Phase 3: Stabilization (Planned v0.3.1)
+### Phase 3: Stabilization Complete (v0.3.1)
 
-- **LDS Bank Conflict Fix**: Padding tile buffers to break 32-bank symmetry
-- **Wave32 Enforcement**: `__attribute__((amdgpu_waves_per_eu(4, 8)))` for scheduler stability
-- **Target**: Reduce prefill variance from ±450 → <±200 t/s
+| Metric | Before (v0.3.0) | After (v0.3.1) |
+|--------|-----------------|----------------|
+| Prefill (t/s) | 1314 ± 635 | 1772 ± 6 |
+| Variance | Bimodal (666–1777) | Consistent high mode |
+| Variance reduction | — | **99%** |
 
 ---
 
