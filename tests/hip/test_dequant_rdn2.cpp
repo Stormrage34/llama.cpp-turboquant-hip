@@ -10,7 +10,7 @@
 
 extern "C" void dequantize_row_iq4_xs(const void * x, float * y, int64_t k);
 #ifdef RDNA2_OPT_V1
-extern "C" void ggml_dequant_iq4_xs_rdn2(const void * vx, half * y, const int64_t k);
+extern "C" void ggml_dequant_iq4_xs_rdn2_extern(const void * vx, half * y, const int64_t k, hipStream_t stream);
 #endif
 
 int main() {
@@ -30,7 +30,8 @@ int main() {
 
     // allocate host source packed buffer
     std::vector<uint8_t> src(bytes_q);
-    for (size_t i = 0; i < src.size(); ++i) src[i] = (uint8_t)(i & 0xFF);
+    // Fill with valid IQ4_XS quantized values (0-15) - 4-bit indices into kvalues_iq4nl
+    for (size_t i = 0; i < src.size(); ++i) src[i] = (uint8_t)(i & 0xF);
 
     // CPU baseline (float output)
     std::vector<float> baseline_f(k);
@@ -43,7 +44,11 @@ int main() {
     hipMalloc(&d_src, src.size());
     hipMalloc(&d_out, k * sizeof(half));
     hipMemcpy(d_src, src.data(), src.size(), hipMemcpyHostToDevice);
-    ggml_dequant_iq4_xs_rdn2(d_src, d_out, k);
+    hipStream_t stream;
+hipStreamCreate(&stream);
+ggml_dequant_iq4_xs_rdn2_extern(d_src, d_out, k, stream);
+hipStreamSynchronize(stream);
+hipStreamDestroy(stream);
     hipMemcpy(rdn2_h.data(), d_out, k * sizeof(half), hipMemcpyDeviceToHost);
     hipFree(d_src); hipFree(d_out);
 

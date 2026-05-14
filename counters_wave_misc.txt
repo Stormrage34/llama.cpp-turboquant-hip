@@ -1,0 +1,1 @@
+pmc: WAVE_ISSUE_WAIT, WAVE_DEP_WAIT, GPUBusy, OccupancyPercent

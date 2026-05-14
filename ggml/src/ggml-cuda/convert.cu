@@ -559,16 +559,65 @@ extern "C" void ggml_dequant_iq4_xs_baseline(const void * vx, half * y, const in
 
 // Local host wrapper for convert.cu (avoids extern linkage issues)
 template<typename dst_t>
-static void dequant_iq4_xs_rdn2_local(const void * vx, dst_t * y, const int64_t k, cudaStream_t stream) {
+static void dequant_iq4_xs_rdn2_local(const void * vx, dst_t * y, const int64_t k, hipStream_t stream) {
     const int nb = (k + 256 - 1) / 256;
     if (k % 256 == 0) {
-        dequantize_block_iq4_xs_rdn2<false><<<nb, 32, 0, stream>>>(vx, (half *)y, k);
+        dequantize_block_iq4_xs_rdn2<false, dst_t><<<nb, 32, 0, stream>>>(vx, y, k);
     } else {
-        dequantize_block_iq4_xs_rdn2<true><<<nb, 32, 0, stream>>>(vx, (half *)y, k);
+        dequantize_block_iq4_xs_rdn2<true, dst_t><<<nb, 32, 0, stream>>>(vx, y, k);
     }
 }
 
-#endif
+#ifdef RDNA2_BFE_DISPATCHER
+#include "quant_layouts_rdn2.cuh"
+
+// RDNA2 BFE-optimized Q4_K dequant kernel.
+// Uses v_bfe_u32 (1-cycle bit-field extract) instead of shift+mask per element.
+// Gate: RDNA2_OPT_V1 + RDNA2_BFE_DISPATCHER (compile-time); RDNA2_OPT_V1=1 env var (runtime).
+template<typename dst_t>
+static __global__ void dequantize_block_q4_K_rdn2_bfe(const void * __restrict__ vx, dst_t * __restrict__ yy) {
+    const block_q4_K * x = (const block_q4_K *) vx;
+
+    const int64_t i = blockIdx.x;
+
+    // assume 32 threads
+    const int64_t tid = threadIdx.x;
+    const int64_t il  = tid/8;
+    const int64_t ir  = tid%8;
+    const int64_t n   = 4;
+
+    dst_t * y = yy + i*QK_K + 64*il + n*ir;
+
+    const float dall = __low2half(x[i].dm);
+    const float dmin = __high2half(x[i].dm);
+
+    uint8_t sc, m;
+    get_scale_min_k4(2*il + 0, x[i].scales, sc, m);
+    const float d1 = dall * sc; const float m1 = dmin * m;
+    get_scale_min_k4(2*il + 1, x[i].scales, sc, m);
+    const float d2 = dall * sc; const float m2 = dmin * m;
+
+    // Q4_K nibble layout: 8 nibbles per uint32, interleaved as
+    // [el0_low | el0_high | el1_low | el1_high | el2_low | el2_high | el3_low | el3_high].
+    // BFE unpack maps byte position byte_pos = 32*il + 4*ir + l to:
+    //   idx_low  = 64*il + 8*ir + 2*l    (low nibble  → y[l+0])
+    //   idx_high = 64*il + 8*ir + 2*l + 1 (high nibble → y[l+32])
+    for (int l = 0; l < n; ++l) {
+        y[l + 0] = rdna2_bfe_traits<block_q4_K>::unpack(x + i, 64*il + 8*ir + 2*l,       d1) - m1;
+        y[l +32] = rdna2_bfe_traits<block_q4_K>::unpack(x + i, 64*il + 8*ir + 2*l + 1,   d2) - m2;
+    }
+}
+
+// Host wrapper: dispatches BFE Q4_K dequant kernel
+template<typename dst_t>
+static void dequantize_row_q4_K_cuda_bfe(const void * vx, dst_t * y, const int64_t k, hipStream_t stream) {
+    const int nb = k / QK_K;
+    dequantize_block_q4_K_rdn2_bfe<<<nb, 32, 0, stream>>>(vx, y);
+}
+
+#endif // RDNA2_BFE_DISPATCHER
+
+#endif // RDNA2_OPT_V1
 
 template<typename dst_t>
 static void dequantize_row_q2_K_cuda(const void * vx, dst_t * y, const int64_t k, cudaStream_t stream) {
@@ -598,6 +647,13 @@ static void dequantize_row_q4_1_cuda(const void * vx, dst_t * y, const int64_t k
 
 template<typename dst_t>
 static void dequantize_row_q4_K_cuda(const void * vx, dst_t * y, const int64_t k, cudaStream_t stream) {
+#if defined(RDNA2_OPT_V1) && defined(RDNA2_BFE_DISPATCHER)
+    if (runtime_enable_rdn2_opt()) {
+        // BFE dequant: uses v_bfe_u32 (1-cycle) instead of shift+mask per element
+        dequantize_row_q4_K_cuda_bfe(vx, y, k, stream);
+        return;
+    }
+#endif
     const int nb = k / QK_K;
     dequantize_block_q4_K<<<nb, 32, 0, stream>>>(vx, y);
 }
@@ -666,51 +722,9 @@ template<typename dst_t>
 static void dequantize_row_iq4_xs_cuda(const void * vx, dst_t * y, const int64_t k, cudaStream_t stream) {
 #ifdef RDNA2_OPT_V1
     if (runtime_enable_rdn2_opt()) {
-#ifdef RDNA2_ASYNC_PIPELINE
-        // Async pipeline: dedicated dequant stream + event-based sync
-        static cudaStream_t g_dequant_stream = nullptr;
-        static cudaEvent_t  g_dequant_done   = nullptr;
-        static bool         g_async_init     = false;
-        static bool         g_teardown_registered = false;
-
-        if (!g_async_init) {
-            if (hipStreamCreate(&g_dequant_stream) != hipSuccess) {
-                fprintf(stderr, "RDNA2 async: failed to create dequant stream, falling back to sync\n");
-                dequant_iq4_xs_rdn2_local(vx, y, k, stream);
-                return;
-            }
-            if (hipEventCreate(&g_dequant_done) != hipSuccess) {
-                fprintf(stderr, "RDNA2 async: failed to create dequant event, falling back to sync\n");
-                hipStreamDestroy(g_dequant_stream);
-                g_dequant_stream = nullptr;
-                dequant_iq4_xs_rdn2_local(vx, y, k, stream);
-                return;
-            }
-            g_async_init = true;
-            if (!g_teardown_registered) {
-                // Capture pointers via lambda for atexit cleanup
-                static cudaStream_t* p_stream = &g_dequant_stream;
-                static cudaEvent_t*  p_event  = &g_dequant_done;
-                atexit([](){
-                    if (*p_stream) { hipStreamDestroy(*p_stream); *p_stream = nullptr; }
-                    if (*p_event)  { hipEventDestroy(*p_event);   *p_event  = nullptr; }
-                });
-                g_teardown_registered = true;
-            }
-        }
-
-        // Launch dequant on dedicated stream (non-blocking to CPU)
-        dequant_iq4_xs_rdn2_local(vx, y, k, g_dequant_stream);
-
-        // Record completion event
-        hipEventRecord(g_dequant_done, g_dequant_stream);
-
-        // Make caller's stream wait for dequant completion
-        hipStreamWaitEvent(stream, g_dequant_done, 0);
-#else
-        // Synchronous path (Phase 2B behavior)
+        // Synchronous RDNA2 dequant on caller's stream
         dequant_iq4_xs_rdn2_local(vx, y, k, stream);
-#endif
+
         return;
     }
 #endif

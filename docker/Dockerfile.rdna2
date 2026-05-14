@@ -1,0 +1,98 @@
+# syntax=docker/dockerfile:1
+# =============================================================================
+# llama.cpp RDNA2-optimized Docker image — Buildx multi-stage build
+# =============================================================================
+# Build: docker buildx build -t llama-cpp-rdna2:v0.3.2-p3-bfe-stable -f docker/Dockerfile.rdna2 .
+# Run:   docker compose -f docker/docker-compose.rdna2.yml up
+#
+# Multi-stage: builder (6.78 GB) → runtime (~2-3 GB)
+# Build cache: apt + cmake layers persisted via --mount=type=cache
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Stage 1: Builder — full ROCm dev image with all build tools
+# -----------------------------------------------------------------------------
+FROM rocm/dev-ubuntu-22.04:7.2.1 AS builder
+
+LABEL stage=builder
+LABEL gpu_arch="gfx1030"
+LABEL rocm_version="7.2.1"
+
+# Install build deps with persistent apt cache (Buildx cache mount)
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        git \
+        cmake \
+        rocblas-dev \
+        hipblas-dev \
+        libssl-dev \
+        python3 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy source LAST — key layer optimization for fast rebuilds on code changes
+COPY . /app/llama.cpp
+WORKDIR /app/llama.cpp
+
+# Build with RDNA2 optimizations + cmake cache mount for faster rebuilds
+RUN --mount=type=cache,target=/app/llama.cpp/build \
+    cmake -B build -S . \
+        -DGGML_HIP=ON \
+        -DGPU_TARGETS=gfx1030 \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DGGML_CUDA_FA=ON \
+    && cmake --build build --config Release -j $(nproc)
+
+# -----------------------------------------------------------------------------
+# Stage 2: Runtime — minimal ROCm user-space image
+# -----------------------------------------------------------------------------
+FROM ubuntu:22.04 AS runtime
+
+LABEL version="v0.3.2-p3-bfe-stable"
+LABEL description="llama.cpp RDNA2-optimized build with TurboQuant, MTP, and custom HIP kernels"
+LABEL gpu_arch="gfx1030"
+LABEL rocm_version="7.2.1"
+LABEL stage=runtime
+
+# Install only runtime dependencies (minimal footprint)
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        libssl3 \
+        curl \
+        dpkg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install ROCm runtime libraries from official packages
+# (avoids full 6.78 GB dev image — runtime is ~1-2 GB)
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    echo 'deb [arch=amd64] https://repo.radeon.com/rocm/ubuntu/22.04/ ./' > \
+        /etc/apt/sources.list.d/rocm.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        rocm-runtime \
+        rocblas \
+    && rm -rf /var/lib/apt/lists/*
+
+# Runtime environment
+ENV ROCM_PATH=/opt/rocm
+ENV HSA_OVERRIDE_GFX_VERSION=10.3.0
+ENV LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH:-}
+
+# Copy ONLY the compiled artifacts from builder stage
+COPY --from=builder /app/llama.cpp/build/bin /app/llama.cpp/build/bin
+COPY --from=builder /app/llama.cpp/build/lib /app/llama.cpp/build/lib
+
+WORKDIR /app
+
+EXPOSE 8080
+
+# RDNA2 runtime flags (can be overridden)
+ENV RDNA2_OPT_V1=1
+ENV RDNA2_ASYNC_PIPELINE=1
+ENV RDNA2_MATMUL_OPT_V1=1
+
+CMD ["./llama.cpp/build/bin/llama-server"]

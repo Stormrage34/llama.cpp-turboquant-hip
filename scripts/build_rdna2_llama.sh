@@ -9,6 +9,11 @@
 
 set -e
 
+# GPU failback — free VRAM before compilation
+source "$(cd "$(dirname "$0")" && pwd)/gpu_failback.sh"
+gpu_failback_trap
+gpu_acquire
+
 # ─── Configuration ───────────────────────────────────────────────────────────
 # ROCm path — adjust if your installation differs
 ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
@@ -152,11 +157,11 @@ if [ "${MODE}" != "baseline" ]; then
     if [ "${MODE}" = "stable" ]; then
         echo "  RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 ${BIN_DIR}/llama-server -m model.gguf -ngl 99"
     else
-        echo "  # Stable (production):"
-        echo "  RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 ${BIN_DIR}/llama-server -m model.gguf -ngl 99"
-        echo ""
-        echo "  # + Experimental MoE prefill (benchmark first):"
-        echo "  RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 RDNA2_MATMUL_OPT_V1=1 ${BIN_DIR}/llama-server -m model.gguf -ngl 99"
+            echo "  # Stable (production):"
+            echo "  RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 ${BIN_DIR}/llama-server -m model.gguf -ngl 99"
+            echo ""
+            echo "  # + Experimental MoE prefill (benchmark first):"
+            echo "  RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 RDNA2_MATMUL_OPT_V1=1 ${BIN_DIR}/llama-server -m model.gguf -ngl 99"
     fi
     echo ""
     echo -e "${YELLOW}See docs/rdna2-experimental.md for details.${NC}"

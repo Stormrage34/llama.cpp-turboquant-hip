@@ -3489,8 +3489,19 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
     // Overlap loading of next tile_x with current vec_dot computation
     // Requires 2x tile_x buffer space (prefetch buffer)
     // Phase 3: +1 LDS padding to break 32-bank symmetry (kills variance from bank conflicts)
-    constexpr int lds_bank_pad = 1;
-    int * tile_x_next = tile_x + GGML_PAD(mmq_x*MMQ_TILE_Y_K, nwarps*warp_size) + lds_bank_pad;
+    // FIX: tile_x may be larger than MMQ_TILE_Y_K — derive actual size from quant-specific traits.
+    constexpr int tile_x_size_ints =
+#if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
+        mmq_y * mmq_get_mma_tile_x_k(type);
+#else
+        []() {
+            constexpr tile_x_sizes txs = mmq_get_dp4a_tile_x_sizes(type, mmq_y);
+            return txs.qs + txs.dm + txs.sc;
+        }();
+#endif
+    static_assert(tile_x_size_ints > 0, "RDNA2 tile_x_size_ints must resolve to > 0");
+    constexpr int lds_bank_pad = 2;
+    int * tile_x_next = tile_x + tile_x_size_ints + lds_bank_pad;
 
     // Prefetch first tile_x
     load_tiles(x, tile_x, offset_x + kb0_start, tile_x_max_i, stride_row_x);
@@ -3539,9 +3550,10 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
         __syncthreads();
 
         // Swap buffers: next becomes current
+        // FIX: use tile_x_size_ints (not mmq_x*MMQ_TILE_Y_K) to copy the full prefetched tile
         if (kb0_next < kb0_stop) {
 #pragma unroll
-            for (int l0 = 0; l0 < mmq_x * MMQ_TILE_Y_K; l0 += nwarps * warp_size) {
+            for (int l0 = 0; l0 < tile_x_size_ints; l0 += nwarps * warp_size) {
                 int l = l0 + threadIdx.y*warp_size + threadIdx.x;
                 tile_x[l] = tile_x_next[l];
             }
@@ -4056,12 +4068,12 @@ static void launch_mul_mat_q(ggml_backend_cuda_context & ctx, const mmq_args & a
     const int nwarps = mmq_get_nwarps_host(cc, warp_size);
     const int mmq_y = get_mmq_y_host(cc);
 
-    // Experimental matmul opt: runtime gate (compile-time + env + gfx1030 hardware check)
+    // Experimental matmul opt: runtime gate (compile-time + env + gfx1030 + MoE routing)
     bool use_experimental = false;
 #ifdef RDNA2_MATMUL_OPT_V1
     {
         const char* exp_env = getenv("RDNA2_MATMUL_OPT_V1");
-        if (exp_env && strcmp(exp_env, "1") == 0 && GGML_CUDA_CC_IS_RDNA2(cc)) {
+        if (exp_env && strcmp(exp_env, "1") == 0 && GGML_CUDA_CC_IS_RDNA2(cc) && args.expert_bounds != nullptr) {
             use_experimental = true;
         }
     }

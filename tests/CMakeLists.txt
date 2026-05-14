@@ -202,17 +202,41 @@ llama_build_and_test(test-json-partial.cpp)
 llama_build_and_test(test-log.cpp)
 
 # RDNA2 HIP tests: unit + microbench
-add_executable(test_dequant_rdn2 hip/test_dequant_rdn2.cpp)
-target_include_directories(test_dequant_rdn2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../ggml/src $ENV{ROCM_PATH}/include)
+# Resolve ROCM_PATH with fallback (same logic as ggml/src/ggml-hip/CMakeLists.txt)
+if (NOT EXISTS $ENV{ROCM_PATH})
+    if (NOT EXISTS /opt/rocm)
+        set(ROCM_PATH /usr)
+    else()
+        set(ROCM_PATH /opt/rocm)
+    endif()
+else()
+    set(ROCM_PATH $ENV{ROCM_PATH})
+endif()
+add_executable(test_dequant_rdn2
+    hip/test_dequant_rdn2.cpp
+    ../ggml/src/ggml-cuda/iq4_dequant_rdn2.cu
+)
+target_include_directories(test_dequant_rdn2 PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../ggml/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../ggml/src/ggml-cuda
+    ${ROCM_PATH}/include
+)
 target_compile_definitions(test_dequant_rdn2 PRIVATE RDNA2_OPT_V1 __HIP_PLATFORM_AMD__)
 set_source_files_properties(hip/test_dequant_rdn2.cpp PROPERTIES LANGUAGE CXX)
-target_link_directories(test_dequant_rdn2 PRIVATE ${CMAKE_BINARY_DIR}/bin $ENV{ROCM_PATH}/lib)
+target_link_directories(test_dequant_rdn2 PRIVATE ${CMAKE_BINARY_DIR}/bin ${ROCM_PATH}/lib)
 target_link_libraries(test_dequant_rdn2 PRIVATE llama-common ggml-hip amdhip64)
-add_custom_command(TARGET test_dequant_rdn2 POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E echo "Note: iq4_dequant_rdn2.o must be manually linked"
-)
 llama_test(test_dequant_rdn2 NAME test-dequant-rdn2)
-llama_build(hip/dequant_microbench.cu)
+# dequant_microbench — manually configured to link ggml-hip for RDNA2 symbols
+add_executable(dequant_microbench hip/dequant_microbench.cpp)
+target_include_directories(dequant_microbench PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../ggml/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../ggml/src/ggml-cuda
+    ${ROCM_PATH}/include
+)
+target_compile_definitions(dequant_microbench PRIVATE RDNA2_OPT_V1 __HIP_PLATFORM_AMD__)
+set_source_files_properties(hip/dequant_microbench.cpp PROPERTIES LANGUAGE CXX)
+target_link_directories(dequant_microbench PRIVATE ${CMAKE_BINARY_DIR}/bin ${ROCM_PATH}/lib)
+target_link_libraries(dequant_microbench PRIVATE llama-common ggml-hip amdhip64)
 
 llama_build_and_test(
     test-peg-parser.cpp

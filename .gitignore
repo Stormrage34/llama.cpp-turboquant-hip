@@ -157,3 +157,8 @@ a.out.*
 
 AGENTS.local.md
 .pi/SYSTEM.md
+
+# ROCm profiler artifacts
+.rocprofv3/
+rocprofv3_*
+counters_*.yaml

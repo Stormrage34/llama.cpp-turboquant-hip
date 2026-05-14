@@ -20,6 +20,11 @@ VERBOSE=false
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${SCRIPT_DIR}/build"
+
+# GPU failback — free VRAM before smoke test
+source "${SCRIPT_DIR}/scripts/gpu_failback.sh"
+gpu_failback_trap
+gpu_acquire
 TEST_SRC="${SCRIPT_DIR}/tests/smoke_rdna2.cpp"
 TEST_BIN="${BUILD_DIR}/bin/smoke_rdna2"
 ROCMPATH="${ROCM_PATH:-/opt/rocm}"

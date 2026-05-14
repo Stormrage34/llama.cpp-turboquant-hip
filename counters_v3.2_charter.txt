@@ -1,0 +1,5 @@
+pmc: GL2C_HIT, GL2C_MISS, L2CacheHit, FETCH_SIZE
+pmc: LDSBankConflict, ALUStalledByLDS, MemUnitBusy, WriteUnitStalled
+pmc: SQ_INSTS_LDS, SQ_INSTS_VALU, VALUBusy, VALUUtilization
+pmc: SALUInsts, SQ_INSTS_SALU, MeanOccupancyPerCU, OccupancyPercent, SQ_WAVES
+pmc: WAVE_ISSUE_WAIT, WAVE_DEP_WAIT, GPUBusy, GRBM_GUI_ACTIVE
