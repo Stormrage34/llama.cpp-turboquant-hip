@@ -2,3 +2,9 @@
 # Git's pack-file delta compression still works (byte-level), but this prevents
 # git diff from printing the entire minified file on every change.
 tools/server/public/index.html -diff
+
+# Prevent accidental commits of large binary artifacts
+*.gguf filter=lfs diff=lfs merge=lfs -text
+*.rocprofv3/ export-ignore
+benchmarks/phase4/*.csv export-ignore
+benchmarks/phase4/*.dat export-ignore
