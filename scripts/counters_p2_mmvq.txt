@@ -1,48 +1,60 @@
 # ROCProf counters for P2.1 Memory Coalescing baseline — mul_mat_vec_q hot-path
 # gfx1030 (RX 6800 XT) — ROCm 7.13 nightly
 #
-# VALUBusy and VALUUtilization are NOT available on gfx1030 (ROCm limitation).
-# Use SQ_INSTS_VALU instead for ALU instruction counting.
-# GL2C_HIT is available but misleading for streaming kernels (near-zero by design).
+# Verified available on this hardware (rocprofv3-avail list 2026-05-14):
+# - SQ_INSTS_VMEM_RD: NOT available (use SQ_INST_CYCLES_VMEM + FETCH_SIZE)
+# - ALUStalledByLDS: ✅ AVAILABLE
+# - FetchSize: ✅ AVAILABLE
+# - MemUnitBusy: ✅ AVAILABLE
 #
 # Usage (rocprofv3 v1.3.0):
-#   rocprofv3 --stats --kernel-trace \
+#   rocprofv3 --kernel-trace \
 #     -i scripts/counters_p2_mmvq.txt \
 #     -d benchmarks/phase4/p2_mmvq_baseline \
 #     ./build/bin/llama-bench [args]
 
-# Memory bandwidth — THE KEY METRICS for streaming mmvq kernel
+# Memory bandwidth — key metrics for streaming mmvq kernel
 MemUnitBusy
 MemUnitStalled
-WriteUnitBusy
+WriteUnitStalled
+
+# Bytes fetched (all cache levels) — measures transaction waste
 FetchSize
+WRITE_SIZE
 
-# Vector memory reads — measures coalescing efficiency
-SQ_INSTS_VMEM_RD
+# Vector memory cycle count (replaces unavailable SQ_INSTS_VMEM_RD)
+SQ_INST_CYCLES_VMEM
 
-# ALU pipeline — use SQ_INSTS_VALU (VALUBusy unavailable on gfx1030)
+# GL2 request sizes — tells us load transaction efficiency
+GL2C_EA_RDREQ_32B
+GL2C_EA_RDREQ_64B
+GL2C_EA_RDREQ_96B
+GL2C_EA_RDREQ_128B
+
+# GL2 hit/miss — context only (streaming weights have near-zero hit rate)
+GL2C_HIT
+GL2C_MISS
+
+# ALU pipeline — SQ_INSTS_VALU available (VALUBusy unavailable on gfx1030)
 SQ_INSTS_VALU
 SQ_INSTS_VALU_PS
-SALUBusy
-SALUBusy_ideal
-
-# Wave occupancy — register pressure limits occupancy, hides latency
-MeanOccupancyPerCU
-WavesPerCU
-SQ_WAVES
+VALUInsts
+SALUInsts
+SQ_INSTS_SALU
 
 # LDS — bank conflicts in inter-warp reduction
 LDSBankConflict
 LDSBankConflict_ideal
 
-# L2 / Infinity Cache — context for KV cache reads only (NOT weight reads)
-# Weight reads are streaming (read-once), so GL2C_HIT is near-zero by design
-GL2C_HIT
-GL2C_MISS
-
-# L1 data cache — impacts vector load coalescing
-L1DCHitRate
-L1DCMiss
+# Wave occupancy — register pressure limits occupancy, hides latency
+MeanOccupancyPerCU
+WavesPerCU
+SQ_LEVEL_WAVES
 
 # Stall analysis — tells us WHY we're not doing useful work
-SQ_WAIT_CNT_INST
+ALUStalledByLDS
+WAVE_DEP_WAIT
+WAVE_ISSUE_WAIT
+SQ_WAIT_ANY
+SQ_WAIT_INST_ANY
+SQ_WAIT_INST_LDS
