@@ -1,0 +1,48 @@
+# ROCProf counters for P2.1 Memory Coalescing baseline — mul_mat_vec_q hot-path
+# gfx1030 (RX 6800 XT) — ROCm 7.13 nightly
+#
+# VALUBusy and VALUUtilization are NOT available on gfx1030 (ROCm limitation).
+# Use SQ_INSTS_VALU instead for ALU instruction counting.
+# GL2C_HIT is available but misleading for streaming kernels (near-zero by design).
+#
+# Usage (rocprofv3 v1.3.0):
+#   rocprofv3 --stats --kernel-trace \
+#     -i scripts/counters_p2_mmvq.txt \
+#     -d benchmarks/phase4/p2_mmvq_baseline \
+#     ./build/bin/llama-bench [args]
+
+# Memory bandwidth — THE KEY METRICS for streaming mmvq kernel
+MemUnitBusy
+MemUnitStalled
+WriteUnitBusy
+FetchSize
+
+# Vector memory reads — measures coalescing efficiency
+SQ_INSTS_VMEM_RD
+
+# ALU pipeline — use SQ_INSTS_VALU (VALUBusy unavailable on gfx1030)
+SQ_INSTS_VALU
+SQ_INSTS_VALU_PS
+SALUBusy
+SALUBusy_ideal
+
+# Wave occupancy — register pressure limits occupancy, hides latency
+MeanOccupancyPerCU
+WavesPerCU
+SQ_WAVES
+
+# LDS — bank conflicts in inter-warp reduction
+LDSBankConflict
+LDSBankConflict_ideal
+
+# L2 / Infinity Cache — context for KV cache reads only (NOT weight reads)
+# Weight reads are streaming (read-once), so GL2C_HIT is near-zero by design
+GL2C_HIT
+GL2C_MISS
+
+# L1 data cache — impacts vector load coalescing
+L1DCHitRate
+L1DCMiss
+
+# Stall analysis — tells us WHY we're not doing useful work
+SQ_WAIT_CNT_INST
