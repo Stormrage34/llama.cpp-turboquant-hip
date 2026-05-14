@@ -1,0 +1,43 @@
+# RDNA2-optimized llama.cpp Docker image
+# Base: ROCm 7.2.1 (Ubuntu 22.04)
+# Targets: gfx1030 (RDNA2) with TurboQuant and custom HIP kernels
+FROM rocm/dev-ubuntu-22.04:7.2.1
+
+LABEL version="v0.3.2-p3-bfe-stable"
+LABEL description="llama.cpp RDNA2-optimized build with TurboQuant, MTP, and custom HIP kernels"
+LABEL gpu_arch="gfx1030"
+LABEL rocm_version="7.2.1"
+
+# Install build dependencies
+RUN apt-get update && \
+    apt-get install -y \
+        build-essential \
+        git \
+        cmake \
+        rocblas-dev \
+        hipblas-dev \
+        libssl-dev \
+        python3 \
+        && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy the project source
+COPY . /app/llama.cpp
+
+WORKDIR /app/llama.cpp
+
+# Build with RDNA2 optimizations
+RUN cmake -B build -S . \
+        -DGGML_HIP=ON \
+        -DGPU_TARGETS=gfx1030 \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DGGML_CUDA_FA=ON \
+        && \
+    cmake --build build --config Release -j $(nproc)
+
+# Expose llama-server port
+EXPOSE 8080
+
+# Default command: llama-server (can be overridden)
+CMD ["./build/bin/llama-server"]

@@ -1,0 +1,31 @@
+# RDNA2-optimized llama.cpp docker-compose
+# Usage: docker compose -f docker/docker-compose.rdna2.yml up
+version: "3.9"
+
+services:
+  llama-rdna2:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.rdna2
+    image: llama-cpp-rdna2:v0.3.2-p3-bfe-stable
+    container_name: llama-rdna2
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    volumes:
+      - /home/stormrage/models:/models:ro
+    environment:
+      - RDNA2_OPT_V1=1
+      - RDNA2_ASYNC_PIPELINE=1
+      - RDNA2_MATMUL_OPT_V1=1
+      - HSA_OVERRIDE_GFX_VERSION=10.3.0
+      - HIP_VISIBLE_DEVICES=0
+    ports:
+      - "8080:8080"
+    command: >
+      ./build/bin/llama-server
+      -m /models/llama-model.gguf
+      --host 0.0.0.0
+      --port 8080
+      -ngl 30
+      --flash-attn on
