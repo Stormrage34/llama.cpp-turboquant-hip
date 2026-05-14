@@ -41,7 +41,7 @@
 
 **None found.** The v0.3.1 stabilization commit (`19fa3895`) was a pure fix — it added LDS padding and occupancy guard without removing any functional code. The `RDNA2_MODULE_CACHE` removal was intentional (replaced by simpler direct dispatch).
 
-The v0.3.1.1 hotfix (referenced in docs but not in this branch) reportedly fixed a hygiene pass that accidentally reverted `tile_x_size_ints` and the occupancy guard. This branch does not contain that regression.
+The v0.3.1.1 hotfix (referenced in docs but not in this branch) reportedly fixed a **separate hygiene pass** that temporarily reverted `tile_x_size_ints` and the occupancy guard. This branch does not contain that regression. **Recommendation**: Add `static_assert` guards for critical constants (e.g., `static_assert(tile_x_size_ints > 0)`) to prevent future hygiene passes from accidentally reverting safety-critical lines.
 
 ---
 
@@ -73,17 +73,27 @@ When comparing identical configs (`-ngl 99`, same model, same quant), decode is 
 
 **Key insight**: Both versions use the same dequant kernel. The v0.3.1 changes are in the matmul kernel (LDS padding + occupancy guard) and the async dispatch path (cleanup). The dequant path is unchanged.
 
+### Counter Methodology Notes
+
+| Issue | Impact | Fix |
+|-------|--------|-----|
+| No `--kernel-trace` in v0.3.0 benchmarks | Cannot isolate dequant vs matmul counters | Mandate `rocprofv3 --kernel-trace` for all future runs |
+| Single-run "peak" claims in v0.3.0 docs | Variance hidden, gains overstated | Require `-r 10` + median ± std dev reporting |
+| No `--dispatch-filter` for kernel isolation | Counter deltas include all kernels, not just target | Use `rocprofv3 --dispatch-filter <kernel_name>` |
+| Cross-build counter comparison | Build-state noise masquerading as optimization signal | Same-build A/B with only target flag toggled |
+
 ---
 
 ## Oracle Summary (Requires GPU)
 
 | Version | Prefill (pp512) | Decode (tg128) | Variance | Parity | Coherence |
 |---------|----------------|----------------|----------|--------|-----------|
-| v0.1 | ~480 t/s (baseline) | ~27 t/s (dense) | ±100 t/s | ✅ | ✅ |
+| v0.1 | ~480 t/s (baseline) | ~27 t/s (dense, -ngl 99) | ±100 t/s | ✅ | ✅ |
 | v0.3.0 | ~1314 t/s (MoE) | ~57 t/s (MoE, -ngl 99) | ±635 t/s | ❌ NaN/gibberish | ❌ Bimodal |
 | v0.3.1 | ~2781 t/s (MoE) | ~66 t/s (MoE, -ngl 99) | ±6 t/s | ✅ Zero mismatches | ✅ Coherent |
+| v0.3.1 (reported) | — | ~27 t/s (dense, -ngl 30) | — | — | — |
 
-**Note**: v0.3.0 produced NaN/gibberish tokens at `temp=0.0` due to LDS aliasing bug. The +170% prefill gain was real but unstable. v0.3.1 fixed the correctness issue and stabilized variance.
+**Important**: The ~27 t/s figure for v0.3.1 was from a **dense model benchmark** (Qwen3.6-27B, -ngl 30), not MoE. When comparing identical MoE configs (`-ngl 99`, same model, same quant), decode is **flat or slightly improved** (~57 → ~66 t/s). v0.3.0 produced NaN/gibberish tokens at `temp=0.0` due to LDS aliasing bug. v0.3.1 fixed the correctness issue and stabilized variance.
 
 ---
 

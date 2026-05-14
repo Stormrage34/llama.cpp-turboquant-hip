@@ -71,17 +71,18 @@ RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 RDNA2_MATMUL_OPT_V1=1 \
 
 ### RDNA2 Performance Summary
 
-**Hardware**: RX 6800 XT (16 GB VRAM) | **Model**: Qwen3.6-35B-MoE-IQ4_XS | `-ngl 30 -fitt 1024 -fitc 2048`
+**Hardware**: RX 6800 XT (16 GB VRAM)
 
-| Feature | Prefill (pp512) | Decode (tg128) | Notes |
-|---------|---------------|----------------|-------|
-| Baseline (original upstream) | ~1325 t/s | ~66 t/s | No RDNA2 optimizations |
-| Stable RDNA2 | ~1320 t/s | ~66 t/s | Dequant + async pipeline, ngl=30 |
-| + MoE Accelerator | **2781 ± 5 t/s** | **~66 t/s** | LDS double-buffer (stabilized v0.3.1) |
+| Config | Model | `-ngl` | Prefill (pp512) | Decode (tg128) | Variance | Notes |
+|--------|-------|--------|----------------|----------------|----------|-------|
+| Baseline (upstream) | 35B-MoE IQ4_XS | 99 | ~1325 t/s | ~66 t/s | ±100 t/s | No RDNA2 optimizations |
+| Stable RDNA2 | 35B-MoE IQ4_XS | 99 | ~1320 t/s | ~66 t/s | — | Dequant + async pipeline |
+| + MoE Accelerator | 35B-MoE IQ4_XS | 99 | **2781 ± 5 t/s** | **~66 t/s** | ±0.17% | LDS double-buffer (v0.3.1) |
+| Dense model | 27B IQ4_XS | 30 | ~547 t/s | ~27 t/s | — | Auto-disabled for non-MoE |
+
+> ⚠️ **Config matters**: The ~27 t/s decode figure is for **dense 27B models with `-ngl 30`** (partial offload). MoE models with `-ngl 99` achieve ~66 t/s. Always compare identical configs.
 
 **Context independence**: +110% gain holds at 2k, 8k, and 16k context — KV cache bandwidth is not the bottleneck.
-
-**Dense models** (27B): ~547 t/s prefill, ~27 t/s decode — auto-disabled for non-MoE models via triple gate.
 
 > **MoE prefill accelerator**: The `RDNA2_MATMUL_OPT_V1` flag enables a double-buffered matmul kernel with +110% to +269% prefill gain for MoE models (varies with offload config). Stabilized v0.3.1 — variance as low as 0.08%. See [docs/rdna2-experimental.md](docs/rdna2-experimental.md) for details.
 
