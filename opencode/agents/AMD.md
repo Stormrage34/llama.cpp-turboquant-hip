@@ -42,8 +42,8 @@ You are the Chief Architect for the RDNA2 LLM Inference project. Your role is to
 ### P2.1 Validation Gates — Memory Coalescing in `mmvq.cu`
 | Metric | Baseline Range | Target | Method |
 |--------|---------------|--------|--------|
-| `SQ_INSTS_VMEM_RD` | [capture] | ↓ ≥15% (kernel-filtered median) | `rocprofv3 -d -i counters_p2_mmvq.txt` |
-| `FetchSize` / token | [capture] | ↓ ≥10% | Bytes per generated token across 5 runs |
+| `SQ_INST_CYCLES_VMEM` | 156,454 | ↓ ≥10% (proxy for VMEM_RD, which is unavailable) | `rocprofv3 --pmc SQ_INST_CYCLES_VMEM` |
+| `FetchSize` / dispatch | 36,316 | ↓ ≥10% | Bytes fetched per dispatch, `rocprofv3 --pmc FETCH_SIZE` |
 | `tg32` decode | ~76 t/s (Llama 8B) | ≥82 t/s or ↑8% | `llama-bench -r 5` median |
 | `tg128` (MoE decode) | ~27 t/s (Gemma 4 26B) | ≥29.5 t/s or ↑10% | `llama-bench -r 5` median |
 | Variance | ≤±1.5 t/s | ≤±1.0 t/s | Std dev across 5 runs |
@@ -51,16 +51,41 @@ You are the Chief Architect for the RDNA2 LLM Inference project. Your role is to
 | VGPR budget | ≤128 | No spilling | Compiler `-vgpr-usage` |
 
 ### P0 Rationale: Memory Bandwidth, Not Cache Alignment
-`mul_mat_vec_q` is a streaming read-once kernel — each weight row is read once during decode. L2/Infinity Cache hit rate is near-zero by design (no data reuse). The correct optimization vector is memory bandwidth saturation (`MemUnitBusy`) and vector load efficiency (`SQ_INSTS_VMEM_RD`, `FetchSize`), not cache alignment. Only after confirming bandwidth saturation should we explore compute-side optimizations (coalescing, register pressure, SALU routing).
+`mul_mat_vec_q` is a streaming read-once kernel — each weight row is read once during decode. L2/Infinity Cache hit rate is near-zero by design (no data reuse). The correct optimization vector is memory bandwidth saturation (`MemUnitBusy`) and vector load efficiency (`SQ_INST_CYCLES_VMEM`, `FETCH_SIZE`), not cache alignment. `SQ_INSTS_VMEM_RD` is NOT available on gfx1030. Only after confirming bandwidth saturation should we explore compute-side optimizations (coalescing, register pressure, SALU routing).
 
-### Counter Availability on gfx1030
-- `VALUBusy`, `VALUUtilization` — **NOT available** on gfx1030 (ROCm limitation). Use `SQ_INSTS_VALU` instead.
-- `VALUStalledByLDS` — may not be available on gfx1030. Verify with `rocprofv3-avail` before relying.
-- `GL2C_HIT`, `GL2C_MISS`, `L2CacheHitRate` — available but misleading for streaming kernels (near-zero by design).
-- `SQ_INSTS_VMEM_RD`, `SQ_INSTS_VMEM_WR` — available, key metrics for coalescing analysis.
-- `FetchSize` — available, measures total bytes fetched (all cache levels).
-- `MemUnitBusy`, `MemUnitStalled` — available, key metrics for bandwidth saturation.
-- `LDSBankConflict`, `WavesPerCU`, `MeanOccupancyPerCU` — available.
+### P2.1 Baseline Summary (Llama-3.1-8B-Instruct-Q4_K_M, gfx1030)
+| Metric | Value | Status |
+|--------|-------|--------|
+| `MemUnitBusy` | 85.29% | Good — not saturated |
+| `SQ_INST_CYCLES_VMEM` | 156,454 | VMEM cycle count per dispatch |
+| `FETCH_SIZE` | 36,316 | Bytes fetched per dispatch |
+| `SQ_INSTS_VALU` | 171,807 | VALU instructions per dispatch |
+| `WAVE_ISSUE_WAIT` | 52,560 | Primary bottleneck — instruction-issue-bound |
+| `WAVE_DEP_WAIT` | 24,655 | Secondary — data dependency wait |
+| `LDSBankConflict` | 211.77 | Low — not a bottleneck |
+| `tg128` decode | 82.28 ± 0.76 t/s | Performance gate baseline |
+| Hot-path verification | 92.2% of GPU time in mmvq | ✅ Confirmed |
+
+### Counter Availability on gfx1030 (Verified 2026-05-14 via `rocprofv3-avail list`)
+| Counter | Status | Notes |
+|---------|--------|-------|
+| `VALUBusy`, `VALUUtilization` | ❌ NOT available | Use `SQ_INSTS_VALU` |
+| `SQ_INSTS_VMEM_RD`, `SQ_INSTS_VMEM_WR` | ❌ NOT available | Use `SQ_INST_CYCLES_VMEM` |
+| `MemUnitStalled` | ❌ NOT available | Infer from `100 - MemUnitBusy%` |
+| `WavesPerCU` | ❌ NOT available | Use `SQ_WAVES` or `MeanOccupancyPerCU` |
+| `L1DCHitRate`, `L1DCMiss` | ❌ NOT available | — |
+| `VALUStalledByLDS` | ✅ Available | Verified working, value ~0.12 avg |
+| `MemUnitBusy` | ✅ Available | **Key metric** — 85% on mmvq baseline |
+| `FETCH_SIZE` (uppercase) | ✅ Available | Bytes fetched per dispatch |
+| `SQ_INST_CYCLES_VMEM` | ✅ Available | Vector memory instruction cycles |
+| `SQ_INSTS_VALU` | ✅ Available | ALU instruction count |
+| `SQ_WAVES` | ✅ Available | Cumulative wave count |
+| `SQ_INSTS_WAVE32` | ✅ Available | Wave32 instruction count |
+| `WAVE_ISSUE_WAIT` | ✅ Available | Instruction issue stalls |
+| `WAVE_DEP_WAIT` | ✅ Available | Data dependency stalls |
+| `LDSBankConflict` | ✅ Available | LDS bank conflict count |
+| `GL2C_HIT`, `GL2C_MISS` | ✅ Available | Misleading for streaming (near-zero) |
+| `GL2C_EA_RDREQ_{32,64,96,128}B` | ✅ Available | Transaction size breakdown |
 - See `scripts/counters_p2_mmvq.txt` for the validated P2.1 counter set.
 
 ### BFE Dispatcher — Sunset Rationale
