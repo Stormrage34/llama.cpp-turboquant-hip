@@ -1,0 +1,24 @@
+# ROCProf counters for RDNA2 P3 BFE validation (gfx1030, RX 6800 XT)
+# ROCm 7.13 compatible — VALUBusy replaced with VALUUtilization + GRBM_GUI_ACTIVE
+#
+# Usage:
+#   rocprofv3 -i counters_v3.2_p3.txt --kernel-trace -f csv \
+#     --output-dir benchmarks/phase4/p3_dequant_bfe \
+#     RDNA2_OPT_V1=1 RDNA2_BFE_DISPATCHER=1 \
+#     ./build/bin/llama-bench -m <model> -ngl 99 -p 512 -n 128 -b 256 -ub 256 \
+#       -ctk turbo4 -ctv turbo2 -fa 1 -mmp 0 -r 3
+
+# L2 / Infinity Cache
+pmc: GL2C_HIT, GL2C_MISS, L2CacheHit, FETCH_SIZE
+
+# LDS (Local Data Share) — bank conflicts kill warp utilization
+pmc: LDSBankConflict, ALUStalledByLDS, MemUnitBusy, WriteUnitStalled
+
+# ALU / pipeline utilization (ROCm 7.13 compatible)
+pmc: SQ_INSTS_VALU, VALUUtilization, SQ_INSTS_SALU, SALUInsts
+
+# Wave occupancy — register pressure indicator
+pmc: MeanOccupancyPerCU, OccupancyPercent, SQ_WAVES, WAVE_ISSUE_WAIT
+
+# GPU activity proxy (VALUBusy unavailable on gfx1030)
+pmc: GRBM_GUI_ACTIVE, TA_UTIL, SPI_UTIL
