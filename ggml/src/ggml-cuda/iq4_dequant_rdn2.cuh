@@ -16,7 +16,6 @@ template<> __device__ __forceinline__ float rdn2_cvt<float>(float v) { return v;
 
 // Optimized IQ4_XS dequant kernel for RDNA2:
 // - Wave-cooperative scale extraction (threads 0-7 each handle one sub-block)
-// - DPP scale broadcast: thread 0 loads block-scale d, broadcasts via wave_read_lane
 // - Direct global memory writes (no LDS staging)
 template <bool need_check, typename dst_t>
 static __global__ void dequantize_block_iq4_xs_rdn2(const void * __restrict__ vx, dst_t * __restrict__ y, const int64_t k) {
@@ -29,17 +28,7 @@ static __global__ void dequantize_block_iq4_xs_rdn2(const void * __restrict__ vx
         const int sl_shift = (tid % 2) * 4;
         const int sh_shift = 2 * tid;
 
-#ifdef RDNA2_EXP_DPP_SCALES
-        // DPP broadcast: thread 0 loads x->d, all threads get it via intra-wave read
-        float block_d;
-        if (tid == 0) {
-            block_d = __half2float(x->d);
-        }
-        block_d = __builtin_amdgcn_wave_read_lane(block_d, 0);
-        const float dl = block_d * (((float)((x->scales_l[sl_idx] >> sl_shift) & 0xf) + (float)((x->scales_h >> sh_shift) & 3) * 16.0f) - 32.0f);
-#else
         const float dl = (float)x->d * (((float)((x->scales_l[sl_idx] >> sl_shift) & 0xf) + (float)((x->scales_h >> sh_shift) & 3) * 16.0f) - 32.0f);
-#endif
 
         const uint8_t * q4 = x->qs + tid * 16;
         dst_t * out_lower = y + i0 + tid * 32;
