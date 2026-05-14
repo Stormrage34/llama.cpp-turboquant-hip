@@ -1,0 +1,5 @@
+jobs:
+  - pmc:
+      - GL2C_HIT
+  - pmc:
+      - LDSBankConflict

@@ -1,0 +1,1 @@
+pmc: LDSBankConflict, ALUStalledByLDS, GL2C_HIT, GL2C_MISS
