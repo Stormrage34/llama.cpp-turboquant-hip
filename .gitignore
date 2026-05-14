@@ -162,3 +162,7 @@ AGENTS.local.md
 .rocprofv3/
 rocprofv3_*
 counters_*.yaml
+
+# Profiler and benchmark data artifacts
+logs/
+benchmarks/phase4/
