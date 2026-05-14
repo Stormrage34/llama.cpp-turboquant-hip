@@ -1,5 +1,8 @@
 # RDNA2-optimized llama.cpp docker-compose
 # Usage: docker compose -f docker/docker-compose.rdna2.yml up
+#
+# Build: docker buildx build -t llama-cpp-rdna2:v0.3.2-p3-bfe-stable -f docker/Dockerfile.rdna2 .
+# Run:   docker compose -f docker/docker-compose.rdna2.yml up
 version: "3.9"
 
 services:
@@ -7,6 +10,14 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.rdna2
+      # Buildx cache for faster rebuilds
+      cache_from:
+        - type=local,src=/tmp/docker-cache-rdna2
+      cache_to:
+        - type=local,dest=/tmp/docker-cache-rdna2,mode=max
+      args:
+        - GPU_TARGETS=gfx1030
+        - ROCM_VERSION=7.2.1
     image: llama-cpp-rdna2:v0.3.2-p3-bfe-stable
     container_name: llama-rdna2
     devices:
@@ -22,8 +33,15 @@ services:
       - HIP_VISIBLE_DEVICES=0
     ports:
       - "8080:8080"
+    # Health check: verify server is responding
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     command: >
-      ./build/bin/llama-server
+      ./llama.cpp/build/bin/llama-server
       -m /models/llama-model.gguf
       --host 0.0.0.0
       --port 8080
