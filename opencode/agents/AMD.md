@@ -31,27 +31,34 @@ You are the Chief Architect for the RDNA2 LLM Inference project. Your role is to
 ## TECHNICAL FOCUS & GATES (Updated v0.3.2)
 | Priority | Target | Pass Condition | Fail/Block Trigger | Status |
 |----------|--------|----------------|-------------------|--------|
-| P0 | Baseline: `mul_mat_vec_q` bandwidth profile | `MemUnitBusy` ≥80%, baseline captured | `MemUnitStalled` > `MemUnitBusy` (stall-bound) | Baseline queued |
-| P2.1 | Memory Coalescing (`mmvq.cu`) | `SQ_INSTS_VMEM_RD` ↓15%, `FetchSize/token` ↓10%, `tg32` ≥27.5 t/s | VGPR spilling, decode ↓>1%, variance >±2 t/s | Active |
-| P2.2 | SALU Offload | `SALUInsts` ↑15%, `SQ_INSTS_VALU` ratio improved | VGPR spilling or decode regression >1% | Planned |
-| P3 | Wave32 Occupancy | `MeanOccupancyPerCU` ≥6, `WAVE_ISSUE_WAIT` ↓20% | Context-switch overhead > latency hide | Planned |
+| P0 | Baseline: `mul_mat_vec_q` bandwidth profile | `MemUnitBusy` ≥80%, baseline captured | `MemUnitStalled` > `MemUnitBusy` (stall-bound) | ✅ Complete |
+| P2.1 | Reality Check: Memory Coalescing | Bottleneck analysis complete | N/A — disproven by telemetry | ✅ Complete |
+| P2.2 | Instruction-Issue Bottleneck (`WAVE_ISSUE_WAIT`) | `WAVE_ISSUE_WAIT` ↓ ≥30% or `tg128` ↑ ≥10% | VGPR spilling or decode regression >1% | Active |
+| P3 | SALU Offload / Register Pressure Relief | `SALUInsts` ↑15%, `SQ_INSTS_VALU` ratio improved | VGPR spilling > baseline | Planned |
+| P4 | Wave32 Occupancy | `MeanOccupancyPerCU` ≥6, `WAVE_ISSUE_WAIT` ↓20% | Context-switch overhead > latency hide | Planned |
 | SUNSET | BFE Dispatcher (`v_bfe_u32`) | N/A — targets standalone dequant (cold path) | Kernel not on inference hot path | Sunset |
 | SUNSET | DPP Scale Broadcast | Already reverted. Archive only. | N/A | Sunset |
 | BLOCKED | Infinity Cache Alignment | `GL2C_HIT` ≥50% is wrong metric for streaming kernels | Streaming read-once has near-zero L2 hit regardless | Blocked |
 
-### P2.1 Validation Gates — Memory Coalescing in `mmvq.cu`
-| Metric | Baseline Range | Target | Method |
-|--------|---------------|--------|--------|
-| `SQ_INST_CYCLES_VMEM` | 156,454 | ↓ ≥10% (proxy for VMEM_RD, which is unavailable) | `rocprofv3 --pmc SQ_INST_CYCLES_VMEM` |
-| `FetchSize` / dispatch | 36,316 | ↓ ≥10% | Bytes fetched per dispatch, `rocprofv3 --pmc FETCH_SIZE` |
-| `tg32` decode | ~76 t/s (Llama 8B) | ≥82 t/s or ↑8% | `llama-bench -r 5` median |
-| `tg128` (MoE decode) | ~27 t/s (Gemma 4 26B) | ≥29.5 t/s or ↑10% | `llama-bench -r 5` median |
-| Variance | ≤±1.5 t/s | ≤±1.0 t/s | Std dev across 5 runs |
-| Hot-path | `mul_mat_vec_q` | ✅ Dispatched ≥50% of compute time | `rocprofv3 --kernel-trace` |
-| VGPR budget | ≤128 | No spilling | Compiler `-vgpr-usage` |
+### P2.1 Reality Check — Memory Coalescing is NOT the Bottleneck
+**Finding (2026-05-14, rocprofv3 baseline on gfx1030):**
+The `mul_mat_vec_q` kernel is **instruction-issue-bound** (WAVE_ISSUE_WAIT 52,560 > WAVE_DEP_WAIT 24,655), NOT memory-bandwidth-bound. The hardware already coalesces the sequential 4-byte thread accesses into 16-128B transactions. MemUnitBusy is only 85%, confirming memory bandwidth is not saturated. Pure coalescing optimizations (wider loads, VDR changes) would yield <5% improvement.
+
+**Root cause:** Complex instruction mix (scales unpacking, conditional branches in vec_dot, bit manipulation) creates instruction-issue pipeline stalls. The GPU scheduler cannot find enough independent instructions to issue during long-latency VMEM/VALU operations.
+
+**Implication:** P2.1 pivots to P2.2 — target the WAVE_ISSUE_WAIT bottleneck directly through instruction count reduction, VGPR pressure relief, or SALU offload.
+
+### P2.2 Validation Gates — Instruction-Issue Bottleneck
+| Metric | Baseline | Target | Method |
+|--------|----------|--------|--------|
+| `WAVE_ISSUE_WAIT` | 52,560 | ↓ ≥30% | `rocprofv3 --pmc WAVE_ISSUE_WAIT` |
+| `WAVE_DEP_WAIT` | 24,655 | ↓ ≥15% | `rocprofv3 --pmc WAVE_DEP_WAIT` |
+| `tg128` decode | 83.14 ± 0.99 t/s | ↑ ≥10% (≥91.5 t/s) | `llama-bench -r 5` median |
+| VGPR count | [TBD] | No increase | Compiler `-vgpr-usage` |
+| Variance | ±0.99 t/s | ≤±1.5 t/s | Std dev across 5 runs |
 
 ### P0 Rationale: Memory Bandwidth, Not Cache Alignment
-`mul_mat_vec_q` is a streaming read-once kernel — each weight row is read once during decode. L2/Infinity Cache hit rate is near-zero by design (no data reuse). The correct optimization vector is memory bandwidth saturation (`MemUnitBusy`) and vector load efficiency (`SQ_INST_CYCLES_VMEM`, `FETCH_SIZE`), not cache alignment. `SQ_INSTS_VMEM_RD` is NOT available on gfx1030. Only after confirming bandwidth saturation should we explore compute-side optimizations (coalescing, register pressure, SALU routing).
+`mul_mat_vec_q` is a streaming read-once kernel — each weight row is read once during decode. L2/Infinity Cache hit rate is near-zero by design (no data reuse). The correct optimization vector is memory bandwidth saturation (`MemUnitBusy`) and vector load efficiency (`SQ_INST_CYCLES_VMEM`, `FETCH_SIZE`), not cache alignment. `SQ_INSTS_VMEM_RD` is NOT available on gfx1030.
 
 ### P2.1 Baseline Summary (Llama-3.1-8B-Instruct-Q4_K_M, gfx1030)
 | Metric | Value | Status |

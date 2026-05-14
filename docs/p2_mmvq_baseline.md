@@ -53,11 +53,35 @@
    - Coalescing improvements would reduce VMEM cycles and could raise MemUnitBusy
 3. **LDS is Not a Bottleneck** — LDSBankConflict low, ALUStalledByLDS negligible
 
-## P2.1 Opportunity Assessment
+## P2.1 Reality Check: Memory Coalescing is NOT the Bottleneck
+
+**Critical finding:** The kernel is **instruction-issue-bound**, NOT memory-coalescing-bound.
+
+Evidence:
+1. **WAVE_ISSUE_WAIT (52,560) > WAVE_DEP_WAIT (24,655)** — 65% of dispatch time the pipeline is stalled waiting for instructions to issue
+2. **MemUnitBusy at 85%** — memory bandwidth is NOT the bottleneck (~15% headroom)
+3. **VALU:VMEM ratio 1.10:1** — balanced, not memory-heavy
+4. **LDSBankConflict at 211 (low), ALUStalledByLDS at 0.12 (negligible)** — no secondary bottlenecks
+
+**Why coalescing doesn't help:** The hardware already coalesces consecutive 4-byte thread accesses into 16-128B transactions. Using `uint2`/`uint4` in source code reduces instruction count by at most 1-2 per vec_dot call (~2% of total instructions), which is within noise for WAVE_ISSUE_WAIT.
+
+**VDR analysis:** Increasing VDR_Q4_K_Q8_1_MMVQ from 2 to 4 would change thread grouping but NOT reduce total instruction count (the vec_dot function is hardcoded to process 2 ints per call regardless of VDR). The loop overhead savings (~4 instructions/iteration) are negligible relative to total instruction count.
+
+## P2.2 Pivot: Target the Real Bottleneck
+
+The root cause of WAVE_ISSUE_WAIT is the complex instruction mix in the vec_dot functions. Each call involves:
+- Global memory loads with high latency (q4, q8, scales)
+- Bit manipulation for scales unpacking (masks, shifts, conditional)
+- DP4A dot product computation
+- Mixed-precision math (half-to-float conversions)
+
+The GPU instruction scheduler cannot find enough independent work during the latency of these operations.
+
 | Optimization | Expected Impact | Risk |
 |-------------|----------------|------|
-| float4/uint4 vector loads (coalescing) | ↓VMEM cycles, ↓FETCH_SIZE | VGPR pressure increase |
-| Reduce instruction count (SALU offload) | ↓WAVE_ISSUE_WAIT | Medium complexity |
-| Wave32 optimization | ↓SQ_WAVES, better occupancy | Medium |
+| VGPR reduction → higher occupancy → better latency hiding | ↓WAVE_ISSUE_WAIT 20-30% | Requires compiler-flag tuning |
+| SALU offload of uniform address calcs | ↓VALU instructions 5-10% | Low |
+| Branch reduction in scales unpacking | Instruction flow smoothing | Low |
+| LDS tiling for weight sharing | ↓Global loads per wave 8x | High complexity |
 
-**Recommendation**: Proceed with coalescing (P2.1) but note the primary bottleneck is instruction-issue; expect modest gains (~5-8% tg32) unless combined with instruction reduction.
+**Recommendation**: Pivot P2.1 → P2.2. Target WAVE_ISSUE_WAIT directly. Start with VGPR usage analysis (compile with `-Rpass-analysis=kernel-resource-usage`), then apply SALU offload for the most accessible gains.
