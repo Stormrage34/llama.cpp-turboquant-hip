@@ -12,6 +12,11 @@
 
 set -e
 
+# GPU failback — free VRAM before benchmarking
+source "$(cd "$(dirname "$0")" && pwd)/gpu_failback.sh"
+gpu_failback_trap
+gpu_acquire
+
 # ─── Configuration ───────────────────────────────────────────────────────────
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN_DIR="${PROJECT_ROOT}/build/bin"

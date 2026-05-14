@@ -1,0 +1,32 @@
+# ROCProf counters for RDNA2 Infinity Cache & LDS analysis
+# v0.3.1 baseline — gfx1030 (RX 6800 XT)
+#
+# Usage:
+#   rocprofv3 --stats --hip-trace --kernel-trace \
+#     -i scripts/counters_inf_cache.txt \
+#     --output-dir benchmarks/phase4/baseline_v0.3.1 \
+#     ./build/bin/llama-bench [args]
+
+# L2 / Infinity Cache
+L2CacheHitRate
+GL2C_HIT
+GL2C_MISS
+
+# LDS (Local Data Share) — bank conflicts kill warp utilization
+LDSBankConflict
+LDSBankConflict_ideal
+
+# ALU / pipeline utilization
+VALUBusy
+VALUBusy_ideal
+SALUBusy
+SALUBusy_ideal
+
+# Wave occupancy — register pressure indicator
+MeanOccupancyPerCU
+WavesPerCU
+
+# Memory
+MemUnitBusy
+MemUnitStalled
+WriteUnitBusy

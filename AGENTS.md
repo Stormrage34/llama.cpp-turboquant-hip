@@ -108,3 +108,104 @@ To conserve context space, load these resources as needed:
 - [Jinja engine](common/jinja/README.md)
 - [How to add a new model](docs/development/HOWTO-add-model.md)
 - [PR template](.github/pull_request_template.md)
+
+---
+
+## Repository-specific: llama.cpp-turboquant-hip
+
+This is an **AMD RDNA2-optimized fork** with TurboQuant, MTP, and custom HIP kernels. The upstream is [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp).
+
+### Build
+
+```bash
+# CMake only — Makefile has been removed
+cmake -B build -S . -DGGML_HIP=ON -DGPU_TARGETS=gfx1030
+cmake --build build --config Release -j $(nproc)
+
+# Or use the RDNA2 build script (also assembles llama-bench-rdna2 with opt kernels)
+./scripts/build_rdna2_llama.sh         # all RDNA2 optimizations
+./scripts/build_rdna2_llama.sh stable  # stable only (no matmul LDS)
+./scripts/build_rdna2_llama.sh baseline # no RDNA2 opt flags
+```
+
+Requires `cmake -B build` first before running `build_rdna2_llama.sh`.
+
+### RDNA2 Runtime Flags
+
+RDNA2 optimizations are **compile-time + runtime gated**. All three must be set:
+
+| Env Var | Feature |
+|---------|---------|
+| `RDNA2_OPT_V1=1` | BFE dequantization kernel (stable) |
+| `RDNA2_ASYNC_PIPELINE=1` | Async HIP pipeline (stable) |
+| `RDNA2_MATMUL_OPT_V1=1` | LDS double-buffer matmul for MoE (stable in v0.3.1) |
+
+Used as: `RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 ./llama-cli -m model.gguf ...`
+
+### Available Binaries
+
+Currently only `build/bin/llama-cli` is built. `llama-server` and `llama-bench-rdna2` require additional targets.
+
+### GPU Setup
+
+- Source `scripts/gpu_failback.sh` before GPU work: saves/running llama-server state, frees VRAM, restores on exit
+- VRAM check: `rocm-smi --showmeminfo vram`
+- Default offload arch: `gfx1030` (RDNA2). Override via `OFFLOAD_ARCH` env var.
+- Model dir: `/home/stormrage/models/`
+
+### Testing
+
+```bash
+cd build
+ctest -L main -E "test-llama-archs" --verbose --timeout 900
+```
+
+Tests are registered via `llama_test()` / `llama_test_cmd()` in `tests/CMakeLists.txt`.  
+HIP-specific tests live in `tests/` with `RDNA2_OPT_V1` compile definition (e.g. `test_dequant_rdn2`).
+
+### Benchmark
+
+```bash
+# Full benchmark suite across context lengths
+./scripts/run_rdna2_bench.sh                 # RDNA2 optimized
+./scripts/run_rdna2_bench.sh baseline        # baseline comparison
+```
+
+Default bench parameters (from `scripts/run_rdna2_bench.sh`):
+- Contexts: 512, 2048, 4096
+- Gen len: 128, batch: 256, ubatch: 128
+- TurboQuant: `CTK=turbo4 CTV=turbo2 FA=1`
+- Fit: `-fitt 2048 -fitc 4096`
+- 3 runs per config
+- VRAM hard limit: 13.5 GB
+
+### Key CLI Flags
+
+| Flag | Purpose |
+|------|---------|
+| `-fitt 512` | Fit target margin (MiB) |
+| `-fitc 4096` | Minimum context for fit |
+| `-ngl 30` | Partial GPU offload for 35B models |
+| `--reasoning off` | Disable Qwen3 thinking chain |
+| `--reasoning [on\|off\|auto]` | Control reasoning mode |
+| `--no-display-prompt` | Suppress prompt echo |
+| `--repeat-penalty 1.1` | Prevent repetition loops |
+
+### Qwen3 Reasoning
+
+Qwen3 models default to `--reasoning auto` — in-chat mode this outputs a reasoning tag.  
+With `-f` (file prompt, non-interactive), it still generates thinking tokens.  
+Validation harness: `./scripts/validate_qwen3_reasoning.sh` — runs baseline vs RDNA2, checks coherence and VRAM leaks.
+
+### HIP Quality
+
+- CI workflow: `.github/workflows/hip-quality-check.yml`
+- Compiles with `-Werror` for HIP, checks VGPR spills via `scripts/hip/gcn-cdna-vgpr-check.py`
+- Uses ROCm 7.2.1 container in CI
+
+### Hygiene
+
+- `scripts/validate_hygiene.sh` — general repo consistency checks
+- No Python lint/type targets are configured for this repo
+- Lockfiles: `poetry.lock`, `pyproject.toml` (Python deps), `flake.nix` (Nix)
+- Models downloaded via `scripts/hf.sh` or fetched via `scripts/fetch_server_test_models.py`

@@ -153,6 +153,11 @@ if (NOT GGML_CUDA_FA)
     add_compile_definitions(GGML_CUDA_NO_FA)
 endif()
 
+# RDNA2 optimization flags for the ggml-hip backend
+# Enables BFE dequant, async pipeline, and LDS matmul (compile-time)
+add_compile_definitions(RDNA2_OPT_V1)
+add_compile_definitions(RDNA2_MATMUL_OPT_V1)
+
 if (CXX_IS_HIPCC)
     set_source_files_properties(${GGML_SOURCES_ROCM} PROPERTIES LANGUAGE CXX)
     if (WIN32 AND CMAKE_BUILD_TYPE STREQUAL "Debug")
