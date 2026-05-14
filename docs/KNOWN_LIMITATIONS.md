@@ -27,11 +27,12 @@
 
 ## Known Issues
 
-### 1. BFE Dispatcher — Unvalidated
-- **Status**: Code exists, but has NOT been validated on Q4_K_M/Q5_K_M models
-- **Risk**: May provide zero benefit or introduce regressions on untested quant types
-- **Action required**: Run `scripts/verify_kernel_dispatch.sh <model.gguf> Q4_K_M` before enabling
-- **Default**: OFF (`-DGGML_RDNA2_BFE_DISPATCHER=OFF`)
+### 1. BFE Dispatcher — Off-Hot-Path (Cold Path Only)
+- **Status**: Code exists, but targets a COLD PATH (standalone dequant), NOT the inference hot path
+- **Evidence**: Kernel trace on Llama-3.1-8B-Q4_K_M shows `mul_mat_vec_q` (fused dequant+matmul), NOT `dequantize_row_q4_K_cuda`
+- **Impact**: BFE optimization never executes during normal inference — dequant is fused into matmul kernels
+- **Default**: OFF (`-DGGML_RDNA2_BFE_DISPATCHER=OFF`) — and should stay OFF
+- **Recommendation**: Sunset. Keep code behind `#ifdef` for reference only
 
 ### 2. DPP Scale Broadcast — Reverted
 - **Status**: Removed from codebase

@@ -26,26 +26,38 @@
 
 ---
 
-## BFE Dispatcher — VALID BUT UNTESTED ON CORRECT PATH
+## BFE Dispatcher — OFF-HOT-PATH (Cold Path Only)
 
-**Status**: ⚠️ Valid code, untested on target quant types (Q4_K_M / Q5_K_M).
+**Status**: ❌ BFE targets standalone dequant path, which is NOT on the inference hot path.
 
-**What it does**: `RDNA2_BFE_DISPATCHER` replaces shift/mask unpack with `v_bfe_u32` (1-cycle) for Q4_K_M and Q5_K_M dequant kernels. Trait-based compile-time dispatch, zero runtime branching.
+**What it does**: `RDNA2_BFE_DISPATCHER` replaces shift/mask unpack with `v_bfe_u32` (1-cycle) in `dequantize_row_q4_K_cuda` and `dequantize_row_q5_K_cuda` (convert.cu:649-659).
 
-**What's missing**:
-- Kernel-path verification: `rocprofv3 --kernel-trace` must confirm `dequantize_row_q4_K_cuda` is invoked
-- Correct model/quant: Validation must use Q4_K_M or Q5_K_M quant, not IQ4_XS/TurboQuant
-- A/B harness: Same-build comparison with/without `RDNA2_BFE_DISPATCHER` flag
+**Why it doesn't matter for inference**:
+- Kernel trace on Llama-3.1-8B-Q4_K_M shows Q4_K_M inference uses the **fused `mul_mat_vec_q` path** (stream-k fixup), NOT standalone `dequantize_row_q4_K_cuda`
+- The standalone dequant path (`dequantize_row_q4_K_cuda`) is only called for:
+  - KV cache type conversion (`GGML_OP_DEQUANTIZE` for `cache_type_k` changes)
+  - Tensor copies between devices
+  - Debug/inspection operations
+- During normal inference, dequantization is **inlined into `mul_mat_vec_q`** — the BFE optimization never executes
 
-**Validation gates** (for BFE promotion to ON-by-default):
+**Evidence** (rocprofv3 kernel trace, Llama-3.1-8B-Q4_K_M):
+- Observed kernels: `mul_mat_vec_q` (type12, type14), `rms_norm`, `rope`, `flash_attn_tile`
+- NOT observed: `dequantize_row_q4_K`, `dequantize_block_q4_K`, or any BFE variant
+- This matches upstream llama.cpp architecture: weight dequant is fused into matmul kernels
 
-| Metric | Target | Method |
+**Recommendation**: SUNSET BFE dispatcher. Keep code behind `#ifdef RDNA2_BFE_DISPATCHER` for reference, but do NOT promote to ON-by-default. The optimization targets a cold path.
+
+**Additional finding**: Fixed brace bug in `build_attn_kv_iswa` (llama-graph.cpp:2527) that caused SIGSEGV for models using the kv_iswa attention path (Gemma 4, etc.). The `if (inp->self_v_rot)` block was missing its closing brace.
+
+**Validation gates** (for BFE promotion to ON-by-default — NOT MET):
+
+| Metric | Target | Result |
 |--------|--------|--------|
-| Kernel invoked | Yes | `rocprofv3 --kernel-trace` grep |
-| `SQ_INSTS_VALU` ↓ | ≥10% (kernel-filtered) | Median across 3 runs, CV < 2% |
-| Decode (`tg128`) | ≥26.5 t/s | `llama-bench -r 5` median |
-| Variance | ≤±1.5 t/s | Std dev across 5 runs |
-| Parity | Zero mismatches @ `temp=0.0` | Token diff vs CPU baseline |
+| Kernel invoked on hot path | Yes | ❌ Not invoked during inference |
+| `SQ_INSTS_VALU` ↓ | ≥10% (kernel-filtered) | N/A — kernel not on hot path |
+| Decode (`tg128`) | ≥26.5 t/s | N/A — optimization not exercised |
+| Variance | ≤±1.5 t/s | N/A |
+| Parity | Zero mismatches @ `temp=0.0` | N/A |
 
 ---
 
