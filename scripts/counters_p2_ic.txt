@@ -1,0 +1,39 @@
+# ROCProf counters for P2 Infinity Cache baseline — mul_mat_vec_q hot-path
+# gfx1030 (RX 6800 XT)
+#
+# VALUBusy and VALUUtilization are NOT available on gfx1030 (ROCm limitation).
+# Use SQ_INSTS_VALU instead for ALU instruction counting.
+#
+# Usage:
+#   rocprofv3 --stats --hip-trace --kernel-trace \
+#     -i scripts/counters_p2_ic.txt \
+#     --output-dir benchmarks/p2_ic_baseline \
+#     ./build/bin/llama-bench [args]
+
+# L2 / Infinity Cache — hit rate directly impacts mul_mat_vec_q memory latency
+L2CacheHitRate
+GL2C_HIT
+GL2C_MISS
+
+# LDS (Local Data Share) — bank conflicts stall wavefronts in matmul kernels
+LDSBankConflict
+LDSBankConflict_ideal
+
+# ALU pipeline utilization — use SQ_INSTS_VALU instead of VALUBusy (not avail)
+SQ_INSTS_VALU
+SQ_INSTS_VALU_PS
+SALUBusy
+SALUBusy_ideal
+
+# Wave occupancy — register pressure limits occupancy, hides latency
+MeanOccupancyPerCU
+WavesPerCU
+
+# Memory throughput — key for bandwidth-bound mul_mat_vec_q
+MemUnitBusy
+MemUnitStalled
+WriteUnitBusy
+
+# L1 data cache — impacts vector load performance
+L1DCHitRate
+L1DCMiss

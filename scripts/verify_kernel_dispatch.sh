@@ -74,6 +74,8 @@ KERNEL_PATTERNS[turbo4]="dequantize_turbo4"
 KERNEL_PATTERNS[turbo2]="dequantize_turbo2"
 KERNEL_PATTERNS[turbo3]="dequantize_turbo3"
 KERNEL_PATTERNS[BFE]="rdn2_bfe"
+KERNEL_PATTERNS[mul_mat_vec]="mul_mat_vec"
+KERNEL_PATTERNS[mul_mat]="mul_mat_q\|mul_mat"
 
 # ─── Determine which kernels to check ─────────────────────────────────────────
 if [ -n "$QUANT_TYPE" ] && [ "$QUANT_TYPE" != "all" ]; then
