@@ -112,12 +112,17 @@ BENCH_ARGS=(
 echo "Running llama-bench with kernel tracing..."
 RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 \
     "$ROCPROF" --kernel-trace \
-        --output-dir "$OUTDIR" \
+        -d "$OUTDIR" \
         "$BENCH" "${BENCH_ARGS[@]}" 2>&1 | tee "$OUTDIR/bench.log" || true
 
 # ─── Parse kernel trace ───────────────────────────────────────────────────────
 # rocprofv3 outputs kernel names in CSV files
-TRACE_FILE=$(find "$OUTDIR" -name "*kernel_trace*" -o -name "*KernelTrace*" | head -1)
+# Output directory may be under OUTDIR or in a subdirectory
+TRACE_FILE=$(find "$OUTDIR" -name "*.csv" -path "*kernel*" 2>/dev/null | head -1)
+if [ -z "$TRACE_FILE" ]; then
+    # Try broader search for any CSV with kernel dispatch data
+    TRACE_FILE=$(find "$OUTDIR" -name "*.csv" 2>/dev/null | head -1)
+fi
 
 if [ -z "$TRACE_FILE" ] || [ ! -f "$TRACE_FILE" ]; then
     echo ""

@@ -2525,6 +2525,7 @@ ggml_tensor * llm_graph_context::build_attn(
 
     if (inp->self_v_rot) {
         cur = ggml_mul_mat_aux(ctx0, cur, inp->self_v_rot);
+    }
     if (v_rot) {
         cur = ggml_mul_mat_aux(ctx0, cur, v_rot);
     }
@@ -2544,8 +2545,6 @@ ggml_tensor * llm_graph_context::build_attn(
     return cur;
 }
 
-
-}
 llm_graph_input_attn_cross * llm_graph_context::build_attn_inp_cross() const {
     auto inp = std::make_unique<llm_graph_input_attn_cross>(cross);
 

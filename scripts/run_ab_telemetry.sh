@@ -126,7 +126,7 @@ run_variant() {
             eval "${env_vars}" \
                 "$ROCPROF" --stats --hip-trace --kernel-trace \
                     -i "$COUNTERS_FILE" \
-                    --output-dir "$run_outdir" \
+                    -d "$run_outdir" \
                     "$BENCH" "${BENCH_ARGS[@]}" 2>&1 | tee "${run_outdir}/bench.log" || true
         else
             eval "${env_vars}" \
