@@ -33,8 +33,6 @@ The `RDNA2_MATMUL_OPT_V1` flag enables an LDS (Local Data Share) double-buffered
 ### Recommended Configuration (v0.3.1)
 
 ```bash
-export RDNA2_OPT_V1=1
-export RDNA2_ASYNC_PIPELINE=1
 export RDNA2_MATMUL_OPT_V1=1
 ./llama-bench -m MoE.gguf -p 512 -n 128 -fitt 1024 -fitc 2048 -ngl 30
 ```
@@ -47,10 +45,8 @@ export RDNA2_MATMUL_OPT_V1=1
 
 ```bash
 # Stable RDNA2 features only (production)
-RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 ./llama-server -m model.gguf -ngl 99
 
 # + MoE prefill accelerator (now stable)
-RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 RDNA2_MATMUL_OPT_V1=1 ./llama-server -m model.gguf -ngl 99
 ```
 
 ## Safety Gates
@@ -97,5 +93,4 @@ Unset `RDNA2_MATMUL_OPT_V1` or compile without `-DRDNA2_MATMUL_OPT_V1=1`. Runtim
 unset RDNA2_MATMUL_OPT_V1
 
 # Or compile without the flag
-cmake -DCMAKE_HIP_FLAGS="-DRDNA2_OPT_V1=1 -DRDNA2_ASYNC_PIPELINE=1" -S . -B build
 ```

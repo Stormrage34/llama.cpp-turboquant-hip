@@ -148,7 +148,6 @@ BENCH_ARGS=(
 )
 
 echo "Running benchmark (${RUNS} iterations)..." | tee -a "${OUTDIR}/summary.txt"
-echo "  Command: RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 RDNA2_MATMUL_OPT_V1=1 llama-bench ${BENCH_ARGS[*]}" | tee -a "${OUTDIR}/summary.txt"
 echo "" | tee -a "${OUTDIR}/summary.txt"
 
 # ─── Run with kernel trace if available ─────────────────────────────────────────
@@ -158,7 +157,6 @@ if [ -n "$ROCPROF" ] && [ -f "$COUNTERS_FILE" ]; then
     echo "  rocprofv3: ENABLED (kernel trace + counters)" | tee -a "${OUTDIR}/summary.txt"
     echo "" | tee -a "${OUTDIR}/summary.txt"
 
-    RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 RDNA2_MATMUL_OPT_V1=1 \
         "$ROCPROF" --stats --hip-trace --kernel-trace \
             -i "$COUNTERS_FILE" \
             --output-dir "${OUTDIR}/rocprof" \
@@ -167,7 +165,6 @@ else
     echo "  rocprofv3: DISABLED (not available or counters file missing)" | tee -a "${OUTDIR}/summary.txt"
     echo "" | tee -a "${OUTDIR}/summary.txt"
 
-    RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 RDNA2_MATMUL_OPT_V1=1 \
         "$BENCH" "${BENCH_ARGS[@]}" 2>&1 | tee "${OUTDIR}/bench.log"
 fi
 

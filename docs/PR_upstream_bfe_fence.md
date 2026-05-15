@@ -106,7 +106,6 @@ The following are kept in the fork and stripped from the upstream PR:
 |-------------|--------|
 | `RDNA2_OPT_V1` compile-time flag | Upstream uses runtime detection |
 | `RDNA2_MATMUL_OPT_V1` LDS double-buffer | Separate PR, different scope |
-| `RDNA2_ASYNC_PIPELINE` env var | Upstream uses HIP stream API directly |
 | `iq4_dequant_rdn2.cuh` IQ4_XS kernel | Not validated for upstream, path-specific |
 | `RDNA2_BFE_DISPATCHER` CMake option | Upstream uses runtime detection |
 

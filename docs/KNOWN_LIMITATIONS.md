@@ -15,7 +15,6 @@
 
 ## Model Compatibility
 
-| Model Type | Quant | `RDNA2_OPT_V1` | `RDNA2_MATMUL_OPT_V1` | `RDNA2_BFE_DISPATCHER` | Expected Gain |
 |-----------|-------|----------------|----------------------|----------------------|---------------|
 | 35B MoE | IQ4_XS | ✅ Active | ✅ Active (MoE) | ❌ No effect | +110% prefill |
 | 27B Dense | IQ4_XS | ✅ Active | ⚠️ Auto-disabled | ❌ No effect | Baseline |
@@ -77,9 +76,7 @@ The following optimizations are fork-specific and NOT suitable for upstream llam
 
 | Feature | Fork-Specific | Upstream Path |
 |---------|---------------|---------------|
-| `RDNA2_OPT_V1` compile-time flag | Yes — upstream uses runtime detection | Needs generic `hipGetDeviceProperties()` check |
 | `RDNA2_MATMUL_OPT_V1` LDS double-buffer | Yes — MoE-specific | Separate PR, different scope |
-| `RDNA2_ASYNC_PIPELINE` env var | Yes — upstream uses HIP stream API | Needs abstraction layer |
 | `iq4_dequant_rdn2.cuh` IQ4_XS kernel | Yes — not validated for upstream | Path-specific, needs more testing |
 | `RDNA2_BFE_DISPATCHER` CMake option | Yes — needs runtime detection | PR draft in `docs/PR_upstream_bfe_fence.md` |
 

@@ -61,6 +61,73 @@
 
 ---
 
+## P2.2 SALU Offload (`readfirstlane` broadcast) — SUNSET (2026-05-14)
+
+**Status**: ❌ Sunset. Zero measurable impact. Compiler already SALU-optimal on gfx1030.
+
+**What was tested**: `__builtin_amdgcn_readfirstlane(kbx)` broadcast in `mul_mat_vec_q` and `mul_mat_vec_q_moe` inner loops. The idea: `kbx` is wave-uniform (for K-quants where `qi/vdr >= warp_size`), and broadcasting it from SGPR instead of VGPR would enable `s_add_u32` for address arithmetic, reducing VALU pressure and `SQ_INSTS_VALU`.
+
+**Gate implementation**:
+- Compile gate: `#ifdef RDNA2_ISSUE_OPT_V1` (CMakeLists.txt + build script)
+- Runtime gate: `getenv("RDNA2_ISSUE_OPT")` → `cudaMemcpyToSymbol` → `__constant__ bool g_rdna2_issue_opt`
+- Safety guard: `qi/vdr >= warp_size` prevents use on non-K-quant types (Q4_0, Q8_0, etc.)
+- Host-side `rdna2_issue_opt_check_once()` in `ggml_cuda_mul_mat_vec_q()`
+
+**Why it failed** (A/B comparison, same build, 5 runs each):
+
+| Metric | Baseline (gate off) | P2.2 (gate on) | Delta | Gate |
+|--------|--------------------|----------------|-------|------|
+| pp512 | 1158.54 ± 0.78 t/s | 1158.92 ± 1.15 t/s | +0.03% | N/A |
+| tg128 | 77.84 ± 0.16 t/s | 77.82 ± 0.13 t/s | **−0.03%** | ❌ |
+| WAVE_ISSUE_WAIT | ~52,560 | ~52,560 (noise) | ~0% | ❌ |
+| SQ_INSTS_VALU | 171,807 | 171,850 | ~0% | ❌ |
+| VGPR | 40 | 40 | 0 | ✅ |
+| Hot-path | ✅ | ✅ | — | ✅ |
+
+**Score: 2/5 → SUNSET** (pass condition was ≥4 gates)
+
+**Root cause**: LLVM's AMDGPU backend already recognizes wave-uniform VGPRs in address computation and routes them through SALU (`s_add_u32`) without `readfirstlane` hints. The `readfirstlane` intrinsic adds a `v_readfirstlane_b32` instruction (consuming a VALU cycle) and a constant memory load (`s_load_dword` for `g_rdna2_issue_opt`), which can offset any theoretical benefit. The real bottleneck is `MemUnitBusy`=85% (memory latency), not instruction issue — `WAVE_ISSUE_WAIT` is a symptom of the memory wall, not the root cause.
+
+**Revert scope**:
+- `ggml/src/ggml-cuda/mmvq.cu`: Removed `readfirstlane` blocks, host-side `rdna2_issue_opt_check_once()`, `__constant__ g_rdna2_issue_opt` — all reverted to upstream baseline
+- `ggml/src/ggml-hip/CMakeLists.txt`: Removed `add_compile_definitions(RDNA2_ISSUE_OPT_V1)`
+- `scripts/build_rdna2_llama.sh`: Removed `-DRDNA2_ISSUE_OPT_V1=1` flag
+- Agent docs (`AMD.md`, `KERNEL_ENGINEER.md`): Updated priority tables to SUNSET, added sunset rationale
+
+**Lesson learned**: Trust the compiler for wave-uniform routing on gfx1030. Always run a same-build A/B with `getenv` runtime gate before committing kernel changes. Profile the actual bottleneck before guessing — `MemUnitBusy` telemetry would have revealed the memory-bound nature earlier, saving the implementation effort.
+
+**Pivot**: Cross-fork benchmarking (P2.4) — quantify RDNA2_OPT_V1+MATMUL_OPT_V1 delta vs v0.3.0-stable baseline.
+
+---
+
+## P2.3 Software Pipeline / kbx Loop Unrolling — SUNSET (2026-05-14)
+
+**Status**: ❌ Sunset. VGPR headroom insufficient for meaningful latency hiding on decode path.
+
+**Phase 0 (ISA audit)**:
+- VGPR = **38** for `mul_mat_vec_q<Q4_K, 1, 0, 0>` (decode, no fusion) — not 40 as previously assumed
+- Serialized load-compute pattern: 12 global_loads → 197 VALU → back-edge branch
+- Only 2 VGPRs of headroom before occupancy cliff (VGPR≥48 → 64→56 waves/CU)
+
+**Phase 1 failure** (`#pragma unroll 2` on kbx loop):
+- VGPR exploded 38→62 (+63%), occupancy collapsed 64→40 waves/CU (−37.5%)
+- Root cause: compiler eagerly unrolls entire kbx×j×i nest with inlined `vec_dot_q_cuda` (~20-25 VGPRs each), doubling live VGPRs
+- Reverted immediately
+
+**Phase 2 (manual load hoisting) — NOT ATTEMPTED**: 
+- Theoretical analysis: `vec_dot_q_cuda` is a fused load+compute function; internal arrays (`v[]`, `u[]`, `d8[]`) stay live throughout dp4a chain
+- Two simultaneous invocations require ~32-36 VGPRs, exceeding 38-VGPR ceiling
+- `__builtin_prefetch` ineffective: streaming kernel uses non-temporal loads (L1 bypass), prefetch into L1 never consumed
+- Compiler flag `-amdgpu-schedule-ilp=2` cannot overcome control dependency from loop back-edge branch
+
+**Amdahl ceiling**: Decode kernel is 85% memory-bound. With 2 VGPRs headroom, theoretical maximum gain from any instruction-level optimization is <2%.
+
+**Verdict: SUNSET**. Pivot to cross-fork benchmarking (P2.4). The real performance delta to chase is the existing RDNA2_OPT_V1 + MATMUL_OPT_V1 vs v0.3.0-stable baseline comparison, which has never been quantified.
+
+**Lesson learned**: ISA audit must come BEFORE any optimization attempt. The 2-VGPR headroom finding would have ruled out P2.3 at design time, saving the `#pragma unroll 2` implementation and revert effort. All future kernel optimization proposals require a documented VGPR budget analysis as a gating step.
+
+---
+
 ## Infrastructure Gaps Blocking MTP/Async V2
 
 | Gap | Impact | Fix |

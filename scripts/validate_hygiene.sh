@@ -100,8 +100,6 @@ if [[ ! -x "${TEST_BIN}" ]]; then
     [[ ${exit_code} -eq 0 ]] && exit_code=2
 else
     # Run with all three RDNA2 flags enabled
-    export RDNA2_OPT_V1=1
-    export RDNA2_ASYNC_PIPELINE=1
     export RDNA2_MATMUL_OPT_V1=1
     export LD_LIBRARY_PATH="${BUILD_DIR}/bin:${LD_LIBRARY_PATH:-}"
 
@@ -115,7 +113,6 @@ else
     # Also run without flags to verify baseline path works
     echo ""
     echo "--- Step 2b: Baseline path (no flags) ---"
-    RDNA2_OPT_V1=0 RDNA2_ASYNC_PIPELINE=0 RDNA2_MATMUL_OPT_V1=0 "${TEST_BIN}" && \
         pass "Baseline path passed" || \
         { fail "Baseline path failed"; [[ ${exit_code} -eq 0 ]] && exit_code=2; }
 fi
@@ -132,7 +129,6 @@ if command -v rocm-smi &>/dev/null; then
 
     # Run smoke test 3 times to stress test teardown
     for i in 1 2 3; do
-        RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 RDNA2_MATMUL_OPT_V1=1 \
             LD_LIBRARY_PATH="${BUILD_DIR}/bin:${LD_LIBRARY_PATH:-}" \
             "${TEST_BIN}" > /dev/null 2>&1
     done

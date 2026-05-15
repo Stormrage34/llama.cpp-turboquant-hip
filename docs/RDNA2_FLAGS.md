@@ -6,8 +6,6 @@
 
 | Flag | Purpose | Default | Compile-Time | Runtime | Compatible Models | Status |
 |------|---------|---------|-------------|---------|------------------|--------|
-| `RDNA2_OPT_V1` | Enable RDNA2 dequant + matmul kernels | ON | `add_compile_definitions(RDNA2_OPT_V1)` | `RDNA2_OPT_V1=1` | IQ4_XS, Q4_K_M, Q5_K_M, TurboQuant | ✅ Stable |
-| `RDNA2_ASYNC_PIPELINE` | Overlap dequant + compute via dedicated HIP stream | ON | (part of RDNA2_OPT_V1) | `RDNA2_ASYNC_PIPELINE=1` | All | ✅ Stable |
 | `RDNA2_MATMUL_OPT_V1` | LDS double-buffer matmul for MoE | ON | `add_compile_definitions(RDNA2_MATMUL_OPT_V1)` | `RDNA2_MATMUL_OPT_V1=1` | MoE models only | ✅ Stable |
 | `RDNA2_BFE_DISPATCHER` | `v_bfe_u32` for K-quant nibble unpack | OFF | `-DGGML_RDNA2_BFE_DISPATCHER=ON` | `RDNA2_BFE_DISPATCHER=1` | Q4_K_M, Q5_K_M | ⚠️ Experimental |
 | `RDNA2_EXP_DPP_SCALES` | DPP broadcast for scale loads | ~~OFF~~ | ~~Removed~~ | ~~Removed~~ | ~~IQ4_XS~~ | ❌ Reverted |
@@ -35,8 +33,6 @@ cmake -B build -S . \
 
 ```bash
 # Production: all stable flags
-export RDNA2_OPT_V1=1
-export RDNA2_ASYNC_PIPELINE=1
 export RDNA2_MATMUL_OPT_V1=1
 
 # + Experimental BFE (only after validation!)
@@ -45,7 +41,6 @@ export RDNA2_BFE_DISPATCHER=1
 
 ## Model Compatibility Matrix
 
-| Model | Quant | `RDNA2_OPT_V1` | `RDNA2_MATMUL_OPT_V1` | `RDNA2_BFE_DISPATCHER` | Notes |
 |-------|-------|----------------|----------------------|----------------------|-------|
 | Qwen3.6-35B-MoE | IQ4_XS | ✅ Active | ✅ Active (MoE) | ❌ No effect | BFE targets Q4_K_M/Q5_K_M, not IQ4_XS |
 | Qwen3.6-27B | IQ4_XS | ✅ Active | ⚠️ Auto-disabled (dense) | ❌ No effect | Same as above |

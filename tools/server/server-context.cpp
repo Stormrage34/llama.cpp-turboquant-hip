@@ -194,6 +194,11 @@ struct server_slot {
     int32_t n_draft_total = 0;      // Total draft tokens generated
     int32_t n_draft_accepted = 0;   // Draft tokens actually accepted
 
+    // VRAM Memory Fence: counter to skip speculative decoding when VRAM is low
+    // Decremented each update_slots() call. When > 0, update_batch() skips draft
+    // generation and the speculative decode loop skips the slot.
+    int32_t mtp_skip_counter = 0;
+
     void reset() {
         SLT_DBG(*this, "%s", "\n");
 
@@ -216,9 +221,10 @@ struct server_slot {
         generated_token_probs.clear();
         json_schema = json();
 
-        // clear speculative decoding stats
+        // clear speculative decoding stats and VRAM fence counter
         n_draft_total = 0;
         n_draft_accepted = 0;
+        mtp_skip_counter = 0;
 
         task_prev = std::move(task);
         task.reset();
@@ -304,7 +310,7 @@ struct server_slot {
         generated_token_probs.push_back(token);
     }
 
-    int get_n_draft_max() const {
+    int get_n_draft_max(int n_predict_limit = -1) const {
         GGML_ASSERT(task);
 
         if (!can_speculate()) {
@@ -320,8 +326,20 @@ struct server_slot {
         //       also, need to leave space for 1 extra token to allow context shifts
         n_draft_max = std::min(n_draft_max, n_ctx - prompt.n_tokens() - 2);
 
-        if (n_remaining > 0) {
-            n_draft_max = std::min(n_draft_max, n_remaining - 1);
+        // Compute the current remaining budget from n_decoded directly,
+        // using the effective n_predict limit (task-local or global).
+        // Priority matches has_budget(): task-local first, then global
+        // fallback. This avoids stale n_remaining values that can cause
+        // draft selection to overshoot the token limit (fix for -n early
+        // termination in MTP).
+        int n_budget_remaining = -1;
+        if (task->params.n_predict != -1) {
+            n_budget_remaining = task->params.n_predict - n_decoded;
+        } else if (n_predict_limit != -1) {
+            n_budget_remaining = n_predict_limit - n_decoded;
+        }
+        if (n_budget_remaining > 0) {
+            n_draft_max = std::min(n_draft_max, n_budget_remaining - 1);
         }
 
         SLT_DBG(*this, "max possible draft: %d\n", n_draft_max);
@@ -334,51 +352,60 @@ struct server_slot {
         return n_draft_max;
     }
 
-    void update_batch(llama_batch & batch) {
-        const int n_draft_max = get_n_draft_max();
-        if (n_draft_max > 0) {
-            GGML_ASSERT(can_speculate());
+    void update_batch(llama_batch & batch, int n_predict_limit = -1) {
+        // VRAM Memory Fence: if mtp_skip_counter > 0, skip draft generation
+        // and fall through to the non-speculative single-token path.
+        // The counter was already decremented in update_slots().
+        if (mtp_skip_counter > 0) {
+            spec_draft.clear();
+            spec_i_batch.clear();
+            // fall through to non-speculative path below
+        } else {
+            const int n_draft_max = get_n_draft_max(n_predict_limit);
+            if (n_draft_max > 0) {
+                GGML_ASSERT(can_speculate());
 
-            // generate draft tokens in speculative decoding mode
-            // TODO: rework to have a single draft llama_context shared across all slots [TAG_SERVER_SPEC_REWORK]
-            //       perform the speculative drafting for all sequences at the same time in a single batch
-            const llama_tokens & tokens = prompt.tokens.get_text_tokens();
+                // generate draft tokens in speculative decoding mode
+                // TODO: rework to have a single draft llama_context shared across all slots [TAG_SERVER_SPEC_REWORK]
+                //       perform the speculative drafting for all sequences at the same time in a single batch
+                const llama_tokens & tokens = prompt.tokens.get_text_tokens();
 
-            const auto & params_spec = task->params.speculative;
+                const auto & params_spec = task->params.speculative;
 
-            if (!spec_draft.empty()) {
-                // we have a previous (partial) draft to reuse from the FULL
-                if (ctx_seq_rm_type == COMMON_CONTEXT_SEQ_RM_TYPE_FULL) {
-                    GGML_ASSERT(!spec_ckpt.empty());
+                if (!spec_draft.empty()) {
+                    // we have a previous (partial) draft to reuse from the FULL
+                    if (ctx_seq_rm_type == COMMON_CONTEXT_SEQ_RM_TYPE_FULL) {
+                        GGML_ASSERT(!spec_ckpt.empty());
+                    }
+                } else {
+                    GGML_ASSERT(spec_i_batch.empty());
+
+                    // generate a new draft
+                    spec_draft = common_speculative_draft(spec.get(), params_spec, tokens, sampled);
+                    n_draft_total += spec_draft.size();
+
+                    if (spec_draft.size() > (size_t) n_draft_max) {
+                        SLT_WRN(*this, "draft size %d exceeds max %d, truncating\n", (int) spec_draft.size(), n_draft_max);
+                        spec_draft.resize(n_draft_max);
+                    }
+
+                    if (!spec_draft.empty() && ctx_seq_rm_type == COMMON_CONTEXT_SEQ_RM_TYPE_FULL) {
+                        const auto n_tokens = prompt.tokens.size();
+
+                        //const int64_t t_start = ggml_time_us();
+
+                        server_prompt_checkpoint_update(spec_ckpt, ctx, this->id, n_tokens);
+
+                        //const int64_t t_total = ggml_time_us() - t_start;
+                        //printf("checkpoint total: %f ms\n", t_total / 1000.0);
+
+                        SLT_DBG(*this, "created speculative checkpoint (pos_min = %d, pos_max = %d, n_tokens = %zu, size = %.3f MiB)\n",
+                                spec_ckpt.pos_min, spec_ckpt.pos_max, n_tokens, (float) spec_ckpt.data.size() / 1024 / 1024);
+                    }
                 }
-            } else {
-                GGML_ASSERT(spec_i_batch.empty());
 
-                // generate a new draft
-                spec_draft = common_speculative_draft(spec.get(), params_spec, tokens, sampled);
-                n_draft_total += spec_draft.size();
-
-                if (spec_draft.size() > (size_t) n_draft_max) {
-                    SLT_WRN(*this, "draft size %d exceeds max %d, truncating\n", (int) spec_draft.size(), n_draft_max);
-                    spec_draft.resize(n_draft_max);
-                }
-
-                if (!spec_draft.empty() && ctx_seq_rm_type == COMMON_CONTEXT_SEQ_RM_TYPE_FULL) {
-                    const auto n_tokens = prompt.tokens.size();
-
-                    //const int64_t t_start = ggml_time_us();
-
-                    server_prompt_checkpoint_update(spec_ckpt, ctx, this->id, n_tokens);
-
-                    //const int64_t t_total = ggml_time_us() - t_start;
-                    //printf("checkpoint total: %f ms\n", t_total / 1000.0);
-
-                    SLT_DBG(*this, "created speculative checkpoint (pos_min = %d, pos_max = %d, n_tokens = %zu, size = %.3f MiB)\n",
-                            spec_ckpt.pos_min, spec_ckpt.pos_max, n_tokens, (float) spec_ckpt.data.size() / 1024 / 1024);
-                }
+                GGML_ASSERT(spec_draft.size() <= (size_t) n_draft_max);
             }
-
-            GGML_ASSERT(spec_draft.size() <= (size_t) n_draft_max);
         }
 
         if (spec_draft.empty()) {
@@ -672,6 +699,10 @@ private:
 
     llama_context * ctx = nullptr;
 
+    // Cached GPU device for VRAM queries.
+    // Initialized during load_model() once the ggml backend is available.
+    ggml_backend_dev_t gpu_dev = nullptr;
+
     llama_batch batch {};
 
     llama_model_ptr model_dft;
@@ -765,6 +796,13 @@ private:
         model = llama_init->model();
         ctx   = llama_init->context();
 
+        // Cache the first non-CPU device for VRAM queries used by the
+        // MTP speculative decode VRAM fence.
+        gpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
+        if (!gpu_dev) {
+            gpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_IGPU);
+        }
+
         if (model == nullptr) {
             SRV_ERR("failed to load model, '%s'\n", params_base.model.path.c_str());
             return false;
@@ -833,6 +871,33 @@ private:
 
             auto mparams_mtp = common_model_params_to_llama(params_base);
             mparams_mtp.override_arch = mtp_arch;
+
+            // Extend MoE CPU offload to the MTP model's MoE layer(s).
+            // The --n-cpu-moe N flag adds overrides for trunk layers 0..N-1,
+            // but the MTP model loads only the LAST nextn_predict_layers layers
+            // (typically 1), whose MoE tensors use the original trunk layer
+            // indices and would not be covered by a small N.  To avoid a VRAM
+            // spike on the MTP model's MoE, also add a catch-all MoE-expert
+            // CPU override (which matches MoE tensor names regardless of the
+            // layer index) whenever --n-cpu-moe is active (Fix 3).
+            if (!params_base.tensor_buft_overrides.empty()) {
+                // Collect existing overrides (stop at the nullptr sentinel),
+                // append a catch-all MoE CPU override, and re-terminate.
+                std::vector<llama_model_tensor_buft_override> mtp_overrides;
+                for (const auto & o : params_base.tensor_buft_overrides) {
+                    if (o.pattern == nullptr) {
+                        break;
+                    }
+                    mtp_overrides.push_back(o);
+                }
+                mtp_overrides.push_back(llm_ffn_exps_cpu_override());
+                mtp_overrides.push_back({nullptr, nullptr}); // sentinel
+                // Store the extended list so mparams_mtp can point into it.
+                // The pointer remains valid through the synchronous model load.
+                static std::vector<llama_model_tensor_buft_override> mtp_overrides_static;
+                mtp_overrides_static = std::move(mtp_overrides);
+                mparams_mtp.tensor_buft_overrides = mtp_overrides_static.data();
+            }
 
             model_mtp.reset(llama_model_load_from_file(params_base.model.path.c_str(), mparams_mtp));
             if (model_mtp == nullptr) {
@@ -2287,6 +2352,15 @@ private:
         // start populating the batch for this iteration
         common_batch_clear(batch);
 
+        // Decrement the MTP skip counter for all slots once per update_slots()
+        // call.  When a slot's counter was set by the VRAM fence below, we
+        // skip speculative drafting for N iterations to let VRAM recover.
+        for (auto & slot : slots) {
+            if (slot.mtp_skip_counter > 0) {
+                slot.mtp_skip_counter--;
+            }
+        }
+
         // track if given slot can be batched with slots already in the batch
         server_slot * slot_batched = nullptr;
 
@@ -2308,7 +2382,7 @@ private:
                 continue;
             }
 
-            slot.update_batch(batch);
+            slot.update_batch(batch, params_base.n_predict);
         }
 
         // process in chunks of params.n_batch
@@ -3041,6 +3115,31 @@ private:
                 }
             }
 
+            // VRAM Memory Fence: before entering speculative decode, check
+            // that the GPU has enough free memory to safely run MTP verification.
+            // If VRAM is too tight (< 500 MiB free), discard pending drafts for
+            // all slots and set the mtp_skip_counter to prevent re-generating
+            // drafts for the next 10 iterations, allowing standard non-speculative
+            // decode to continue without allocation pressure.
+            if (gpu_dev) {
+                size_t free = 0, total = 0;
+                ggml_backend_dev_memory(gpu_dev, &free, &total);
+                const size_t min_free = 500ULL * 1024 * 1024;
+                if (free < min_free) {
+                    for (auto & slot : slots) {
+                        if (slot.state == SLOT_STATE_GENERATING && slot.can_speculate() && !slot.spec_draft.empty()) {
+                            SRV_WRN(
+                                "VRAM low (%zu MiB free < %zu MiB), "
+                                "MTP speculative decode disabled for slot %d for 10 iterations\n",
+                                free / (1024*1024), min_free / (1024*1024), slot.id);
+                            slot.spec_draft.clear();
+                            slot.spec_i_batch.clear();
+                            slot.mtp_skip_counter = 10;
+                        }
+                    }
+                }
+            }
+
             // speculative decoding - main model sample and accept
             for (auto & slot : slots) {
                 if (slot.state != SLOT_STATE_GENERATING || !slot.can_speculate() || slot.spec_draft.empty()) {
@@ -3089,10 +3188,14 @@ private:
                                         __func__, ckpt.pos_min, ckpt.pos_max, ckpt.size(), ckpt.size(), n);
                             }
 
-                            // ctx_mtp has no analogous checkpointing — auto-mirror
-                            // wipes its tail; the next prefill ubatch repopulates
-                            // it via the streaming hook.
+                            // Sync MTP KV cache after checkpoint restore.
+                            // The auto-mirror in llama_context_seq_rm removes
+                            // stale tail positions from ctx_mtp, but we also
+                            // explicitly reset the MTP hook's pending state
+                            // to prevent stale cross-ubatch continuation
+                            // (Fix 2).
                             llama_context_seq_rm(slot.ctx, slot.id, ckpt.pos_max + 1, -1);
+                            llama_mtp_reset_pending(slot.ctx);
 
                             slot.prompt.tokens.keep_first(ckpt.n_tokens);
                             slot.smpl = std::move(smpl_save);
@@ -3113,8 +3216,6 @@ private:
                 const int64_t t_current = ggml_time_us();
 
                 const auto ids = std::move(slot.spec_draft);
-
-                slot.n_decoded += ids.size();
                 slot.t_token_generation = std::max<int64_t>(1, t_current - slot.t_start_generation) / 1e3;
 
                 // update how many tokens out of those tested were accepted
@@ -3130,6 +3231,21 @@ private:
                 llama_context_seq_rm(slot.ctx, slot.id, slot.prompt.tokens.pos_next(), -1);
 
                 for (size_t i = 0; i < ids.size(); ++i) {
+                    // Increment n_decoded one token at a time, matching the
+                    // non-speculative path (line 3051).  This lets has_budget()
+                    // inside process_token() correctly track remaining tokens
+                    // against the -n limit.  Without this, the entire batch
+                    // increment at once overshoots the budget and process_token
+                    // stops after the first token, dropping the rest (fix for
+                    // -n early termination in MTP).
+                    slot.n_decoded += 1;
+
+                    if (slot.n_decoded == 1) {
+                        slot.t_start_generation = t_current;
+                        slot.t_prompt_processing = (slot.t_start_generation - slot.t_start_process_prompt) / 1e3;
+                        metrics.on_prompt_eval(slot);
+                    }
+
                     completion_token_output result;
 
                     result.tok          = ids[i];

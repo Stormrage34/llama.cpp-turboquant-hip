@@ -36,7 +36,6 @@ if [ -z "$MODEL" ] || [ -z "$FLAG_NAME" ]; then
     echo "Supported flags:"
     echo "  RDNA2_OPT_V1          — BFE dequant kernel"
     echo "  RDNA2_BFE_DISPATCHER  — BFE v_bfe_u32 for Q4_K_M/Q5_K_M"
-    echo "  RDNA2_ASYNC_PIPELINE  — Async HIP pipeline"
     echo "  RDNA2_MATMUL_OPT_V1  — LDS double-buffer matmul for MoE"
     echo ""
     echo "The flag must be compiled into the binary (check CMakeLists.txt)."
@@ -117,7 +116,6 @@ run_variant() {
         mkdir -p "$run_outdir"
 
         # Build env vars: always enable base RDNA2 flags, toggle target flag
-        local env_vars="RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 ${FLAG_NAME}=${env_flag}"
         if [ -n "$extra_env" ]; then
             env_vars="${env_vars} ${extra_env}"
         fi

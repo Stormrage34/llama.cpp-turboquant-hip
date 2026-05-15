@@ -37,12 +37,10 @@
 ```bash
 # Stable RDNA2 features: BFE dequantization + async pipeline
 # Recommended for production — zero regression, predictable performance
-RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 \
   ./build/bin/llama-server -m model.gguf -ngl 99 -c 4096
 
 # + MoE prefill accelerator (stabilized in v0.3.1)
 # +269% prefill throughput, ±6 t/s variance
-RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 RDNA2_MATMUL_OPT_V1=1 \
   ./build/bin/llama-server -m model.gguf -ngl 99 -c 4096
 ```
 
@@ -123,8 +121,6 @@ RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 RDNA2_MATMUL_OPT_V1=1 \
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `RDNA2_OPT_V1` | unset | Enable RDNA2-optimized dequant kernels |
-| `RDNA2_ASYNC_PIPELINE` | unset | Enable async dequant stream + event sync |
 | `RDNA2_MATMUL_OPT_V1` | unset | Enable LDS double-buffered matmul (MoE only, stabilized v0.3.1) |
 
 All flags are **inert by default** — the fork runs identically to upstream llama.cpp when no flags are set.

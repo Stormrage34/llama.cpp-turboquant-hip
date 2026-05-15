@@ -979,6 +979,9 @@ extern "C" {
             struct llama_context * ctx_target,
             struct llama_context * ctx_mtp);
 
+    LLAMA_API void llama_mtp_reset_pending(
+            struct llama_context * ctx_target);
+
     LLAMA_API bool llama_context_seq_rm(
             struct llama_context * ctx,
                     llama_seq_id   seq_id,

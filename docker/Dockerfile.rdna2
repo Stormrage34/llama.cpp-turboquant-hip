@@ -91,8 +91,6 @@ WORKDIR /app
 EXPOSE 8080
 
 # RDNA2 runtime flags (can be overridden)
-ENV RDNA2_OPT_V1=1
-ENV RDNA2_ASYNC_PIPELINE=1
 ENV RDNA2_MATMUL_OPT_V1=1
 
 CMD ["./llama.cpp/build/bin/llama-server"]

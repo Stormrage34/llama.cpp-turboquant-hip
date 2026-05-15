@@ -19,7 +19,6 @@ To control this behavior:
 - `-n 1024` — ✅ Comfortable for thinking + concise response
 - `-n 2048` — ✅ Recommended for long-form generation
 
-**Note:** RDNA2 flags (`RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 RDNA2_MATMUL_OPT_V1=1`) accelerate tensor math only.  
 They do **not** modify sampling, chat templates, or reasoning behavior.
 
 ### Validation

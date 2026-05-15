@@ -3,7 +3,6 @@
 // Smoke test for RDNA2 pipeline (IQ4_XS dequant + async pipeline)
 // Verifies: compile succeeds, kernel launches, MSE < 1e-4
 // Usage: hipcc -o smoke_rdna2 smoke_rdna2.cpp -I../ggml/include -L../build/bin -lggml-base -lggml-cpu -lggml-hip
-// With env: RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 RDNA2_MATMUL_OPT_V1=1
 
 #include <cstdio>
 #include <cstdlib>
@@ -34,11 +33,7 @@ static bool check_hip_device() {
 
 // Test env var gates are present
 static bool check_env_gates() {
-    const char* opt_v1 = getenv("RDNA2_OPT_V1");
-    const char* async  = getenv("RDNA2_ASYNC_PIPELINE");
     const char* matmul = getenv("RDNA2_MATMUL_OPT_V1");
-    printf("RDNA2_OPT_V1=%s\n", opt_v1 ? opt_v1 : "(unset)");
-    printf("RDNA2_ASYNC_PIPELINE=%s\n", async ? async : "(unset)");
     printf("RDNA2_MATMUL_OPT_V1=%s\n", matmul ? matmul : "(unset)");
     return true;
 }

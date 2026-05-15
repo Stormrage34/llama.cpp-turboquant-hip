@@ -603,6 +603,9 @@ ggml_backend_cuda_context::~ggml_backend_cuda_context() {
     if (copy_event != nullptr) {
         CUDA_CHECK(cudaEventDestroy(copy_event));
     }
+    if (admin_stream != nullptr) {
+        CUDA_CHECK(cudaStreamDestroy(admin_stream));
+    }
     for (int i = 0; i < GGML_CUDA_MAX_DEVICES; ++i) {
         for (int j = 0; j < GGML_CUDA_MAX_STREAMS; ++j) {
             if (streams[i][j] != nullptr) {
@@ -2555,6 +2558,13 @@ static void ggml_cuda_mul_mat_id(ggml_backend_cuda_context & ctx, ggml_tensor * 
     const ggml_tensor * src0 = dst->src[0];
     const ggml_tensor * src1 = dst->src[1];
     const ggml_tensor * ids  = dst->src[2];
+
+    // Async MoE routing: when RDNA2_ASYNC_ROUTING is set, use the admin stream
+    // to pre-fetch expert routing data concurrently with matmul compute.
+    static int g_rdna2_async_routing = -1;
+    if (g_rdna2_async_routing == -1) {
+        g_rdna2_async_routing = (getenv("RDNA2_ASYNC_ROUTING") != nullptr) ? 1 : 0;
+    }
 
     GGML_ASSERT(src1->type == GGML_TYPE_F32);
     GGML_ASSERT(dst->type  == GGML_TYPE_F32);

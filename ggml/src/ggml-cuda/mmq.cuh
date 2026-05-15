@@ -3483,7 +3483,9 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
 
     constexpr int sz = sizeof(block_q8_1_mmq) / sizeof(int);
 
-#ifdef RDNA2_MATMUL_OPT_V1
+    // Runtime-dispatched: experimental (LDS double-buffer) or stable (standard).
+    // Both paths always compiled to eliminate compiler-ghost optimization divergence
+    // between builds with and without RDNA2_MATMUL_OPT_V1 defined.
     if (use_experimental) {
     // RDNA2 experimental: LDS double-buffering for tile_x (gfx1030 only)
     // Overlap loading of next tile_x with current vec_dot computation
@@ -3561,7 +3563,7 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
         }
     }
     } else {
-    // RDNA2 stable: baseline matmul path (experimental flag not set or non-gfx1030)
+    // Standard matmul path (baseline, no LDS double-buffering)
     for (int kb0 = kb0_start; kb0 < kb0_stop; kb0 += blocks_per_iter) {
         load_tiles(x, tile_x, offset_x + kb0, tile_x_max_i, stride_row_x);
         {
@@ -3596,44 +3598,7 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
 
         __syncthreads();
     }
-    } // end else (stable path when compiled with flag but runtime gate off)
-#else
-    // Original path (baseline, compiled without RDNA2_MATMUL_OPT_V1)
-    for (int kb0 = kb0_start; kb0 < kb0_stop; kb0 += blocks_per_iter) {
-        load_tiles(x, tile_x, offset_x + kb0, tile_x_max_i, stride_row_x);
-        {
-            const int * by0 = y + ncols_y * (kb0 * qk / ne_block) * sz;
-#pragma unroll
-            for (int l0 = 0; l0 < mmq_x * MMQ_TILE_Y_K; l0 += nwarps * warp_size) {
-                int l = l0 + threadIdx.y*warp_size + threadIdx.x;
-
-                tile_y[l] = by0[l];
-            }
-        }
-
-        __syncthreads();
-
-        vec_dot(tile_x, tile_y, sum, 0);
-
-        __syncthreads();
-
-        {
-            const int * by0 = y + ncols_y * ((kb0 * qk / ne_block) * sz + sz);
-#pragma unroll
-            for (int l0 = 0; l0 < mmq_x * MMQ_TILE_Y_K; l0 += nwarps * warp_size) {
-                int l = l0 + threadIdx.y*warp_size + threadIdx.x;
-
-                tile_y[l] = by0[l];
-            }
-        }
-
-        __syncthreads();
-
-        vec_dot(tile_x, tile_y, sum, MMQ_TILE_NE_K);
-
-        __syncthreads();
-    }
-#endif // RDNA2_MATMUL_OPT_V1
+    } // end else (standard path, runtime fallback)
 
     if (fixup) {
         write_back(sum, ids_dst, tmp_fixup + blockIdx.x*(mmq_x*mmq_y), mmq_y, mmq_y, mmq_x);
@@ -4068,16 +4033,15 @@ static void launch_mul_mat_q(ggml_backend_cuda_context & ctx, const mmq_args & a
     const int nwarps = mmq_get_nwarps_host(cc, warp_size);
     const int mmq_y = get_mmq_y_host(cc);
 
-    // Experimental matmul opt: runtime gate (compile-time + env + gfx1030 + MoE routing)
+    // Experimental matmul opt: runtime gate (env var + gfx1030 + MoE routing)
+    // Always compiled to prevent compiler-ghost optimization divergence — no compile-time gate.
     bool use_experimental = false;
-#ifdef RDNA2_MATMUL_OPT_V1
     {
         const char* exp_env = getenv("RDNA2_MATMUL_OPT_V1");
         if (exp_env && strcmp(exp_env, "1") == 0 && GGML_CUDA_CC_IS_RDNA2(cc) && args.expert_bounds != nullptr) {
             use_experimental = true;
         }
     }
-#endif
 
     const dim3 block_dims(warp_size, nwarps, 1);
 

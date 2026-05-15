@@ -1368,6 +1368,11 @@ struct ggml_backend_cuda_context {
     cudaEvent_t copy_event = nullptr;
 
     cudaStream_t streams[GGML_CUDA_MAX_DEVICES][GGML_CUDA_MAX_STREAMS] = { { nullptr } };
+
+    // Admin stream for async MoE expert routing (overlaps with matmul compute).
+    // Created with cudaStreamNonBlocking when RDNA2_ASYNC_ROUTING env var is set.
+    cudaStream_t admin_stream = nullptr;
+
     cublasHandle_t cublas_handles[GGML_CUDA_MAX_DEVICES] = {nullptr};
 
     int curr_stream_no = 0;
@@ -1442,6 +1447,17 @@ struct ggml_backend_cuda_context {
     }
 
     cudaStream_t stream() { return stream(device, curr_stream_no); }
+
+    // Async admin stream for MoE expert routing overlap (RDNA2_ASYNC_ROUTING).
+    // Returns a dedicated non-blocking stream that can execute routing kernels
+    // concurrently with the main compute stream. Lazy-created on first call.
+    cudaStream_t get_admin_stream() {
+        if (admin_stream == nullptr) {
+            ggml_cuda_set_device(device);
+            CUDA_CHECK(cudaStreamCreateWithFlags(&admin_stream, cudaStreamNonBlocking));
+        }
+        return admin_stream;
+    }
 
     ggml_cuda_stream_context & stream_context() { return concurrent_stream_context; }
 

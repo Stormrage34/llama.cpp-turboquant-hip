@@ -8,7 +8,6 @@ Fill this table for each candidate commit before merging.
 |------|---------|---------------|--------|
 | Numerical parity | `--temp 0.0` 10 runs vs CPU baseline | 0 mismatches, MSE <1e-4 | □ Pass □ Fail |
 | Multi-turn stability | 3 prompts, 64 tokens each | Coherent output, no `????` or `HereHere` | □ Pass □ Fail |
-| Fallback (no flags) | Unset `RDNA2_OPT_V1` | Identical output to baseline | □ Pass □ Fail |
 | Fallback (no asm) | Unset `RDNA2_MATMUL_OPT_V1` | Identical output, no NaN | □ Pass □ Fail |
 
 ## Performance

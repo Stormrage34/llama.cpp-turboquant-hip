@@ -133,13 +133,9 @@ for prompt_len in "${PROMPT_SIZES[@]}"; do
 
     # Set environment variables
     if [ "${MODE}" = "optimized" ]; then
-        export RDNA2_OPT_V1=1
-        export RDNA2_ASYNC_PIPELINE=1
         export RDNA2_MATMUL_OPT_V1=1
-        echo "  Env: RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 RDNA2_MATMUL_OPT_V1=1"
+        echo "  Env: RDNA2_MATMUL_OPT_V1=1"
     else
-        unset RDNA2_OPT_V1
-        unset RDNA2_ASYNC_PIPELINE
         unset RDNA2_MATMUL_OPT_V1
         echo "  Env: baseline (no RDNA2 optimizations)"
     fi

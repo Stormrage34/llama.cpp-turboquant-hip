@@ -74,6 +74,7 @@ struct llama_context {
     ggml_tensor * get_t_mtp_out()    const;
 
     void            set_mtp(llama_context * ctx_mtp_in);
+    void            reset_mtp_pending();
     llama_context * get_mtp() const { return mtp.ctx_mtp; }
 
     llama_token * get_sampled_tokens() const;
@@ -240,11 +241,18 @@ private:
 
     llm_graph_cb graph_get_cb() const;
 
-    void handle_mtp_for_ubatch(
+    // Collect MTP hidden-state data (called inside process_ubatch while the
+    // tensor is still valid).  Does NOT call llama_decode(ctx_mtp) — that is
+    // deferred to flush_mtp_data() to avoid nested GPU memory allocation.
+    void collect_mtp_data(
             int32_t                n_tokens,
             const llama_token    * tokens,
             const llama_pos      * positions,
             struct ggml_tensor   * t_h_pre_norm);
+
+    // Flush all collected MTP data by calling llama_decode(ctx_mtp) after
+    // the target scheduler's graph has been freed (ggml_backend_sched_reset).
+    void flush_mtp_data();
 
     // TODO: read/write lora adapters and cvec
     size_t state_write_data(llama_io_write_i & io);

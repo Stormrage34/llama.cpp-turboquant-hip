@@ -72,23 +72,23 @@ echo -e "${GREEN}✓ cmake: $(cmake --version | head -1)${NC}"
 echo -e "${GREEN}✓ ROCm path: ${ROCM_PATH}${NC}" && echo ""
 
 # ─── Mode → Runtime Environment ─────────────────────────────────────────────
-# RDNA2_OPT_V1 and RDNA2_MATMUL_OPT_V1 are hardcoded in ggml-hip/CMakeLists.txt
-# via add_compile_definitions(). The mode controls which RUNTIME env vars to set.
-# All modes compile the same binary — runtime gates control which paths execute.
+# Phantom gates removed per v0.3.2-alpha "Ghost Protocol":
+#   RDNA2_OPT_V1 (BFE dequant) — targets cold standalone dequant path, ~0% impact
+#   RDNA2_ASYNC_PIPELINE       — had zero kernel implementation
+# RDNA2_MATMUL_OPT_V1 remains as runtime-only dispatch (no compile gate).
 case "${MODE}" in
     all|optimized)
         echo -e "${GREEN}Mode: ${BOLD}All optimizations${NC}"
-        echo "  BFE dequant + async pipeline + LDS matmul"
-        RUN_ENV="RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 RDNA2_MATMUL_OPT_V1=1"
-        RUN_STABLE="RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1" ;;
+        echo "  RDNA2_MATMUL_OPT_V1 runtime gate (LDS double-buffer matmul)"
+        RUN_ENV="RDNA2_MATMUL_OPT_V1=1"
+        RUN_STABLE="RDNA2_MATMUL_OPT_V1=1" ;;
     stable)
-        echo -e "${GREEN}Mode: ${BOLD}Stable only (BFE dequant + async pipeline)${NC}"
+        echo -e "${GREEN}Mode: ${BOLD}Stable only${NC}"
+        echo "  No RDNA2 env gates enabled by default"
         RUN_ENV=""
-        RUN_STABLE="RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1" ;;
+        RUN_STABLE="" ;;
     baseline)
         echo -e "${YELLOW}Mode: ${BOLD}Baseline (no RDNA2 optimizations)${NC}"
-        echo -e "${YELLOW}  Compile definitions are hardcoded — baseline runs without env vars.${NC}"
-        echo -e "${YELLOW}  For a true baseline build, edit ggml-hip/CMakeLists.txt to remove add_compile_definitions.${NC}"
         RUN_ENV=""
         RUN_STABLE="" ;;
 esac

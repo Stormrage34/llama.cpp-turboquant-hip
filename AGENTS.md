@@ -136,11 +136,9 @@ RDNA2 optimizations are **compile-time + runtime gated**. All three must be set:
 
 | Env Var | Feature |
 |---------|---------|
-| `RDNA2_OPT_V1=1` | BFE dequantization kernel (stable) |
-| `RDNA2_ASYNC_PIPELINE=1` | Async HIP pipeline (stable) |
-| `RDNA2_MATMUL_OPT_V1=1` | LDS double-buffer matmul for MoE (stable in v0.3.1) |
+| `RDNA2_MATMUL_OPT_V1=1` | LDS double-buffer matmul for MoE (default, +28% prefill) |
+| `RDNA2_ASYNC_ROUTING=1` | Async admin stream for MoE expert routing (experimental) |
 
-Used as: `RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 ./llama-cli -m model.gguf ...`
 
 ### Available Binaries
 
@@ -161,7 +159,6 @@ ctest -L main -E "test-llama-archs" --verbose --timeout 900
 ```
 
 Tests are registered via `llama_test()` / `llama_test_cmd()` in `tests/CMakeLists.txt`.  
-HIP-specific tests live in `tests/` with `RDNA2_OPT_V1` compile definition (e.g. `test_dequant_rdn2`).
 
 ### Benchmark
 

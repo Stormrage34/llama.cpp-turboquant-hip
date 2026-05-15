@@ -41,15 +41,12 @@ BENCH_ARGS=(
 )
 
 # Run 1: RDNA2 optimized (BFE dequant + async)
-echo "=== Run 1: RDNA2 OPT (RDNA2_OPT_V1=1) ==="
 if [ -n "$ROCPROF" ]; then
-    RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 \
         "$ROCPROF" --stats --hip-trace --kernel-trace \
             -i "${SCRIPT_DIR}/scripts/counters_inf_cache.txt" \
             --output-dir "${OUTDIR}/rdna2_opt" \
             "$BENCH" "${BENCH_ARGS[@]}" 2>&1 | tee "${OUTDIR}/rdna2_opt/bench.log"
 else
-    RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 \
         "$BENCH" "${BENCH_ARGS[@]}" 2>&1 | tee "${OUTDIR}/rdna2_opt/bench.log"
 fi
 

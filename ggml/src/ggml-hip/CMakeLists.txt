@@ -154,9 +154,12 @@ if (NOT GGML_CUDA_FA)
 endif()
 
 # RDNA2 optimization flags for the ggml-hip backend
-# Enables BFE dequant, async pipeline, and LDS matmul (compile-time)
+# Enables BFE dequant, async pipeline (compile-time)
+# RDNA2_ASYNC_PIPELINE removed — had zero kernel implementation (phantom gate).
+# RDNA2_OPT_V1 retained as compile definition for iq4_dequant_rdn2.cu (dequant kernel
+# used by test_dequant_rdn2 and dequant_microbench). NOT a production optimization gate
+# — the standalone dequant path is cold during inference. Inline fusing in matmul is used.
 add_compile_definitions(RDNA2_OPT_V1)
-add_compile_definitions(RDNA2_MATMUL_OPT_V1)
 option(GGML_RDNA2_BFE_DISPATCHER "ggml-hip: use BFE v_bfe_u32 for Q4_K dequant" OFF)
 if (GGML_RDNA2_BFE_DISPATCHER)
     add_compile_definitions(RDNA2_BFE_DISPATCHER)

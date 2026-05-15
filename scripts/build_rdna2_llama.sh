@@ -47,16 +47,13 @@ MODE="${1:-all}"
 case "${MODE}" in
     all|optimized)
         echo -e "${GREEN}Mode: ${BOLD}All optimizations${NC}"
-        echo "  - BFE dequantization kernel (stable)"
-        echo "  - Async pipeline (stable)"
-        echo "  - LDS double-buffer matmul (experimental)"
-        RDNA2_FLAGS="-DRDNA2_OPT_V1=1 -DRDNA2_ASYNC_PIPELINE=1 -DRDNA2_MATMUL_OPT_V1=1"
+        echo "  - LDS double-buffer matmul (runtime-gated via RDNA2_MATMUL_OPT_V1)"
+        RDNA2_FLAGS=""
         ;;
     stable)
         echo -e "${GREEN}Mode: ${BOLD}Stable only${NC}"
-        echo "  - BFE dequantization kernel"
-        echo "  - Async pipeline"
-        RDNA2_FLAGS="-DRDNA2_OPT_V1=1 -DRDNA2_ASYNC_PIPELINE=1"
+        echo "  - No compile-time RDNA2 flags"
+        RDNA2_FLAGS=""
         ;;
     baseline)
         echo -e "${YELLOW}Mode: ${BOLD}Baseline (no RDNA2 optimizations)${NC}"
@@ -154,15 +151,8 @@ echo ""
 
 if [ "${MODE}" != "baseline" ]; then
     echo -e "${BOLD}Run with:${NC}"
-    if [ "${MODE}" = "stable" ]; then
-        echo "  RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 ${BIN_DIR}/llama-server -m model.gguf -ngl 99"
-    else
-            echo "  # Stable (production):"
-            echo "  RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 ${BIN_DIR}/llama-server -m model.gguf -ngl 99"
-            echo ""
-            echo "  # + Experimental MoE prefill (benchmark first):"
-            echo "  RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 RDNA2_MATMUL_OPT_V1=1 ${BIN_DIR}/llama-server -m model.gguf -ngl 99"
-    fi
+    echo "  # Experimental MoE matmul (benchmark first):"
+    echo "  RDNA2_MATMUL_OPT_V1=1 ${BIN_DIR}/llama-server -m model.gguf -ngl 99"
     echo ""
     echo -e "${YELLOW}See docs/rdna2-experimental.md for details.${NC}"
 fi

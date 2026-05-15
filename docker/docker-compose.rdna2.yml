@@ -26,8 +26,6 @@ services:
     volumes:
       - /home/stormrage/models:/models:ro
     environment:
-      - RDNA2_OPT_V1=1
-      - RDNA2_ASYNC_PIPELINE=1
       - RDNA2_MATMUL_OPT_V1=1
       - HSA_OVERRIDE_GFX_VERSION=10.3.0
       - HIP_VISIBLE_DEVICES=0

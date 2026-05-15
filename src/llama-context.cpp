@@ -1245,8 +1245,12 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
         return nullptr;
     }
 
+    // Collect MTP hidden-state data inside the ubatch (while the tensor is
+    // valid) but do NOT call llama_decode(ctx_mtp) here — that is deferred
+    // to decode() after the target scheduler's graph has been freed, to
+    // avoid nested GPU memory allocation (Fix 1).
     if (mtp.ctx_mtp) {
-        handle_mtp_for_ubatch(
+        collect_mtp_data(
                 (int32_t) ubatch.n_tokens,
                 ubatch.token,
                 ubatch.pos,
@@ -1895,6 +1899,12 @@ int llama_context::decode(const llama_batch & batch_inp) {
 
     // wait for the computation to finish (automatically done when obtaining the model output)
     //synchronize();
+
+    // Flush any MTP data collected during the ubatch loop.
+    // This is called after the target scheduler's graph is freed
+    // (inside flush_mtp_data) to avoid nested GPU memory allocation
+    // that causes VRAM exhaustion (Fix 1).
+    flush_mtp_data();
 
     return 0;
 }
@@ -3183,6 +3193,19 @@ void llama_set_mtp(struct llama_context * ctx_target, struct llama_context * ctx
     ctx_target->set_mtp(ctx_mtp);
 }
 
+void llama_mtp_reset_pending(struct llama_context * ctx_target) {
+    if (!ctx_target) return;
+    ctx_target->reset_mtp_pending();
+}
+
+void llama_context::reset_mtp_pending() {
+    mtp.pending_pos = -1;
+    const int64_t n_embd = model.hparams.n_embd;
+    if ((int64_t) mtp.pending_h.size() >= n_embd) {
+        std::fill(mtp.pending_h.begin(), mtp.pending_h.end(), 0.0f);
+    }
+}
+
 void llama_context::set_mtp(llama_context * ctx_mtp_in) {
     if (mtp.ctx_mtp == ctx_mtp_in) return;
 
@@ -3209,7 +3232,7 @@ void llama_context::set_mtp(llama_context * ctx_mtp_in) {
     }
 }
 
-void llama_context::handle_mtp_for_ubatch(
+void llama_context::collect_mtp_data(
         int32_t                n_tokens,
         const llama_token    * tokens,
         const llama_pos      * positions,
@@ -3242,44 +3265,134 @@ void llama_context::handle_mtp_for_ubatch(
     const int    n_out     = (pending_continues ? 1 : 0) + (n_rows - 1);
 
     if (n_out > 0) {
+        llama_mtp::StagedBatch batch;
+        batch.n_out = n_out;
+        batch.h.resize((size_t) n_out * n_embd);
+
         int out_idx = 0;
         if (pending_continues) {
-            std::memcpy(mtp.hook_batch.embd + (size_t) out_idx * n_embd,
+            std::memcpy(batch.h.data(),
                         mtp.pending_h.data(), row_bytes);
-            mtp.hook_batch.token[out_idx]     = tokens[0];
-            mtp.hook_batch.pos[out_idx]       = pos_start;
-            mtp.hook_batch.n_seq_id[out_idx]  = 1;
-            mtp.hook_batch.seq_id[out_idx][0] = 0;
-            mtp.hook_batch.logits[out_idx]    = 0;
+            batch.tokens.push_back(tokens[0]);
+            batch.positions.push_back(pos_start);
             ++out_idx;
         }
         for (int k = 0; k + 1 < n_rows; ++k) {
             ggml_backend_tensor_get(t,
-                mtp.hook_batch.embd + (size_t) out_idx * n_embd,
+                batch.h.data() + (size_t) out_idx * n_embd,
                 (size_t) k * row_bytes,
                 row_bytes);
-            mtp.hook_batch.token[out_idx]     = tokens[k + 1];
-            mtp.hook_batch.pos[out_idx]       = positions[k + 1];
-            mtp.hook_batch.n_seq_id[out_idx]  = 1;
-            mtp.hook_batch.seq_id[out_idx][0] = 0;
-            mtp.hook_batch.logits[out_idx]    = 0;
+            batch.tokens.push_back(tokens[k + 1]);
+            batch.positions.push_back(positions[k + 1]);
             ++out_idx;
         }
         GGML_ASSERT(out_idx == n_out);
-        mtp.hook_batch.n_tokens = n_out;
 
-        const int32_t rc_dec = llama_decode(mtp.ctx_mtp, mtp.hook_batch);
-        if (rc_dec != 0) {
-            LLAMA_LOG_ERROR("%s: llama_decode(ctx_mtp) failed rc=%d (pos=%d, n=%d)\n",
-                            __func__, (int) rc_dec, (int) pos_start, n_out);
-        }
+        mtp.staged_batches.push_back(std::move(batch));
     }
 
     // Stash the last h-row as the new pending (for the next ubatch's first
-    // token to pair with).
+    // token to pair with).  This state is updated eagerly so the next call
+    // to collect_mtp_data (either later in the same decode or in a future
+    // decode) correctly handles the cross-ubatch continuation.
     ggml_backend_tensor_get(t, mtp.pending_h.data(),
         (size_t) (n_rows - 1) * row_bytes, row_bytes);
     mtp.pending_pos = pos_start + n_rows - 1;
+}
+
+void llama_context::flush_mtp_data() {
+    if (mtp.staged_batches.empty()) {
+        return;
+    }
+
+    const int64_t n_embd = model.hparams.n_embd;
+
+    // Free the target scheduler's GPU compute buffers BEFORE calling
+    // llama_decode(ctx_mtp) to avoid nested GPU memory allocation.
+    // This is the core of Fix 1: the target graph must be freed before
+    // the MTP context allocates its own graph.
+    synchronize();
+    ggml_backend_sched_reset(sched.get());
+    gf_res_prev->reset();
+
+    // VRAM guard (Fix 4): check that the GPU has enough free memory
+    // before calling llama_decode on the MTP context.  If VRAM is low,
+    // skip MTP decode to avoid crashes and log a warning.
+    {
+        ggml_backend_t mtp_backend = nullptr;
+        if (mtp.ctx_mtp) {
+            // Walk the MTP context's backends to find a GPU device
+            for (const auto & backend_ptr : mtp.ctx_mtp->backends) {
+                ggml_backend_t backend = backend_ptr.get();
+                ggml_backend_dev_t dev = ggml_backend_get_device(backend);
+                if (!dev) {
+                    continue;
+                }
+                const auto dev_type = ggml_backend_dev_type(dev);
+                // Skip CPU devices; we want a device with dedicated VRAM
+                if (dev_type != GGML_BACKEND_DEVICE_TYPE_CPU) {
+                    mtp_backend = backend;
+                    break;
+                }
+            }
+        }
+        if (mtp_backend) {
+            const ggml_backend_dev_t dev = ggml_backend_get_device(mtp_backend);
+            size_t free = 0, total = 0;
+            ggml_backend_dev_memory(dev, &free, &total);
+            // Require at least 256 MiB free to safely run MTP decode.
+            // If below this threshold, drain the staged batches with a
+            // warning rather than risk a crash from OOM.
+            const size_t min_free = 256ULL * 1024 * 1024;
+            if (free < min_free) {
+                LLAMA_LOG_WARN(
+                    "%s: VRAM low (free=%zu MiB < %zu MiB), "
+                    "skipping MTP decode for %zu staged batch(es) — "
+                    "draft quality may degrade.  Consider --n-cpu-moe.\n",
+                    __func__, free / (1024*1024), min_free / (1024*1024),
+                    mtp.staged_batches.size());
+                mtp.staged_batches.clear();
+                return;
+            }
+        }
+    }
+
+    for (const auto & batch : mtp.staged_batches) {
+        const int n_out = batch.n_out;
+        if (n_out <= 0) {
+            continue;
+        }
+
+        // Rebuild the hook_batch from the staged data
+        for (int i = 0; i < n_out; ++i) {
+            std::memcpy(mtp.hook_batch.embd + (size_t) i * n_embd,
+                        batch.h.data() + (size_t) i * n_embd,
+                        (size_t) n_embd * sizeof(float));
+            mtp.hook_batch.token[i]     = batch.tokens[i];
+            mtp.hook_batch.pos[i]       = batch.positions[i];
+            mtp.hook_batch.n_seq_id[i]  = 1;
+            mtp.hook_batch.seq_id[i][0] = 0;
+            mtp.hook_batch.logits[i]    = 0;
+        }
+        mtp.hook_batch.n_tokens = n_out;
+
+        int32_t rc_dec = llama_decode(mtp.ctx_mtp, mtp.hook_batch);
+        if (rc_dec != 0) {
+            const int pos_debug = batch.positions.empty() ? -1 : (int) batch.positions[0];
+            LLAMA_LOG_ERROR(
+                    "%s: llama_decode(ctx_mtp) failed rc=%d "
+                    "(pos=%d, n_out=%d, staged=%zu) — VRAM may be exhausted. "
+                    "Consider --n-cpu-moe to reduce GPU memory pressure.\n",
+                    __func__, (int) rc_dec,
+                    pos_debug,
+                    n_out, mtp.staged_batches.size());
+            // Don't clear here — remaining batches may still succeed after
+            // the VRAM pressure from the failed decode is released (the
+            // graph compute will release resources on error).
+        }
+    }
+
+    mtp.staged_batches.clear();
 }
 
 void llama_synchronize(llama_context * ctx) {

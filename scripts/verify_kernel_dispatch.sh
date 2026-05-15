@@ -112,7 +112,6 @@ BENCH_ARGS=(
 )
 
 echo "Running llama-bench with kernel tracing..."
-RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 \
     "$ROCPROF" --kernel-trace \
         -d "$OUTDIR" \
         "$BENCH" "${BENCH_ARGS[@]}" 2>&1 | tee "$OUTDIR/bench.log" || true

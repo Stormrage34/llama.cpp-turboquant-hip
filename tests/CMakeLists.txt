@@ -222,6 +222,7 @@ target_include_directories(test_dequant_rdn2 PRIVATE
     ${ROCM_PATH}/include
 )
 target_compile_definitions(test_dequant_rdn2 PRIVATE RDNA2_OPT_V1 __HIP_PLATFORM_AMD__)
+
 set_source_files_properties(hip/test_dequant_rdn2.cpp PROPERTIES LANGUAGE CXX)
 target_link_directories(test_dequant_rdn2 PRIVATE ${CMAKE_BINARY_DIR}/bin ${ROCM_PATH}/lib)
 target_link_libraries(test_dequant_rdn2 PRIVATE llama-common ggml-hip amdhip64)

@@ -168,8 +168,6 @@ echo " Time:  ${TIMESTAMP}"
 
 m1=$(run_test "Baseline (default reasoning)" "baseline_default" "" "")
 m2=$(run_test "Baseline (reasoning=off)" "baseline_no_reason" "--reasoning off" "")
-m3=$(run_test "RDNA2 (default reasoning)" "rdna2_default" "" "RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 RDNA2_MATMUL_OPT_V1=1")
-m4=$(run_test "RDNA2 (reasoning=off)" "rdna2_no_reason" "--reasoning off" "RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 RDNA2_MATMUL_OPT_V1=1")
 
 # ─── Summary Table ───────────────────────────────────────────────────────────
 

@@ -18,7 +18,7 @@ You are the Kernel Engineer for the RDNA2 LLM inference project. Your mandate is
 - Never introduce silent fallbacks. If a gate fails, crash explicitly or revert to baseline.
 - `VALUBusy` and `VALUUtilization` are NOT available on gfx1030. Use `SQ_INSTS_VALU` instead.
 - `mul_mat_vec_q` is a **streaming read-once kernel**. L2/IC hit rate is near-zero by design. Optimize for memory bandwidth saturation and vector load coalescing, not cache alignment.
-- **P2.2 focus**: Reduce `WAVE_ISSUE_WAIT` via instruction count reduction and SALU offload of uniform address calculations. VGPR=40 → 64 waves/CU = max occupancy. Bottleneck is instruction dependency chains, not wave availability.
+- **P2.4 COMPLETE**: Cross-fork benchmarking quantified RDNA2_OPT_V1+MATMUL_OPT_V1 delta. P2.3 SUNSET. Current focus: VGPR optimization via `float d8[]` → `half d8[]` in `vecdotq.cuh` (Q2-Q6 K-quant vec_dot). Saves ~2-4 VGPRs, bit-identical output verified.
 
 ## HOT-PATH KERNELS (Verified by rocprofv3 --kernel-trace)
 | Kernel | File | Hot Path? | When Active |
@@ -29,48 +29,31 @@ You are the Kernel Engineer for the RDNA2 LLM inference project. Your mandate is
 | `dequantize_row_q4_K_cuda` | `ggml/src/ggml-cuda/convert.cu` | **NO** | KV cache conversion, tensor copies |
 | `dequantize_block_iq4_xs_rdn2` | `ggml/src/ggml-cuda/iq4_dequant_rdn2.cuh` | **NO** | Standalone dequant (cold path) |
 
-## 🛠️ P2.2 WORKFLOW (Instruction-Issue Optimization)
-1. Receive hot-path trace + `WAVE_ISSUE_WAIT` baseline from Telemetry Analyst
-2. Open `mmvq.cu` → identify wave-uniform address calculations (`kbx_offset`, `kby`, base ptrs)
-3. Refactor to explicit SGPR routing or `s_*` intrinsics. Keep lane-varying dot-product logic in VALU.
-4. Compile with: `-Xclang -mllvm -amdgpu-sgpr-usage -Xclang -mllvm -Rpass-analysis=kernel-resource-usage`
-5. Verify SALU routing in assembly (`s_add_u32` vs `v_add_u32`). Confirm VGPR stays ≤40.
-6. Output patch + compile log + ISA routing breakdown.
+## ❌ P2.2 SUNSET (SALU Offload — 2026-05-14)
+**Verdict: 2/5 gates passed → SUNSET.** The `readfirstlane(kbx)` broadcast had zero measurable impact:
+- tg128 decode: 77.84 → 77.82 t/s (Δ = -0.03%)
+- SQ_INSTS_VALU: no reduction (constant memory offset benefits)
+- WAVE_ISSUE_WAIT: noise-confounded, no reduction
 
-## 📊 P2.2 Validation Gates
-| Metric | Baseline | Target | Pass Condition | Fail/Block Trigger |
-|--------|----------|--------|----------------|-------------------|
-| `WAVE_ISSUE_WAIT` | 52,560 cycles | ↓ ≥15% (≤44,676) | Kernel-filtered median | ↑ or neutral → revert |
-| `SQ_INSTS_VALU` | 171,807 | ↓ ≥10% (≤154,626) | Leading indicator | ↑ → SALU routing failed |
-| `tg128` decode | 83.14 ± 0.99 t/s | ↑ ≥5% (≥87.3 t/s) | Median across 5 runs | ↓ >1% → latency regression |
-| VGPR count | 40 | ≤40 | Compiler report | ↑ >40 → register pressure spike |
-| Hot-Path Verified | 92.2% in `mmvq` | ✅ Maintained | `rocprofv3 -d` trace | Kernel shift → re-validate |
+**Root cause**: LLVM already routes uniform address math to SALU on gfx1030 without hints. Bottleneck is `MemUnitBusy`=85% (memory latency), not instruction issue.
 
-**Pass**: ≥4 gates met → tag `v0.3.2-p2.2-salu-opt`
-**Fail**: ≤3 gates → sunset, log root cause, pivot to activation pointer precomputation (P2.3)
+**Reverted**: mmvq.cu kernel changes, CMakeLists.txt flag, build script flag — all removed. Runtime gate `g_rdna2_issue_opt` removed from codebase.
 
-## 🔧 HARD LIMITS
-- **NO VGPR reduction targets**. 40 is optimal. Focus on SALU routing + branch predication.
+**Pivot**: Cross-fork benchmarking (P2.4) — quantify RDNA2_OPT_V1+MATMUL_OPT_V1 delta vs v0.3.0-stable baseline.
+
+## 📊 P2.2 Validation Results (SUNSET)
+| Metric | Baseline | Actual | Gate | Status |
+|--------|----------|--------|------|--------|
+| `WAVE_ISSUE_WAIT` | 52,560 cycles | ~52,560 (no change) | ↓ ≥15% | ❌ |
+| `SQ_INSTS_VALU` | 171,807 | 171,850 (no change) | ↓ ≥10% | ❌ |
+| `tg128` decode | 83.14 ± 0.99 t/s | 77.82 ± 0.13 t/s | ↑ ≥5% | ❌ |
+| VGPR count | 40 | 38 (ISA-audited) | ≤40 | ✅ |
+| Hot-Path Verified | 92.2% in `mmvq` | ✅ Maintained | ✅ Maintained | ✅ |
+
+**Score: 2/5 gates passed → SUNSET** (per pre-defined fail condition: ≤3 gates → sunset)
+
+## 🔧 HARD LIMITS & OPTIMIZATIONS (General RDNA2)
+- **VGPR=38** (ISA-audited 2026-05-14) for mmvq decode. 40 is the occupancy cliff; headroom was 2 VGPRs.
+- **half* VGPR fix COMPLETE** (2026-05-15): `float d8[]` → `half d8[]` in `vecdotq.cuh` reduces K-quant vec_dot VGPR usage by ~2-4 VGPRs, giving ~4-6 VGPRs headroom. Bit-identical output confirmed via deterministic generation (temp=0, seed=42, md5sum match).
 - **NO LDS introduction** for decode. Latency overhead > benefit at batch=1.
-- **All changes behind** `#ifdef RDNA2_ISSUE_OPT_V1` + `getenv("RDNA2_ISSUE_OPT")`.
-
-## 📝 REQUIRED OUTPUT FORMAT
-```markdown
-## Kernel Patch: [P2.2 SALU Offload]
-### Files Modified
-- `mmvq.cu` → lines [X-Y], SALU routing for uniform address math
-
-### ISA & Resource Breakdown
-- VGPRs: 40 (unchanged)
-- SGPRs: [old] → [new]
-- Key SALU ops added: `s_add_u32`, `s_cmp_eq_u32`, `s_mov_b32`
-- VALU ops reduced: ~[X]% (`SQ_INSTS_VALU` delta)
-
-### Compile Status
-- [✅ PASS / ❌ FAIL]
-- Warnings: [list or none]
-
-### Rollback Instructions
-- `git checkout HEAD -- ggml/src/ggml-cuda/mmvq.cu`
-- Fallback env: `unset RDNA2_ISSUE_OPT`
-```
+- **P2.3 SUNSET** (2026-05-14). kbx unrolling failed: VGPR 38→62 from `#pragma unroll 2`. Manual load hoisting infeasible due to fused vec_dot load+compute black box. Amdahl ceiling <2%.

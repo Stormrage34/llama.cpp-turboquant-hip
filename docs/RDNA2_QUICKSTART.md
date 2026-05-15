@@ -31,7 +31,6 @@ cmake --build build --config Release -j $(nproc)
 
 ```bash
 # MoE prefill test (Qwen3_35BMTPIQ4)
-RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 RDNA2_MATMUL_OPT_V1=1 \
   ./build/bin/llama-bench \
     -m /home/stormrage/models/Qwen3_35BMTPIQ4.gguf \
     -ngl 99 -c 4096 -p 512 -n 128 -b 256 -ub 256 \
@@ -45,15 +44,11 @@ RDNA2_OPT_V1=1 RDNA2_ASYNC_PIPELINE=1 RDNA2_MATMUL_OPT_V1=1 \
 All three flags must be set for RDNA2 optimizations:
 
 ```bash
-export RDNA2_OPT_V1=1          # BFE dequant kernel (stable)
-export RDNA2_ASYNC_PIPELINE=1  # Async HIP pipeline (stable)
 export RDNA2_MATMUL_OPT_V1=1   # LDS double-buffer matmul for MoE (stable)
 ```
 
 | Flag | Purpose | Models | Status |
 |------|---------|--------|--------|
-| `RDNA2_OPT_V1=1` | Enable RDNA2 dequant + matmul kernels | All | Stable |
-| `RDNA2_ASYNC_PIPELINE=1` | Overlap dequant + compute | All | Stable |
 | `RDNA2_MATMUL_OPT_V1=1` | LDS double-buffer matmul | MoE only | Stable |
 | `RDNA2_BFE_DISPATCHER=1` | `v_bfe_u32` for K-quant unpack | Q4_K_M, Q5_K_M | **Experimental** — validate first |
 
@@ -77,7 +72,6 @@ export RDNA2_MATMUL_OPT_V1=1   # LDS double-buffer matmul for MoE (stable)
 | `hipcc not found` | `export PATH=/opt/rocm/bin:$PATH` |
 | `GPU_TARGETS not set` | Add `-DGPU_TARGETS=gfx1030` to cmake |
 | `VRAM OOM` | Reduce `-ngl` (e.g., `-ngl 55` for 27B dense) |
-| `NaN/garbage tokens` | Ensure `RDNA2_OPT_V1=1` + `--no-mmap` |
 | `Slow decode (<20 t/s)` | Check `-ngl` matches model size; add `-ctk turbo4 -ctv turbo2` |
 | `High variance (>±50 t/s)` | Ensure `RDNA2_MATMUL_OPT_V1=1` for MoE models |
 | `rocprofv3 not found` | Install `rocm-profiler` package or use `/opt/rocm/bin/rocprofv3` |
