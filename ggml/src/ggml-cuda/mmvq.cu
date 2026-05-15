@@ -489,6 +489,16 @@ static __global__ void mul_mat_vec_q(
         // x block quant index when casting the quants to int
         const int kqs = vdr * (tid % (qi/vdr));
 
+#ifdef RDNA2_PREFETCH
+        // Prefetch the next y block while computing current vec_dot
+        // Idea B: Software Prefetch — see opencode/agents/DEEP_ISA_MISSION.md
+        // Compile gate only (add -DRDNA2_PREFETCH to cmake to enable)
+        if (kbx + blocks_per_iter < blocks_per_row_x) {
+            const int kby_next = (kbx + blocks_per_iter) * (qk/QK8_1);
+            __builtin_prefetch(y + kby_next, 0, 0);
+        }
+#endif
+
 #pragma unroll
         for (int j = 0; j < ncols_dst; ++j) {
 #pragma unroll

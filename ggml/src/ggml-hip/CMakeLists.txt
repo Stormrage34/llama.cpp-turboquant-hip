@@ -165,6 +165,12 @@ if (GGML_RDNA2_BFE_DISPATCHER)
     add_compile_definitions(RDNA2_BFE_DISPATCHER)
 endif()
 
+# Idea B: Software Prefetch — see DEEP_ISA_MISSION.md
+# Enables __builtin_prefetch in mmvq.cu kbx loop. Compile gate only.
+if (DEFINED ENV{RDNA2_PREFETCH} AND "$ENV{RDNA2_PREFETCH}" STREQUAL "1")
+    add_compile_definitions(RDNA2_PREFETCH)
+endif()
+
 if (CXX_IS_HIPCC)
     set_source_files_properties(${GGML_SOURCES_ROCM} PROPERTIES LANGUAGE CXX)
     if (WIN32 AND CMAKE_BUILD_TYPE STREQUAL "Debug")
