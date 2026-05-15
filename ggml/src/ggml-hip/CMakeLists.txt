@@ -165,6 +165,16 @@ if (GGML_RDNA2_BFE_DISPATCHER)
     add_compile_definitions(RDNA2_BFE_DISPATCHER)
 endif()
 
+# Idea D: Compiler tuning for gfx1030 decode pattern (streaming dp4a)
+# See opencode/agents/DEEP_ISA_MISSION.md
+# Gate: RDNA2_LLVM_OPT (set via env var to "1" to activate)
+# Each flag added incrementally for bisection. Keep sorted.
+if (DEFINED ENV{RDNA2_LLVM_OPT} AND "$ENV{RDNA2_LLVM_OPT}" STREQUAL "1")
+    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -mllvm -amdgpu-spill-sgpr-to-vgpr")
+    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -mllvm -amdgpu-enable-rewrite-out-of-range-value=1")
+    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -mllvm -amdgpu-early-inline-all=true")
+endif()
+
 if (CXX_IS_HIPCC)
     set_source_files_properties(${GGML_SOURCES_ROCM} PROPERTIES LANGUAGE CXX)
     if (WIN32 AND CMAKE_BUILD_TYPE STREQUAL "Debug")
