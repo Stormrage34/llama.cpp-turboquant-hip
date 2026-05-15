@@ -51,7 +51,7 @@ def parse_bench(log_path: str) -> dict:
     }
 
     # Extract RDNA2 env vars
-    for env_var in ["RDNA2_OPT_V1", "RDNA2_ASYNC_PIPELINE", "RDNA2_MATMUL_OPT_V1", "RDNA2_BFE_DISPATCHER"]:
+    for env_var in ["RDNA2_OPT_V1", "RDNA2_MATMUL_OPT_V1"]:
         env_match = re.search(rf"{env_var}=(\d+)", text)
         if env_match:
             result["config"][env_var] = int(env_match.group(1))

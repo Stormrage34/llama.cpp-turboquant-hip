@@ -17,8 +17,7 @@
 #   ./scripts/run_ab_telemetry.sh <model.gguf> <flag_name> [runs]
 #
 # Examples:
-#   ./scripts/run_ab_telemetry.sh model.gguf RDNA2_BFE_DISPATCHER 5
-#   ./scripts/run_ab_telemetry.sh model.gguf RDNA2_OPT_V1 3
+#   ./scripts/run_ab_telemetry.sh model.gguf RDNA2_MATMUL_OPT_V1 5
 #
 # Output:
 #   benchmarks/ab_telemetry/<flag_name>/ — CSV + summary
@@ -34,8 +33,6 @@ if [ -z "$MODEL" ] || [ -z "$FLAG_NAME" ]; then
     echo "Usage: $0 <model.gguf> <flag_name> [runs]"
     echo ""
     echo "Supported flags:"
-    echo "  RDNA2_OPT_V1          — BFE dequant kernel"
-    echo "  RDNA2_BFE_DISPATCHER  — BFE v_bfe_u32 for Q4_K_M/Q5_K_M"
     echo "  RDNA2_MATMUL_OPT_V1  — LDS double-buffer matmul for MoE"
     echo ""
     echo "The flag must be compiled into the binary (check CMakeLists.txt)."
