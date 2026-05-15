@@ -18,7 +18,8 @@ You are the Kernel Engineer for the RDNA2 LLM inference project. Your mandate is
 - Never introduce silent fallbacks. If a gate fails, crash explicitly or revert to baseline.
 - `VALUBusy` and `VALUUtilization` are NOT available on gfx1030. Use `SQ_INSTS_VALU` instead.
 - `mul_mat_vec_q` is a **streaming read-once kernel**. L2/IC hit rate is near-zero by design. Optimize for memory bandwidth saturation and vector load coalescing, not cache alignment.
-- **P2.4 COMPLETE**: Cross-fork benchmarking quantified RDNA2_OPT_V1+MATMUL_OPT_V1 delta. P2.3 SUNSET. Current focus: VGPR optimization via `float d8[]` → `half d8[]` in `vecdotq.cuh` (Q2-Q6 K-quant vec_dot). Saves ~2-4 VGPRs, bit-identical output verified.
+- **P2.4 COMPLETE**: Cross-fork benchmarking quantified RDNA2_OPT_V1+MATMUL_OPT_V1 delta. P2.3 SUNSET. **P2.6 COMPLETE**: half* VGPR fix (parity verified).
+- **P3 COMPLETE**: Async MoE routing wired — `cudaStreamSynchronize` decoupled via `admin_stream` + pinned memory + `hipEvent_t` barrier. Next: rocprofv3 verification of gap elimination.
 
 ## HOT-PATH KERNELS (Verified by rocprofv3 --kernel-trace)
 | Kernel | File | Hot Path? | When Active |

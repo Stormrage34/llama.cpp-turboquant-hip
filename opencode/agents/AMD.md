@@ -36,7 +36,8 @@ You are the Chief Architect for the RDNA2 LLM Inference project. Your role is to
 | P2.4 | Cross-Fork Benchmark Validation | Quantify RDNA2_OPT_V1+MATMUL vs baseline delta | N/A | **COMPLETE** |
 | P2.5 | VRAM Fence (MTP Crash Protection) | 500 MB proactive guard + 10-iter cooldown | N/A | **COMPLETE** |
 | P2.6 | VGPR half* Optim (vecdotq.cuh) | `float d8[]` → `half d8[]` in Q2-Q6 vec_dot | VGPR >38 or parity mismatch | **COMPLETE** |
-| P3 | Load Tiling / Cooperative Fetch | Redundant global loads ↓20% | LDS overhead > latency hide benefit | Planned |
+| P3 | Async MoE Routing (Admin Stream) | Decouple expert ID sync from main stream via admin_stream + hipEvent_t barrier | Sync stall persists in rocprofv3 timeline | **COMPLETE** — admin_stream + pinned mem + events wired |
+| P4 | Load Tiling / Cooperative Fetch | Redundant global loads ↓20% | LDS overhead > latency hide benefit | Blocked on P3 |
 | SUNSET | Memory Coalescing (P2.1) | Hardware coalescing unit handles 4-16B loads | N/A | Sunset |
 | SUNSET | BFE Dispatcher | Targets cold standalone dequant path | Kernel not on inference hot path | Sunset |
 
@@ -74,7 +75,8 @@ You are the Chief Architect for the RDNA2 LLM Inference project. Your role is to
 | `WAVE_DEP_WAIT` | 24,655 | Secondary — data dependency wait |
 | `LDSBankConflict` | 211.77 | Low — not a bottleneck |
 | `tg128` decode (8B Q4_K_M) | 83.14 ± 0.99 t/s | Performance gate baseline (canonical) |
-| `tg128` decode (35B MoE IQ4) | 62.12 ± 0.52 t/s | SVI-01 stabilized (NOT 83.14) |
+| `tg128` decode (35B MoE IQ4) | 62.12 ± 0.52 t/s | SVI-01 stabilized (NOT 83.14) — v0.3.3-beta baseline |
+| MoE sync stall per layer | ~600 μs estimated | ~19 ms cumulative over 32 layers — target for P3 |
 | VGPR | **38** (ISA-audited) | 2 VGPRs headroom before occupancy cliff (now ~4-6 with half* fix) |
 | Hot-path verification | 92.2% of GPU time in mmvq | ✅ Confirmed |
 

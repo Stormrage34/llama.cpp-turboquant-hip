@@ -1373,6 +1373,12 @@ struct ggml_backend_cuda_context {
     // Created with cudaStreamNonBlocking when RDNA2_ASYNC_ROUTING env var is set.
     cudaStream_t admin_stream = nullptr;
 
+    // Sync events for async MoE routing.
+    // routing_data_ready_event: recorded on main stream when expert ID tensor is computed.
+    // transfer_complete_event: recorded on admin stream after D→H copy finishes.
+    cudaEvent_t routing_data_ready_event = nullptr;
+    cudaEvent_t transfer_complete_event = nullptr;
+
     cublasHandle_t cublas_handles[GGML_CUDA_MAX_DEVICES] = {nullptr};
 
     int curr_stream_no = 0;

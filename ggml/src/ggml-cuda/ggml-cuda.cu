@@ -606,6 +606,12 @@ ggml_backend_cuda_context::~ggml_backend_cuda_context() {
     if (admin_stream != nullptr) {
         CUDA_CHECK(cudaStreamDestroy(admin_stream));
     }
+    if (routing_data_ready_event != nullptr) {
+        CUDA_CHECK(cudaEventDestroy(routing_data_ready_event));
+    }
+    if (transfer_complete_event != nullptr) {
+        CUDA_CHECK(cudaEventDestroy(transfer_complete_event));
+    }
     for (int i = 0; i < GGML_CUDA_MAX_DEVICES; ++i) {
         for (int j = 0; j < GGML_CUDA_MAX_STREAMS; ++j) {
             if (streams[i][j] != nullptr) {
@@ -2632,14 +2638,50 @@ static void ggml_cuda_mul_mat_id(ggml_backend_cuda_context & ctx, ggml_tensor * 
     ggml_cuda_pool_alloc<char> src1_sorted(ctx.pool(), ne12*n_expert_used*ne10*ts_src1_sorted);
     ggml_cuda_pool_alloc<char>  dst_sorted(ctx.pool(), ne2 *n_expert_used* ne0*ts_dst_sorted);
 
-    std::vector<char> ids_host(ggml_nbytes(ids));
-    CUDA_CHECK(cudaMemcpyAsync(ids_host.data(), ids->data, ggml_nbytes(ids), cudaMemcpyDeviceToHost, stream));
-    CUDA_CHECK(cudaStreamSynchronize(stream));
+    // IDs host buffer: pinned memory for async path (true overlap), std::vector for fallback.
+    // The async path launches D→H copy on the admin stream and only syncs with the main
+    // stream immediately before sorting — allowing the copy to overlap with preceding GEMM.
+    const size_t ids_nbytes = ggml_nbytes(ids);
+    std::vector<char> ids_host_vec;
+    char * ids_host_data = nullptr;
+
+    if (g_rdna2_async_routing) {
+        // Lazy-create sync events for async routing
+        if (ctx.routing_data_ready_event == nullptr) {
+            ggml_cuda_set_device(ctx.device);
+            CUDA_CHECK(cudaEventCreateWithFlags(&ctx.routing_data_ready_event, 0));
+            CUDA_CHECK(cudaEventCreateWithFlags(&ctx.transfer_complete_event, 0));
+        }
+        CUDA_CHECK(cudaMallocHost((void **) &ids_host_data, ids_nbytes));
+
+        // 1. Record event on main stream (IDs are produced by preceding compute)
+        CUDA_CHECK(cudaEventRecord(ctx.routing_data_ready_event, stream));
+        // 2. Admin stream waits for IDs to be ready
+        CUDA_CHECK(cudaStreamWaitEvent(ctx.get_admin_stream(), ctx.routing_data_ready_event, 0));
+        // 3. D→H copy on admin stream — runs in parallel with main stream
+        CUDA_CHECK(cudaMemcpyAsync(ids_host_data, ids->data, ids_nbytes, cudaMemcpyDeviceToHost, ctx.get_admin_stream()));
+        // 4. Record completion on admin stream
+        CUDA_CHECK(cudaEventRecord(ctx.transfer_complete_event, ctx.get_admin_stream()));
+    } else {
+        // Fallback: synchronous copy on main stream (original behavior)
+        ids_host_vec.resize(ids_nbytes);
+        ids_host_data = ids_host_vec.data();
+        CUDA_CHECK(cudaMemcpyAsync(ids_host_data, ids->data, ids_nbytes, cudaMemcpyDeviceToHost, stream));
+        CUDA_CHECK(cudaStreamSynchronize(stream));
+    }
+
+    // Block main stream at the last possible moment — just before CPU-side sorting.
+    // After this point the admin stream's D→H copy is guaranteed complete.
+    if (g_rdna2_async_routing) {
+        CUDA_CHECK(cudaStreamWaitEvent(stream, ctx.transfer_complete_event, 0));
+        CUDA_CHECK(cudaFreeHost(ids_host_data));
+        ids_host_data = nullptr;
+    }
 
     for (int64_t i02 = 0; i02 < ne02; ++i02) { // expert matrices
         for (int64_t i12 = 0; i12 < ne12; ++i12) { // tokens
             for (int64_t iex = 0; iex < n_expert_used; ++iex) {
-                const int32_t expert_to_use = *(const int32_t *)(ids_host.data() + i12*ids->nb[1] + iex*ids->nb[0]);
+                const int32_t expert_to_use = *(const int32_t *)(ids_host_data + i12*ids->nb[1] + iex*ids->nb[0]);
                 assert(expert_to_use >= 0 && expert_to_use < ne02);
                 if (expert_to_use == i02) {
                     ids_from_sorted_host[i12*n_expert_used + iex] = ids_to_sorted_host.size();
