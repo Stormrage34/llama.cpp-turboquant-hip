@@ -165,14 +165,17 @@ if (GGML_RDNA2_BFE_DISPATCHER)
     add_compile_definitions(RDNA2_BFE_DISPATCHER)
 endif()
 
-# Idea D: Compiler tuning for gfx1030 decode pattern (streaming dp4a)
-# See opencode/agents/DEEP_ISA_MISSION.md
-# Gate: RDNA2_LLVM_OPT (set via env var to "1" to activate)
-# Each flag added incrementally for bisection. Keep sorted.
+# Experimental gates — tested in DEEP_ISA_MISSION (all no-effect or not viable).
+# Retained for reference only. See opencode/agents/DEEP_ISA_MISSION.md for results.
+# Idea D: RDNA2_LLVM_OPT=1 → -mllvm compiler flags (tested: no effect)
+# Idea B: RDNA2_PREFETCH=1 → __builtin_prefetch in mmvq kbx loop (tested: no effect)
+set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -mllvm -amdgpu-early-inline-all=true")
 if (DEFINED ENV{RDNA2_LLVM_OPT} AND "$ENV{RDNA2_LLVM_OPT}" STREQUAL "1")
     set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -mllvm -amdgpu-spill-sgpr-to-vgpr")
     set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -mllvm -amdgpu-enable-rewrite-out-of-range-value=1")
-    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -mllvm -amdgpu-early-inline-all=true")
+endif()
+if (DEFINED ENV{RDNA2_PREFETCH} AND "$ENV{RDNA2_PREFETCH}" STREQUAL "1")
+    add_compile_definitions(RDNA2_PREFETCH)
 endif()
 
 if (CXX_IS_HIPCC)
