@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-#!/usr/bin/env bash
 set -euo pipefail
 
 # ─── Qwen3 Reasoning Validation Harness ──────────────────────────────────────
@@ -136,7 +135,7 @@ run_test() {
 
     # Coherence: look for story markers
     local coh=0
-    if echo "$response_block" | grep -qiE "thinking|story|forest|eldoria|creature|ancient|path|beauty|felt\|thought\|knew\|wonder"; then
+    if echo "$response_block" | grep -qiE "thinking|story|forest|eldoria|creature|ancient|path|beauty|felt|thought|knew|wonder"; then
         coh=1
         echo "  OK coherence=1 exit=$ec gen_ts=$gen_ts"
     else
@@ -168,6 +167,8 @@ echo " Time:  ${TIMESTAMP}"
 
 m1=$(run_test "Baseline (default reasoning)" "baseline_default" "" "")
 m2=$(run_test "Baseline (reasoning=off)" "baseline_no_reason" "--reasoning off" "")
+m3=$(run_test "RDNA2 (default reasoning)" "rdna2_default" "" "RDNA2_MATMUL_OPT_V1=1")
+m4=$(run_test "RDNA2 (reasoning=off)" "rdna2_no_reason" "--reasoning off" "RDNA2_MATMUL_OPT_V1=1")
 
 # ─── Summary Table ───────────────────────────────────────────────────────────
 

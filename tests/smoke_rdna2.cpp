@@ -20,13 +20,14 @@ static bool check_hip_device() {
     }
     hipDeviceProp_t props;
     hipGetDeviceProperties(&props, 0);
-    printf("OK: HIP device %s (arch %d.%d, gcnArch %d)\n",
-           props.name, props.major, props.minor, props.gcnArch);
-    // Check for RDNA2 (gfx1030 = gcnArch 1030)
-    if (props.gcnArch == 1030) {
+    printf("OK: HIP device %s (arch %d.%d, %s)\n",
+           props.name, props.major, props.minor, props.gcnArchName);
+    // Check for RDNA2 (gfx1030) via arch name string
+    bool is_gfx1030 = strstr(props.gcnArchName, "1030") != nullptr;
+    if (is_gfx1030) {
         printf("OK: Detected RDNA2 (gfx1030)\n");
     } else {
-        printf("NOTE: Non-RDNA2 arch %d — test will run but optimizations may auto-disable\n", props.gcnArch);
+        printf("NOTE: Non-RDNA2 arch %s — test will run but optimizations may auto-disable\n", props.gcnArchName);
     }
     return true;
 }
@@ -41,17 +42,36 @@ static bool check_env_gates() {
 #define QK_K 256
 
 // IQ4_XS block structure (from llama.cpp)
+// Use uint16_t for half to avoid ROCm 7.13+ type removal
 typedef struct {
-    half  d;
+    uint16_t d;
     uint8_t qs[QK_K / 2];
     uint8_t scales_h;
 } block_iq4_xs;
+
+// Manual half-to-float conversion (no __half2float dependency)
+static __device__ float half_to_float(uint16_t h) {
+    uint32_t sign = (h >> 15) & 1;
+    uint32_t exp  = (h >> 10) & 0x1f;
+    uint32_t mant = h & 0x3ff;
+    uint32_t f;
+    if (exp == 0) {
+        // subnormal: flush to zero
+        f = sign << 31;
+    } else if (exp == 31) {
+        // inf/nan
+        f = (sign << 31) | 0x7f800000 | (mant << 13);
+    } else {
+        f = (sign << 31) | ((exp + 112) << 23) | (mant << 13);
+    }
+    return __uint_as_float(f);
+}
 
 __global__ void dequant_iq4_xs_kernel(const block_iq4_xs* __restrict__ x, float* __restrict__ y, int k) {
     // Minimal: just check we can launch and access data
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < k) {
-        y[idx] = (float)__half2float(x[idx / QK_K].d);
+        y[idx] = half_to_float(x[idx / QK_K].d);
     }
 }
 
@@ -73,9 +93,9 @@ static bool test_kernel_launch() {
         return false;
     }
 
-    // Fill test data: d = 0.5, zero qs
+    // Fill test data: d = 0.5f in half (0x3800), zero qs
     memset(h_x, 0, x_size);
-    h_x[0].d = __float2half(0.5f);
+    h_x[0].d = 0x3800; // 0.5f in IEEE 754 half
 
     // Compute reference
     for (int i = 0; i < n_elements; i++) {

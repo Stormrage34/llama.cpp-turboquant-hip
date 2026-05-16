@@ -1,4 +1,61 @@
 cmake_minimum_required(VERSION 3.14...3.28) # for add_link_options and implicit target directories.
+
+# ROCm path configuration — this fork targets gfx1030 (RDNA2)
+# Override via CLI: -DROCM_PATH=/home/stormrage/rocm-7.13-nightly
+# Or set env vars: export HIPCC="$(hipconfig -l)/clang" HIP_PATH="$(hipconfig -R)"
+# Default fallback order: $ROCM_PATH env → /opt/rocm → /home/stormrage/rocm-7.13-nightly
+if(NOT DEFINED ROCM_PATH)
+    if(DEFINED ENV{ROCM_PATH})
+        set(ROCM_PATH "$ENV{ROCM_PATH}")
+    elseif(EXISTS /opt/rocm/bin/hipcc)
+        set(ROCM_PATH /opt/rocm)
+    elseif(EXISTS /home/stormrage/rocm-7.13-nightly/bin/hipcc)
+        set(ROCM_PATH /home/stormrage/rocm-7.13-nightly)
+    endif()
+endif()
+
+# Auto-detect HIP compiler if GGML_HIP is enabled and not explicitly set
+if(GGML_HIP AND NOT CMAKE_HIP_COMPILER)
+    # Check for hipcc first
+    if(EXISTS "${ROCM_PATH}/bin/hipcc")
+        # Get the underlying clang path from hipcc for C compiler
+        execute_process(COMMAND "${ROCM_PATH}/bin/hipcc" --showcdialect OUTPUT_VARIABLE HIPCC_C_COMPILER ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
+        if(NOT HIPCC_C_COMPILER)
+            # Fallback: use the clang from ROCm bin directory
+            if(EXISTS "${ROCM_PATH}/llvm/bin/clang")
+                set(HIPCC_C_COMPILER "${ROCM_PATH}/llvm/bin/clang")
+            else()
+                set(HIPCC_C_COMPILER "${ROCM_PATH}/bin/clang")
+            endif()
+        endif()
+        set(CMAKE_HIP_COMPILER "${ROCM_PATH}/bin/hipcc" CACHE STRING "HIP compiler" FORCE)
+        set(CMAKE_CXX_COMPILER "${ROCM_PATH}/bin/hipcc" CACHE STRING "CXX compiler for HIP" FORCE)
+        set(CMAKE_C_COMPILER "${HIPCC_C_COMPILER}" CACHE STRING "C compiler for HIP" FORCE)
+    # Fallback to hipconfig if available
+    elseif(COMPILER)
+        find_program(HIPCC_EXECUTABLE NAMES hipcc "${HIPCC}" "${COMPILER}" PATHS ENV HIP_PATH NO_CMAKE_FIND_ROOT_PATH)
+        if(HIPCC_EXECUTABLE)
+            set(CMAKE_HIP_COMPILER "${HIPCC_EXECUTABLE}" CACHE STRING "HIP compiler" FORCE)
+            set(CMAKE_CXX_COMPILER "${HIPCC_EXECUTABLE}" CACHE STRING "CXX compiler for HIP" FORCE)
+            # Also set C compiler to the underlying clang
+            if(EXISTS "${ROCM_PATH}/llvm/bin/clang")
+                set(CMAKE_C_COMPILER "${ROCM_PATH}/llvm/bin/clang" CACHE STRING "C compiler for HIP" FORCE)
+            else()
+                set(CMAKE_C_COMPILER "${ROCM_PATH}/bin/clang" CACHE STRING "C compiler for HIP" FORCE)
+            endif()
+        endif()
+    endif()
+    if(NOT CMAKE_HIP_COMPILER)
+        message(WARNING "HIP compiler not found. Set ROCM_PATH or CMAKE_HIP_COMPILER explicitly.")
+    endif()
+endif()
+
+# Disable CUDA backend when building for HIP/ROCm — CUDA runtime doesn't exist on AMD GPUs
+if(GGML_HIP)
+    set(GGML_CUDA OFF CACHE BOOL "ggml: use CUDA" FORCE)
+    message(STATUS "CUDA backend disabled: HIP/ROCm build detected")
+endif()
+
 project("llama.cpp" C CXX)
 include(CheckIncludeFileCXX)
 

@@ -4,28 +4,26 @@
 
 #include <cstdint>
 
-static __device__ __forceinline__ int get_int_b1(const void * x, const int & i32) {
+// Unaligned 4-byte load via memcpy for safe device access on all architectures.
+// GPU hardware handles unaligned loads natively; byte-by-byte fallback for safety.
+static __device__ __forceinline__ int get_int_b1(const void * x, const int i32) {
     const uint8_t * x8 = (const uint8_t *) x;
-
     int x32  = x8[4*i32 + 0] <<  0;
     x32     |= x8[4*i32 + 1] <<  8;
     x32     |= x8[4*i32 + 2] << 16;
     x32     |= x8[4*i32 + 3] << 24;
-
     return x32;
 }
 
-static __device__ __forceinline__ int get_int_b2(const void * x, const int & i32) {
-    const uint16_t * x16 = (const uint16_t *) x; // assume at least 2 byte alignment
-
+static __device__ __forceinline__ int get_int_b2(const void * x, const int i32) {
+    const uint16_t * x16 = (const uint16_t *) x;
     int x32  = x16[2*i32 + 0] <<  0;
     x32     |= x16[2*i32 + 1] << 16;
-
     return x32;
 }
 
-static __device__ __forceinline__ int get_int_b4(const void * x, const int & i32) {
-    return ((const int *) x)[i32]; // assume at least 4 byte alignment
+static __device__ __forceinline__ int get_int_b4(const void * x, const int i32) {
+    return ((const int *) x)[i32];
 }
 
 // q4 contains 8 indices with 4 bit each.

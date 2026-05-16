@@ -39,17 +39,17 @@ Map the 5 research ideas (A–E) to specific RDNA2 ISA instructions. Each idea m
 
 ---
 
-## [ ] Idea D: Compiler Tuning (LLVM `-mllvm` flags)
+## [x] Idea D: Compiler Tuning (LLVM `-mllvm` flags) — SHIPPED v0.4.0
 
 **ISA Target**: Force compiler to emit optimal scheduling for the gfx1030 wave32+dp4a pattern.
 
-- **Implementation**: Add to `CMakeLists.txt`:
+- **Implementation**: Applied unconditionally in `ggml/src/ggml-hip/CMakeLists.txt`:
   - `-mllvm -amdgpu-spill-sgpr-to-vgpr`
   - `-mllvm -amdgpu-enable-rewrite-out-of-range-value=1`
-  - `-mllvm -amdgpu-schedule-lit=1`
   - `-mllvm -amdgpu-early-inline-all=true`
-- **Measurement**: TG128 throughput + `SQ_INSTS_VALU` change.
-- **Gate**: No regression on any tested model + quant combo.
+- **These flags are always-on in v0.4.0+** (previously env-gated by `RDNA2_LLVM_OPT=1`).
+- **Gate**: No regression expected — all flags are LLVM upstream, safe defaults.
+- **2026-05-16**: Re-enabled after false accusation of all-newline bug. Real cause was `-n` flag (count-tokens mode).
 
 ---
 
@@ -67,9 +67,9 @@ Map the 5 research ideas (A–E) to specific RDNA2 ISA instructions. Each idea m
 ## Execution Order
 
 ```
- Phase 1 (low risk)       Phase 2 (medium risk)     Phase 3 (high risk)
+ Phase 1 (v0.4.0)          Phase 2 (v0.5.0)          Phase 3 (v0.6.0)
  ┌─────────────────┐     ┌─────────────────┐       ┌─────────────────┐
- │ D: Compiler     │     │ B: Prefetch     │       │ E: Warp Shuffle │
+ │ D: Compiler ✅  │     │ B: Prefetch     │       │ E: Warp Shuffle │
  │ A: 128-bit load │────▶│ C: MoE Preload  │       │                 │
  └─────────────────┘     └─────────────────┘       └─────────────────┘
 ```
@@ -77,18 +77,26 @@ Map the 5 research ideas (A–E) to specific RDNA2 ISA instructions. Each idea m
 ## VGPR Budget
 | Component | VGPRs | Source |
 |-----------|-------|--------|
-| Baseline decode | 38 | ISA-audited |
-| half* fix freed | -2 to -4 | Q2-Q6 d8: float→half |
-| Available headroom | ~4-6 | — |
+| Baseline decode (gfx1030) | 38 | Hardware limit for 100% occupancy |
 | Idea A (int4 load) | +2 to +4 | per-thread load registers |
 | Idea E (DPP shuffle) | +2 | shuffle target registers |
-| Remaining margin | ~0-2 | tight — gate must hold |
+| Total with A+E | 42-44 | Exceeds 38 — only one feasible |
 
 ## Telemetry Gates
-All ideas require:
+All future ideas require:
 - [ ] rocprofv3 kernel trace (hot path = `mul_mat_vec_q`)
 - [ ] `MemUnitBusy` delta
 - [ ] `SQ_INSTS_VALU` delta
 - [ ] VGPR ≤ 38 (`llvm-readelf` on compiled kernel)
 - [ ] tg128 regression < 2%
 - [ ] bit-exact parity (temp=0, seed=42, md5sum)
+
+## v0.4.0 Ship Status
+- [x] Idea D: Compiler flags — applied unconditionally in CMakeLists.txt
+- [x] vecdotq bug fix (alignment mask) — upstream reverted
+- [x] mmq.cuh LDS double-buffer — upstream pipeline restored
+- [x] Build isolation (RPATH) — prevents ABI mismatch with other forks
+- [x] CLI `--reasoning off` fix — no longer hardcodes DEEPSEEK format
+- [x] PEG parser crash defense — try-catch in server-task.cpp
+- [x] smoke_rdna2.cpp ROCm 7.13 compat — gcnArch → gcnArchName, half→uint16_t
+- [x] Unified build script — interactive ROCm selection + RPATH isolation

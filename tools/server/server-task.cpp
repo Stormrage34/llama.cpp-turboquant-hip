@@ -152,10 +152,16 @@ common_chat_msg task_result_state::update_chat_msg(
     generated_text += text_added;
     auto msg_prv_copy = chat_msg;
     //SRV_DBG("Parsing chat message: %s\n", generated_text.c_str());
-    auto new_msg = common_chat_parse(
-        generated_text,
-        is_partial,
-        chat_parser_params);
+    common_chat_msg new_msg;
+    try {
+        new_msg = common_chat_parse(
+            generated_text,
+            is_partial,
+            chat_parser_params);
+    } catch (const std::exception & e) {
+        SRV_WRN("Chat parse failed (pos %zu, len %zu): %s\n", generated_text.size(), text_added.size(), e.what());
+        new_msg = chat_msg; // keep last known good state
+    }
     if (!new_msg.empty()) {
         new_msg.set_tool_call_ids(generated_tool_call_ids, gen_tool_call_id);
         chat_msg = new_msg;

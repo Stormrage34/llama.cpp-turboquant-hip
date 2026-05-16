@@ -75,12 +75,14 @@ if ${ROCMPATH}/bin/hipcc \
     -DGGML_USE_HIP \
     -D__HIP_PLATFORM_AMD__ \
     -I"${SCRIPT_DIR}/ggml/include" \
+    -I"${SCRIPT_DIR}/ggml/src" \
+    -I"${SCRIPT_DIR}/src" \
     -I"${SCRIPT_DIR}" \
     -L"${BUILD_DIR}/bin" \
     -Wl,-rpath,"${BUILD_DIR}/bin" \
     -o "${TEST_BIN}" \
     "${TEST_SRC}" \
-    -lggml-base -lggml-cpu -lggml-hip \
+    -lggml-base -lggml-cpu -lggml-hip -lllama \
     -lpthread -ldl -lm \
     2>&1; then
     pass "Smoke test compiled successfully"
@@ -113,8 +115,13 @@ else
     # Also run without flags to verify baseline path works
     echo ""
     echo "--- Step 2b: Baseline path (no flags) ---"
-        pass "Baseline path passed" || \
-        { fail "Baseline path failed"; [[ ${exit_code} -eq 0 ]] && exit_code=2; }
+    unset RDNA2_MATMUL_OPT_V1
+    if "${TEST_BIN}"; then
+        pass "Baseline path passed"
+    else
+        fail "Baseline path failed"
+        [[ ${exit_code} -eq 0 ]] && exit_code=2
+    fi
 fi
 echo ""
 

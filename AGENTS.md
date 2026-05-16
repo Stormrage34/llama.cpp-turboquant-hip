@@ -1,208 +1,149 @@
-# Instructions for llama.cpp
+# llama.cpp-turboquant-hip Agent Guide
 
-> [!IMPORTANT]
-> This project does **not** accept pull requests that are fully or predominantly AI-generated. AI tools may be utilized solely in an assistive capacity.
->
-> Read more: [CONTRIBUTING.md](CONTRIBUTING.md)
+## 🔑 Critical Setup (Easy to Miss)
+- **ROCm 6.1+ required** (CI uses 7.2.1 container: `rocm/dev-ubuntu-22.04:7.2.1`)
+- **Default ROCm paths** (auto-detected in order): `/opt/rocm` → `/home/stormrage/rocm-7.13-nightly`
+- **Override ROCm version**: `export ROCM_PATH=/path/to/rocm` before any build
+- **CMake-first build**: Run `cmake -B build` before any build scripts or GPU work.
+- **GPU prep**: Source `scripts/gpu_failback.sh` before any GPU work — auto-saves/restores llama-server state, kills conflicting processes, waits for VRAM to free.
+- **Model location**: Default is `/home/stormrage/models/` (not `$HOME/models/`).
+- **PATH order matters**: System PATH has `rocm-7.13-nightly/bin` before `/opt/rocm/bin`. For cmake, ensure `/opt/rocm/bin` is first:
+  `export PATH="/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH"`
+- **Build isolation (RPATH > RUNPATH)**: Always use `--disable-new-dtags` + `CMAKE_BUILD_RPATH_USE_ORIGIN` to prevent library cross-contamination from other llama forks in `LD_LIBRARY_PATH`.
 
-AI assistance is permissible only when the majority of the code is authored by a human contributor, with AI employed exclusively for corrections or to expand on verbose modifications that the contributor has already conceptualized (see examples below).
+## ⚙️ Build & Run
 
----
-
-## Guidelines for Contributors Using AI
-
-llama.cpp is built by humans, for humans. Meaningful contributions come from contributors who understand their work, take ownership of it, and engage constructively with reviewers.
-
-Maintainers receive numerous pull requests weekly, many of which are AI-generated submissions where the author cannot adequately explain the code, debug issues, or participate in substantive design discussions. Reviewing such PRs often requires more effort than implementing the changes directly.
-
-**A pull request represents a long-term commitment.** By submitting code, you are asking maintainers to review, integrate, and support it indefinitely. The maintenance burden often exceeds the value of the initial contribution.
-
-Most maintainers already have access to AI tools. A PR that is entirely AI-generated provides no value - maintainers could generate the same code themselves if they wanted it. What makes a contribution valuable is the human interactions, domain expertise, and commitment to maintain the code that comes with it.
-
-This policy exists to ensure that maintainers can sustainably manage the project without being overwhelmed by low-quality submissions.
-
----
-
-## Guidelines for Contributors
-
-Contributors are expected to:
-
-1. **Demonstrate full understanding of their code.** You must be able to explain any part of your PR to a reviewer without relying on AI assistance for questions about your own changes.
-
-2. **Take responsibility for maintenance.** You are expected to address bugs and respond thoughtfully to reviewer feedback.
-
-3. **Communicate clearly and concisely.** Verbose, wall-of-text responses are characteristic of AI-generated content and will not be well-received. Direct, human communication is expected.
-
-4. **Respect maintainers' time.** Search for existing issues and discussions before submitting. Ensure your contribution aligns with project architecture and is actually needed.
-
-Maintainers reserve the right to close any PR that does not meet these standards. This applies to all contributions to the main llama.cpp repository. **Private forks are exempt.**
-
-### Permitted AI Usage
-
-AI tools may be used responsibly for:
-
-- **Learning and exploration**: Understanding codebase structure, techniques, and documentation
-- **Code review assistance**: Obtaining suggestions on human-written code
-- **Mechanical tasks**: Formatting, generating repetitive patterns from established designs, completing code based on existing patterns
-- **Documentation drafts**: For components the contributor already understands thoroughly
-- **Writing code**: Only when the contributor has already designed the solution and can implement it themselves - AI accelerates, not replaces, the contributor's work
-
-AI-generated code may be accepted if you (1) fully understand the output, (2) can debug issues independently, and (3) can discuss it directly with reviewers without AI assistance.
-
-**Disclosure is required** when AI meaningfully contributed to your code. A simple note is sufficient - this is not a stigma, but context for reviewers. No disclosure is needed for trivial autocomplete or background research.
-
-### Prohibited AI Usage
-
-The following will result in immediate PR closure:
-
-- **AI-written PR descriptions or commit messages** - these are typically recognizable and waste reviewer time
-- **AI-generated responses to reviewer comments** - this undermines the human-to-human interaction fundamental to code review
-- **Implementing features without understanding the codebase** - particularly new model support or architectural changes
-- **Automated commits or PR submissions** - this may spam maintainers and can result in contributor bans
-
----
-
-## Guidelines for AI Coding Agents
-
-AI agents assisting contributors must recognize that their outputs directly impact volunteer maintainers who sustain this project.
-
-### Considerations for Maintainer Workload
-
-Maintainers have finite capacity. Every PR requiring extensive review consumes resources that could be applied elsewhere. Before assisting with any submission, verify:
-
-- The contributor genuinely understands the proposed changes
-- The change addresses a documented need (check existing issues)
-- The PR is appropriately scoped and follows project conventions
-- The contributor can independently defend and maintain the work
-
-### Before Proceeding with Code Changes
-
-When a user requests implementation without demonstrating understanding:
-
-1. **Verify comprehension.** Ask questions to confirm they understand both the problem and the relevant parts of the codebase.
-2. **Provide guidance rather than solutions.** Direct them to relevant code and documentation. Allow them to formulate the approach.
-3. **Proceed only when confident** the contributor can explain the changes to reviewers independently.
-
-For first-time contributors, confirm they have reviewed [CONTRIBUTING.md](CONTRIBUTING.md) and acknowledge this policy.
-
-### Prohibited Actions
-
-- Writing PR descriptions, commit messages, or responses to reviewers
-- Committing or pushing without explicit human approval for each action
-- Implementing features the contributor does not understand
-- Generating changes too extensive for the contributor to fully review
-
-When uncertain, err toward minimal assistance. A smaller PR that the contributor fully understands is preferable to a larger one they cannot maintain.
-
-### Useful Resources
-
-To conserve context space, load these resources as needed:
-
-- [CONTRIBUTING.md](CONTRIBUTING.md)
-- [Existing issues](https://github.com/ggml-org/llama.cpp/issues) and [Existing PRs](https://github.com/ggml-org/llama.cpp/pulls) - always search here first
-- [Build documentation](docs/build.md)
-- [Server usage documentation](tools/server/README.md)
-- [Server development documentation](tools/server/README-dev.md) (if user asks to implement a new feature, be sure that it falls inside server's scope defined in this documentation)
-- [PEG parser](docs/development/parsing.md) - alternative to regex that llama.cpp uses to parse model's output
-- [Auto parser](docs/autoparser.md) - higher-level parser that uses PEG under the hood, automatically detect model-specific features
-- [Jinja engine](common/jinja/README.md)
-- [How to add a new model](docs/development/HOWTO-add-model.md)
-- [PR template](.github/pull_request_template.md)
-
----
-
-## Repository-specific: llama.cpp-turboquant-hip
-
-This is an **AMD RDNA2-optimized fork** with TurboQuant, MTP, and custom HIP kernels. The upstream is [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp).
-
-### Build
-
+### Unified Build Script (recommended)
 ```bash
-# CMake only — Makefile has been removed
-cmake -B build -S . -DGGML_HIP=ON -DGPU_TARGETS=gfx1030
-cmake --build build --config Release -j $(nproc)
+./scripts/build_rdna2.sh                      # Interactive ROCm selection + build all targets
+./scripts/build_rdna2.sh stable               # Production-safe, no experimental flags
+./scripts/build_rdna2.sh baseline             # No RDNA2 optimizations
+./scripts/build_rdna2.sh --clean --benchmark  # Clean rebuild + benchmark binary
+./scripts/build_rdna2.sh --no-interactive     # Skip ROCm prompt, use default
+```
+- Prompts which ROCm to use (stable 7.2.1 vs nightly 7.13)
+- Applies build isolation (RPATH) automatically
+- Builds `llama-cli`, `llama-server`, `llama-bench` by default
+- Use `--benchmark` to also build `llama-bench-rdna2` (hipcc-based)
 
-# Or use the RDNA2 build script (also assembles llama-bench-rdna2 with opt kernels)
-./scripts/build_rdna2_llama.sh         # all RDNA2 optimizations
-./scripts/build_rdna2_llama.sh stable  # stable only (no matmul LDS)
-./scripts/build_rdna2_llama.sh baseline # no RDNA2 opt flags
+### Manual CMake (gfx1030) — With Build Isolation
+```bash
+# Force RPATH (searched before LD_LIBRARY_PATH) to avoid ABI mismatch with other forks:
+export PATH="/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH"
+export LD_LIBRARY_PATH="/opt/rocm/lib:/opt/rocm/lib64"
+cmake -S . -B build \
+    -DGGML_HIP=ON \
+    -DGPU_TARGETS=gfx1030 \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_BUILD_RPATH_USE_ORIGIN=ON \
+    -DCMAKE_SHARED_LINKER_FLAGS="-Wl,--disable-new-dtags" \
+    -DCMAKE_EXE_LINKER_FLAGS="-Wl,--disable-new-dtags"
+cmake --build build --config Release -- -j 16
 ```
 
-Requires `cmake -B build` first before running `build_rdna2_llama.sh`.
+### Binaries
+- `build/bin/llama-cli`, `llama-server`, `llama-bench` — CMake-built
+- `build/bin/llama-bench-rdna2` — built by `build_rdna2_llama.sh`
 
-### RDNA2 Runtime Flags
+## 🐛 Known Bugs & Fixes
+### 1. Garbled Output: `vecdotq.cuh` Alignment Mask (FIXED 2026-05-16)
+**File:** `ggml/src/ggml-cuda/vecdotq.cuh`
 
-RDNA2 optimizations are **compile-time + runtime gated**. All three must be set:
+The `RDNA2_FORCE_LDS_ALIGNMENT(addr) & ~0xF` macro in `get_int_b1`/`get_int_b2`/`get_int_b4`
+forced 16-byte alignment on quantized weight reads. For indices 0-3 within a 16-byte chunk,
+**all returned the same 4 bytes** instead of distinct rows, producing mixed-script garbage
+output (e.g. `evelปุевичFTWARE全屏查看шта技术在`).
 
-| Env Var | Feature |
-|---------|---------|
-| `RDNA2_MATMUL_OPT_V1=1` | LDS double-buffer matmul for MoE (default, +28% prefill) |
-| `RDNA2_ASYNC_ROUTING=1` | Async admin stream for MoE expert routing (experimental) |
+**DO NOT RE-INTRODUCE** alignment forcing on these accessors. The original byte-by-byte
+reads handle unaligned loads safely on all GPU architectures.
 
+### 2. `mmq.cuh` LDS Double-Buffer Loop Bug (FIXED 2026-05-16)
+**File:** `ggml/src/ggml-cuda/mmq.cuh`
 
-### Available Binaries
+The LDS double-buffer path (`RDNA2_MATMUL_OPT_V1=1`) had `load_tiles` hardcoded to
+`offset_x + kb0_start` inside the loop instead of `offset_x + kb0`. Reverted to upstream
+pipeline pattern (prefetch before loop, swap at end).
 
-Currently only `build/bin/llama-cli` is built. `llama-server` and `llama-bench-rdna2` require additional targets.
+### 3. Build Cross-Contamination (FIXED 2026-05-16)
+**Problem:** `LD_LIBRARY_PATH` with `llama-mtp/build/bin` first causes turboquant binaries
+to load mtp's `.so` files. Turboquant adds fields (`reasoning_format`, `enable_reasoning`)
+to `common_params` — mtp's struct doesn't have them → ABI mismatch → segfault/garbled
+output.
 
-### GPU Setup
-
-- Source `scripts/gpu_failback.sh` before GPU work: saves/running llama-server state, frees VRAM, restores on exit
-- VRAM check: `rocm-smi --showmeminfo vram`
-- Default offload arch: `gfx1030` (RDNA2). Override via `OFFLOAD_ARCH` env var.
-- Model dir: `/home/stormrage/models/`
-
-### Testing
-
+**Prevention:** The cmake flags above (`--disable-new-dtags`) force `RPATH` which the
+loader searches before `LD_LIBRARY_PATH`. Verify with:
 ```bash
-cd build
-ctest -L main -E "test-llama-archs" --verbose --timeout 900
+readelf -d build/bin/llama-cli | grep RPATH
+# Should show: 0x000000000000000f (RPATH)  Library rpath: [$ORIGIN:]
+ldd build/bin/llama-cli | grep llama
+# All should resolve to build/bin/, never to mtp/
 ```
 
-Tests are registered via `llama_test()` / `llama_test_cmd()` in `tests/CMakeLists.txt`.  
+### 4. `-n` (count-tokens) Flag Produces All-Newlines (OPEN — 2026-05-16)
+**Problem:** `llama-cli -n N -p "prompt"` outputs only `\n` characters instead of actual
+tokens. Only observed with the Qwen3-35B IQ4_NL model. Workaround: omit `-n` and let the
+model generate naturally (use `--no-display-prompt` to suppress prompt echo).
 
-### Benchmark
+**Code path:** `llama-cli` uses `server_context` internally (cli.cpp line 57). The `-n` flag
+sets `task_params.n_predict` which is processed by the server task loop. Suspect: interaction
+between `n_predict` bound and the reasoning/MTP format that causes the generation loop to emit
+only newline tokens. Needs debug logging on a real GPU run.
 
-```bash
-# Full benchmark suite across context lengths
-./scripts/run_rdna2_bench.sh                 # RDNA2 optimized
-./scripts/run_rdna2_bench.sh baseline        # baseline comparison
-```
+### 5. Idea D Compiler Flags Falsely Accused (CLEARED — 2026-05-16)
+**Problem:** Previously suspected that `-mllvm -amdgpu-*` flags caused all-newline output.
+Tested and cleared — output is correct with flags re-enabled. Real all-newline cause is the
+`-n` flag (see #4). Flags re-enabled in `ggml/src/ggml-hip/CMakeLists.txt`.
 
-Default bench parameters (from `scripts/run_rdna2_bench.sh`):
-- Contexts: 512, 2048, 4096
-- Gen len: 128, batch: 256, ubatch: 128
-- TurboQuant: `CTK=turbo4 CTV=turbo2 FA=1`
-- Fit: `-fitt 2048 -fitc 4096`
-- 3 runs per config
-- VRAM hard limit: 13.5 GB
+## 🚩 RDNA2 Runtime Flags
+| Env Var | Feature | Notes |
+|---------|---------|-------|
+| `RDNA2_ASYNC_ROUTING=1` | Async admin stream (MoE routing) | Experimental |
 
-### Key CLI Flags
+## 🧪 Testing & Validation
+- **Smoke test (no model)**: `build/bin/llama-cli --help` — should init GPU and exit cleanly
+- **Unit tests**: `cd build && ctest -L main -E "test-llama-archs" --verbose --timeout 900`
+- **Hygiene check**: `./scripts/validate_hygiene.sh` — compile + smoke test + VRAM leak check (3 runs, >100MB delta = fail)
+  - **Known issue:** `tests/smoke_rdna2.cpp` broken on ROCm 7.13 (uses removed `gcnArch`/`half` types)
+- **Qwen3 reasoning check**: `./scripts/validate_qwen3_reasoning.sh` — validates RDNA2 flags don't break sampling/reasoning
+- **Kernel dispatch verification** (mandatory before attributing perf deltas): `./scripts/verify_kernel_dispatch.sh <model.gguf> [IQ4_XS,Q4_K_M,all]`
 
-| Flag | Purpose |
-|------|---------|
-| `-fitt 512` | Fit target margin (MiB) |
-| `-fitc 4096` | Minimum context for fit |
-| `-ngl 30` | Partial GPU offload for 35B models |
-| `--reasoning off` | Disable Qwen3 thinking chain |
-| `--reasoning [on\|off\|auto]` | Control reasoning mode |
-| `--no-display-prompt` | Suppress prompt echo |
-| `--repeat-penalty 1.1` | Prevent repetition loops |
+## 💾 KV Cache (TurboQuant) Settings
+- **Best overall** (high context, low VRAM): `-ctk turbo4 -ctv turbo2`
+- **Balanced**: `-ctk turbo3 -ctv turbo2`
+- **Max quality**: `-ctk turbo3 -ctv turbo3`
 
-### Qwen3 Reasoning
+## ⚙️ Key CLI Flags (35B MoE Context)
+- `-ngl 99` + `--ncmoe <N>`: Required for 35B MoE on 16GB VRAM (offloads N MoE expert layers)
+- `--reasoning [on|off|auto]`: Qwen3 defaults to `auto` — starts interactive mode by default with `-p`
+- `--chat-template none`: Raw completion mode (avoids template application issues)
+- `--no-display-prompt`: Suppress prompt echo in interactive mode
+- `--repeat-penalty 1.1`: Prevent repetition loops
+- `-fitt <MiB>`, `-fitc <tokens>`: Fit target margin and minimum context
 
-Qwen3 models default to `--reasoning auto` — in-chat mode this outputs a reasoning tag.  
-With `-f` (file prompt, non-interactive), it still generates thinking tokens.  
-Validation harness: `./scripts/validate_qwen3_reasoning.sh` — runs baseline vs RDNA2, checks coherence and VRAM leaks.
+## 📦 Model VRAM Guide (RX 6800 XT, 16GB)
+| Model | Quant | VRAM | Notes |
+|-------|-------|------|-------|
+| 7B–13B | Q4_K_M | 4–8 GB | Comfortable fit |
+| 27B Dense | IQ4_XS | ~13 GB | Use `-ctk turbo4 -ctv turbo2` |
+| 35B MoE (3B active) | IQ4_XS | ~18 GB | Requires `--ncmoe` or `-fitt/-fitc` for offload |
+| 70B+ | IQ4_XS | 30+ GB | Hybrid CPU+GPU split recommended |
 
-### HIP Quality
+## 🔬 Active Research
+See `opencode/agents/DEEP_ISA_MISSION.md` for ISA-level optimization roadmap (A-E):
+- **A**: 128-bit vector loads (`BUFFER_LOAD_DWORD4`)
+- **B**: Software prefetch (`s_buffer_load_dword`)
+- **C**: MoE decode weight preload (admin stream + ACE)
+- **D**: Compiler tuning (LLVM `-mllvm` flags)
+- **E**: Cooperative warp shuffle (`V_DPP`/`DS_SWIZZLE`)
 
-- CI workflow: `.github/workflows/hip-quality-check.yml`
-- Compiles with `-Werror` for HIP, checks VGPR spills via `scripts/hip/gcn-cdna-vgpr-check.py`
-- Uses ROCm 7.2.1 container in CI
+Execution order: Phase 1 (D→A) → Phase 2 (B→C) → Phase 3 (E). VGPR budget ≤38.
 
-### Hygiene
-
-- `scripts/validate_hygiene.sh` — general repo consistency checks
-- No Python lint/type targets are configured for this repo
-- Lockfiles: `poetry.lock`, `pyproject.toml` (Python deps), `flake.nix` (Nix)
-- Models downloaded via `scripts/hf.sh` or fetched via `scripts/fetch_server_test_models.py`
+## ⚠️ Gotchas
+- `llama-server` state not saved/restored by build script — use `gpu_failback.sh` manually.
+- **DO NOT** add alignment forcing to `get_int_b1`/`get_int_b2`/`get_int_b4` — see Known Bugs above.
+- Qwen3-35B (IQ4_NL) measured: **58.4 t/s prefill, 34.2 t/s decode** at `-ngl 99 -ncmoe 33` on RX 6800 XT.
+- MoE decode slower than dense decode due to expert switching overhead.
+- Tile kernels with D≥576 are excluded from HIP builds (exceed 64KB local memory limit).
+- `build.sh` (root) is a generic CMake wrapper — prefer `scripts/build_rdna2_llama.sh`.
+- `llama-cli -p <prompt>` enters interactive mode by default; for non-interactive use
+  stdin pipe or `--interactive` mode.

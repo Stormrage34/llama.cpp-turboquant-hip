@@ -85,9 +85,11 @@ echo ""
 if [ -z "${MODEL_PATH}" ]; then
     # Try common model locations
     for candidate in \
+        "${MODEL_PATH}" \
         "${PROJECT_ROOT}/models/"*.gguf \
         "$HOME/models/"*.gguf \
-        "/home/stormrage/models/Qwen3_35BMTPIQ4.gguf"; do
+        "/home/stormrage/models/"*.gguf; do
+        [ -z "${candidate}" ] && continue
         if [ -f "${candidate}" ]; then
             MODEL_PATH="${candidate}"
             break

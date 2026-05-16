@@ -75,7 +75,10 @@ struct cli_context {
         // defaults.return_progress = true; // TODO: show progress
 
         verbose_prompt = params.verbose_prompt;
+        enable_reasoning = params.enable_reasoning;
     }
+
+    int enable_reasoning = -1; // -1=auto, 0=off, 1=on
 
     std::string generate_completion(result_timings & out_timings) {
         server_response_reader rd = ctx_server.get_response_reader();
@@ -92,7 +95,9 @@ struct cli_context {
 
             // chat template settings
             task.params.chat_parser_params = common_chat_parser_params(chat_params);
-            task.params.chat_parser_params.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
+            if (enable_reasoning != 0) {
+                task.params.chat_parser_params.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
+            }
             if (!chat_params.parser.empty()) {
                 task.params.chat_parser_params.parser.load(chat_params.parser);
             }

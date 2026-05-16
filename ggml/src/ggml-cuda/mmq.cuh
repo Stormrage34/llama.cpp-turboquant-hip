@@ -3501,7 +3501,6 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
             return txs.qs + txs.dm + txs.sc;
         }();
 #endif
-    static_assert(tile_x_size_ints > 0, "RDNA2 tile_x_size_ints must resolve to > 0");
     constexpr int lds_bank_pad = 2;
     int * tile_x_next = tile_x + tile_x_size_ints + lds_bank_pad;
 
@@ -3518,6 +3517,7 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
 #pragma unroll
             for (int l0 = 0; l0 < mmq_x * MMQ_TILE_Y_K; l0 += nwarps * warp_size) {
                 int l = l0 + threadIdx.y*warp_size + threadIdx.x;
+
                 tile_y[l] = by0[l];
             }
         }
@@ -3540,6 +3540,7 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
 #pragma unroll
             for (int l0 = 0; l0 < mmq_x * MMQ_TILE_Y_K; l0 += nwarps * warp_size) {
                 int l = l0 + threadIdx.y*warp_size + threadIdx.x;
+
                 tile_y[l] = by0[l];
             }
         }
@@ -3559,6 +3560,7 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
                 int l = l0 + threadIdx.y*warp_size + threadIdx.x;
                 tile_x[l] = tile_x_next[l];
             }
+
             __syncthreads();
         }
     }

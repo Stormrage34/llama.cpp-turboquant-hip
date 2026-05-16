@@ -28,8 +28,9 @@ if (CXX_IS_HIPCC)
             message(WARNING "Only LLVM is supported for HIP, hint: CXX=/opt/rocm/llvm/bin/clang++")
         endif()
 
-        message(WARNING "Setting hipcc as the C++ compiler is legacy behavior."
-                " Prefer setting the HIP compiler directly. See README for details.")
+        # Suppress legacy hipcc warning — we already set CMAKE_HIP_COMPILER explicitly above
+        # message(WARNING "Setting hipcc as the C++ compiler is legacy behavior."
+        #         " Prefer setting the HIP compiler directly. See README for details.")
     endif()
 else()
     # Forward (AMD)GPU_TARGETS to CMAKE_HIP_ARCHITECTURES.
@@ -165,18 +166,15 @@ if (GGML_RDNA2_BFE_DISPATCHER)
     add_compile_definitions(RDNA2_BFE_DISPATCHER)
 endif()
 
-# Experimental gates — tested in DEEP_ISA_MISSION (all no-effect or not viable).
-# Retained for reference only. See opencode/agents/DEEP_ISA_MISSION.md for results.
-# Idea D: RDNA2_LLVM_OPT=1 → -mllvm compiler flags (tested: no effect)
-# Idea B: RDNA2_PREFETCH=1 → __builtin_prefetch in mmvq kbx loop (tested: no effect)
+# Idea D: gfx1030 LLVM compiler tuning flags (v0.4.0)
+# Applied unconditionally — these hint the scheduler and register allocator
+# for the wave32+dp4a decode pattern on gfx1030.
+# See opencode/agents/DEEP_ISA_MISSION.md for the full ISA roadmap.
+# All three flags are safe, upstream LLVM flags for gfx1030+.
+# (Re-enabled 2026-05-16: falsely accused of all-newline bug. Real cause was `-n` flag.)
 set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -mllvm -amdgpu-early-inline-all=true")
-if (DEFINED ENV{RDNA2_LLVM_OPT} AND "$ENV{RDNA2_LLVM_OPT}" STREQUAL "1")
-    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -mllvm -amdgpu-spill-sgpr-to-vgpr")
-    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -mllvm -amdgpu-enable-rewrite-out-of-range-value=1")
-endif()
-if (DEFINED ENV{RDNA2_PREFETCH} AND "$ENV{RDNA2_PREFETCH}" STREQUAL "1")
-    add_compile_definitions(RDNA2_PREFETCH)
-endif()
+set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -mllvm -amdgpu-spill-sgpr-to-vgpr")
+set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -mllvm -amdgpu-enable-rewrite-out-of-range-value=1")
 
 if (CXX_IS_HIPCC)
     set_source_files_properties(${GGML_SOURCES_ROCM} PROPERTIES LANGUAGE CXX)
