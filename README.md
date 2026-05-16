@@ -138,6 +138,49 @@ All flags are **inert by default** — the fork runs identically to upstream lla
 
 ---
 
+## RDNA2 TurboQuant HIP Fork
+
+This fork adds HIP/ROCm RDNA2 optimizations, TurboQuant KV cache compression, and MoE Stream V1 async routing for AMD GPUs.
+
+### Features
+- **TurboQuant KV Cache** — 2-bit/3-bit/4-bit cache compression for extended context on low-VRAM GPUs
+- **MoE Stream V1** — Async admin stream with SLC cache-bypass GTT loads and driver-compliant semaphore signaling
+- **RDNA2 Matmul Optimizations** — gfx1030-specific kernel tuning (RX 6800/6800 XT/6900 XT)
+- **Build Isolation** — RPATH-based library resolution to prevent cross-contamination from other llama forks
+
+### Build (ROCm RDNA2)
+
+```bash
+cmake -B build \
+    -DGGML_HIP=ON \
+    -DGGML_HIP_MMQ_MFMA=ON \
+    -DGGML_HIP_GRAPHS=ON \
+    -DRDNA2_MOE_STREAM_V1=ON \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_BUILD_RPATH_USE_ORIGIN=ON \
+    -DCMAKE_SHARED_LINKER_FLAGS="-Wl,--disable-new-dtags" \
+    -DCMAKE_EXE_LINKER_FLAGS="-Wl,--disable-new-dtags"
+cmake --build build --config Release -j$(nproc)
+```
+
+### KV Cache Settings
+| Setting | Command | Use Case |
+|---------|---------|----------|
+| Best overall | `-ctk turbo4 -ctv turbo2` | High context, low VRAM |
+| Balanced | `-ctk turbo3 -ctv turbo2` | Default recommendation |
+| Max quality | `-ctk turbo3 -ctv turbo3` | Highest fidelity |
+
+### MoE Offload (35B+ models)
+```bash
+llama-server -m model.gguf -ngl 99 -ncmoe 1 -c 2048 -t 8
+```
+
+### QA Verification
+```bash
+./scripts/verify_slc_emission.sh    # Verify SLC assembly emission
+./scripts/verify_kernel_dispatch.sh <model.gguf> all  # Verify kernel dispatch
+```
+
 ## Description
 
 
