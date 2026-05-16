@@ -6,3 +6,6 @@ benchmarks/
 
 # SVI isolation workspaces
 silos/
+
+# Editor swap files
+*.kate-swp
