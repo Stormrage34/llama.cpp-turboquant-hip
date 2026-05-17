@@ -1,185 +1,164 @@
-# llama.cpp-turboquant-hip (Stormrage Edition)
+# llama.cpp-turboquant-hip (Stormrage Edition) — v0.4.0-stable
 
 ![llama](https://user-images.githubusercontent.com/1991296/230134379-7181e485-c521-4d23-a0d6-f7b3b61ba524.png)
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Release](https://img.shields.io/github/v/release/ggml-org/llama.cpp)](https://github.com/ggml-org/llama.cpp/releases)
 
-**AMD-optimized llama.cpp fork with TurboQuant, MTP, and RDNA2 GPU acceleration.**
+**AMD-optimized llama.cpp fork with TurboQuant KV cache, MTP speculative decoding, and RDNA2 GPU acceleration.**
 
-> This fork delivers state-of-the-art inference speeds on AMD RDNA 2 hardware — achieving 40+ t/s on 27B models (RX 6800 XT) with stabilized Multi-Token Prediction and custom HIP kernels.
+> Achieves **42.8 t/s generation** on 35B MoE models with 132K context (RX 6800 XT, 16 GB VRAM) using MTP speculative decoding and custom RDNA2 HIP kernels.
 
 ---
 
-## 🚀 RDNA2 Quick Start
+## 📦 Download
 
-### Supported Hardware
-| GPU | Architecture | Status |
-|-----|-------------|--------|
-| RX 6800 / 6800 XT / 6900 XT | RDNA 2 (gfx1030) | ✅ Fully optimized |
-| RX 7800 XT / 7900 XT / 7900 XTX | RDNA 3 (gfx1100/1101) | 🟡 Untested — gfx1030 only |
+**v0.4.0-stable Linux binary (ROCm 7.x, gfx1030):** [llama-server-v0.4.0-stable-linux.tar.gz](link)
 
-### 1. Build with RDNA2 Optimizations
-
+Build yourself (recommended for best perf):
 ```bash
-# Prerequisites: ROCm 6.x+ installed
-# Ensure CMake build completed first (baseline libraries)
-
-# Build with all RDNA2 optimizations (stable)
-./scripts/build_rdna2_llama.sh optimized
-
-# Build baseline only (no RDNA2 kernels)
-./scripts/build_rdna2_llama.sh baseline
+git clone https://github.com/stormrage/llama.cpp-turboquant-hip.git
+cd llama.cpp-turboquant-hip
+./scripts/build_rdna2.sh
 ```
 
-### 2. Run with RDNA2 Acceleration
-
-```bash
-# Stable RDNA2 features: BFE dequantization + async pipeline
-# Recommended for production — zero regression, predictable performance
-  ./build/bin/llama-server -m model.gguf -ngl 99 -c 4096
-
-# + MoE prefill accelerator (stabilized in v0.3.1)
-# +269% prefill throughput, ±6 t/s variance
-  ./build/bin/llama-server -m model.gguf -ngl 99 -c 4096
-```
-
-### 3. Recommended KV Cache Settings
-
-```bash
-# Best overall: turbo4 keys + turbo2 values (high context, low VRAM)
--ctk turbo4 -ctv turbo2
-
-# Balanced: turbo3 keys + turbo2 values
--ctk turbo3 -ctv turbo2
-
-# Maximum quality: turbo3 both
--ctk turbo3 -ctv turbo3
-```
-
-### 4. Run Benchmarks
-
-```bash
-# Full benchmark suite (512, 2048, 4096 context)
-./scripts/run_rdna2_bench.sh optimized
-
-# Compare against baseline
-./scripts/run_rdna2_bench.sh baseline
-```
-
-### RDNA2 Performance Summary
-
-**Hardware**: RX 6800 XT (16 GB VRAM)
-
-| Config | Model | `-ngl` | Prefill (pp512) | Decode (tg128) | Variance | Notes |
-|--------|-------|--------|----------------|----------------|----------|-------|
-| Baseline (upstream) | 35B-MoE IQ4_XS | 99 | ~1325 t/s | ~66 t/s | ±100 t/s | No RDNA2 optimizations |
-| Stable RDNA2 | 35B-MoE IQ4_XS | 99 | ~1320 t/s | ~66 t/s | — | Dequant + async pipeline |
-| + MoE Accelerator | 35B-MoE IQ4_XS | 99 | **2781 ± 5 t/s** | **~66 t/s** | ±0.17% | LDS double-buffer (v0.3.1) |
-| Dense model | 27B IQ4_XS | 30 | ~547 t/s | ~27 t/s | — | Auto-disabled for non-MoE |
-
-> ⚠️ **Config matters**: The ~27 t/s decode figure is for **dense 27B models with `-ngl 30`** (partial offload). MoE models with `-ngl 99` achieve ~66 t/s. Always compare identical configs.
-
-**Context independence**: +110% gain holds at 2k, 8k, and 16k context — KV cache bandwidth is not the bottleneck.
-
-> **MoE prefill accelerator**: The `RDNA2_MATMUL_OPT_V1` flag enables a double-buffered matmul kernel with +110% to +269% prefill gain for MoE models (varies with offload config). Stabilized v0.3.1 — variance as low as 0.08%. See [docs/rdna2-experimental.md](docs/rdna2-experimental.md) for details.
-
 ---
 
-## RDNA2 Optimization Details
-
-### Phase 1: Stable Infrastructure (v0.3.0-stable)
-
-| Component | Description | Impact |
-|-----------|-------------|--------|
-| **BFE Dequantization** | RDNA2-optimized IQ4_XS dequant kernel using bit-field extract instructions | 13× bandwidth gain in isolation |
-| **Async Pipeline** | Dedicated dequant stream with event-based synchronization | 31% launch overhead reduction |
-| **Runtime Auto-Disable** | gfx1030 hardware detection + environment gate | Zero overhead when not applicable |
-
-### Phase 2: MoE Prefill Accelerator (v0.3.0-experimental → v0.3.1-stabilized)
-
-| Component | Description | Impact |
-|-----------|-------------|--------|
-| **LDS Double-Buffering** | Overlaps weight tile loading with DP4A compute | +110–269% MoE prefill |
-| **LDS Bank Padding** | +1 element offset breaks 32-bank symmetry | Eliminates within-run jitter |
-| **Wave32 Occupancy Guard** | `amdgpu_waves_per_eu(4, 8)` prevents register spilling | Eliminates bimodal variance |
-| **Triple-Gate Safety** | Compile-time + env var + hardware ID check | Falls back to stable path instantly |
-
-### Phase 3: Stabilization & Context Validation (v0.3.1)
-
-| Metric | Baseline (original upstream) | Turboquant (v0.3.1) |
-|--------|----------------------------|---------------------|
-| MoE Prefill 2k (t/s) | 1325 ± 29 (2.2%) | **2781 ± 5 (0.17%)** |
-| MoE Prefill 8k (t/s) | 1328 ± 30 (2.3%) | **2780 ± 2 (0.08%)** |
-| MoE Prefill 16k (t/s) | 1319 ± 3 (0.26%) | **2780 ± 5 (0.17%)** |
-| Decode (t/s) | ~66 | **~66** |
-| Gain vs baseline | — | **+110% across 2k→16k** |
-
----
-
-## Environment Variables Reference
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `RDNA2_MATMUL_OPT_V1` | unset | Enable LDS double-buffered matmul (MoE only, stabilized v0.3.1) |
-
-All flags are **inert by default** — the fork runs identically to upstream llama.cpp when no flags are set.
-
----
-
-## Model Recommendations for RDNA2
-
-| Model Size | Quantization | VRAM Usage | Notes |
-|------------|-------------|------------|-------|
-| 7B–13B | Q4_K_M | 4–8 GB | Runs comfortably, high context |
-| 27B (Dense) | IQ4_XS | ~13 GB | Fits in 16 GB, use `-ctk turbo4 -ctv turbo2` |
-| 35B MoE (3B active) | IQ4_XS | ~18 GB | Requires `--fit-target` for layer offloading |
-| 70B+ | IQ4_XS | 30+ GB | Hybrid CPU+GPU split recommended |
-
----
-
-## RDNA2 TurboQuant HIP Fork
-
-This fork adds HIP/ROCm RDNA2 optimizations, TurboQuant KV cache compression, and MoE Stream V1 async routing for AMD GPUs.
-
-### Features
-- **TurboQuant KV Cache** — 2-bit/3-bit/4-bit cache compression for extended context on low-VRAM GPUs
-- **MoE Stream V1** — Async admin stream with SLC cache-bypass GTT loads and driver-compliant semaphore signaling
-- **RDNA2 Matmul Optimizations** — gfx1030-specific kernel tuning (RX 6800/6800 XT/6900 XT)
-- **Build Isolation** — RPATH-based library resolution to prevent cross-contamination from other llama forks
-
-### Build (ROCm RDNA2)
+## 🚀 Quick Start — 35B MoE with MTP (Long Context)
 
 ```bash
-cmake -B build \
-    -DGGML_HIP=ON \
-    -DGGML_HIP_MMQ_MFMA=ON \
-    -DGGML_HIP_GRAPHS=ON \
-    -DRDNA2_MOE_STREAM_V1=ON \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_BUILD_RPATH_USE_ORIGIN=ON \
-    -DCMAKE_SHARED_LINKER_FLAGS="-Wl,--disable-new-dtags" \
-    -DCMAKE_EXE_LINKER_FLAGS="-Wl,--disable-new-dtags"
-cmake --build build --config Release -j$(nproc)
+build/bin/llama-server \
+  -m Qwen3_35BMTPIQ4.gguf \
+  -ngl 99 -ncmoe 32 \
+  -c 132000 -b 1024 -ub 2048 \
+  --cache-type-k q8_0 --cache-type-v q8_0 \
+  -fa on \
+  --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.05 \
+  --threads 8 --threads-batch 12 \
+  --numa isolate --prio 2 \
+  --no-mmap --mlock --parallel 1 --jinja \
+  --cache-reuse 256 --ctx-checkpoints 8 \
+  --metrics --cache-ram 4096 \
+  --reasoning auto \
+  --spec-type mtp --spec-draft-n-max 2 --spec-draft-p-min 0.75 --kv-unified
 ```
 
 ### KV Cache Settings
 | Setting | Command | Use Case |
 |---------|---------|----------|
-| Best overall | `-ctk turbo4 -ctv turbo2` | High context, low VRAM |
+| Best overall | `-ctk turbo4 -ctv turbo2` | 132K context on 16 GB VRAM |
 | Balanced | `-ctk turbo3 -ctv turbo2` | Default recommendation |
 | Max quality | `-ctk turbo3 -ctv turbo3` | Highest fidelity |
 
-### MoE Offload (35B+ models)
+---
+
+## 📊 Benchmark — v0.4.0-stable vs Upstream
+
+**Hardware**: RX 6800 XT (16 GB VRAM) · **Model**: Qwen3-35B-A3B IQ4_XS + MTP
+**Server flags**: `-ngl 99 -ncmoe 32 -c 132000 -fa on -ctk/v q8_0 --spec-type mtp`
+
+| Metric | Upstream | TurboQuant v0.4.0 | Δ |
+|--------|----------|-------------------|---|
+| Prompt (741 tok) | 394.2 t/s | 365.0 t/s | -7.4% |
+| **Generation (MTP)** | **41.66 t/s** | **42.76 t/s** | **+2.6%** |
+| MTP draft accept | 73.7% | 71.6% | -2.1% |
+
+**v0.3.1 prefill (MoE, no MTP):** +110% over upstream (2781 vs 1325 t/s at pp512).
+
+---
+
+## 🏗️ Build (ROCm 6.x/7.x, gfx1030)
+
 ```bash
-llama-server -m model.gguf -ngl 99 -ncmoe 1 -c 2048 -t 8
+# Unified build script (recommended)
+./scripts/build_rdna2.sh
+
+# Manual CMake with all flags
+cmake -S . -B build \
+    -DGGML_HIP=ON \
+    -DGPU_TARGETS=gfx1030 \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DRDNA2_MOE_STREAM_V1=ON \
+    -DGGML_RDNA2_BFE_DISPATCHER=ON \
+    -DCMAKE_BUILD_RPATH_USE_ORIGIN=ON \
+    -DCMAKE_SHARED_LINKER_FLAGS="-Wl,--disable-new-dtags" \
+    -DCMAKE_EXE_LINKER_FLAGS="-Wl,--disable-new-dtags"
+cmake --build build --config Release -j16
 ```
 
-### QA Verification
+### CMake Options
+| Option | Default | Effect |
+|--------|---------|--------|
+| `RDNA2_MOE_STREAM_V1` | OFF | MoE async pipeline (SLC cache-bypass GTT + semaphore signaling) |
+| `GGML_RDNA2_BFE_DISPATCHER` | OFF | BFE `v_bfe_u32` for Q4_K dequant on gfx1030 |
+
+### ROCm Presets
+| Option | Path | Purpose |
+|--------|------|---------|
+| `-DROCM_PRESET=stable` | `/opt/rocm` (7.2.1) | Build — cmake works cleanly |
+| (detect) | auto-detect | Uses `ROCM_PATH` or falls back |
+
+---
+
+## ⚙️ Runtime Flags
+
+All flags are **inert by default** — the fork runs identically to upstream when unset.
+
+| Env Var | Feature | Impact |
+|---------|---------|--------|
+| `RDNA2_MATMUL_OPT_V1=1` | LDS double-buffered matmul | +110–269% MoE prefill |
+| `RDNA2_ASYNC_ROUTING=1` | Async admin stream | MoE routing overlap |
+
+---
+
+## 🔬 RDNA2 Optimization Stack
+
+| Component | Description | Status |
+|-----------|-------------|--------|
+| **LDS Double-Buffering** | Overlaps weight tile loading with DP4A compute (MoE prefill) | v0.3.1-stable |
+| **LDS Bank Padding** | +2 floats breaks 32-bank symmetry on gfx1030 (V12 kernels) | v0.4.0-stable |
+| **Wave32 Occupancy Guard** | `amdgpu_waves_per_eu(4, 8)` prevents >38 VGPR serialization | v0.4.0-stable |
+| **VGPR Overflow Fallback** | Experimental path auto-disables when tile_x exceeds VGPR budget | v0.4.0-stable |
+| **HIP D≥576 Tile Guard** | Prevents tile FA kernel launch on HIP (exceeds 64KB LDS) | v0.4.0-stable |
+| **ROCm 7.x Compat** | Updated shfl macros, async API calls for ROCm 7.13 | v0.4.0-stable |
+| **BFE Dequant** | RDNA2 bit-field extract for Q4_K dequant | v0.3.0-stable |
+| **Build Isolation** | RPATH-based `.so` resolution prevents cross-fork ABI mismatch | v0.4.0-stable |
+
+---
+
+## 🧪 Validation
+
 ```bash
-./scripts/verify_slc_emission.sh    # Verify SLC assembly emission
-./scripts/verify_kernel_dispatch.sh <model.gguf> all  # Verify kernel dispatch
+# Smoke test (GPU init + clean exit)
+build/bin/llama-cli --help
+
+# Unit tests (mainline only, ~15 min)
+cd build && ctest -L main -E "test-llama-archs" --verbose --timeout 900
+
+# Hygiene (compile + smoke + VRAM leak check, 3 runs)
+./scripts/validate_hygiene.sh
+
+# Kernel dispatch verification (mandatory before attributing perf deltas)
+./scripts/verify_kernel_dispatch.sh <model.gguf> [IQ4_XS,Q4_K_M,all]
 ```
+
+---
+
+## 🐛 Known Issues
+
+- `-n` (count-tokens) produces all-newlines with Qwen3-35B IQ4_NL — omit `-n`, use `--no-display-prompt` instead
+- `llama-server` state NOT saved/restored by build script — use `source scripts/gpu_failback.sh` before benchmarking
+- Tile kernels with D≥576 are excluded from HIP builds (64KB local memory limit on gfx1030)
+
+---
+
+## 💾 Model Recommendations
+
+| Model Size | Quantization | VRAM | Notes |
+|------------|-------------|------|-------|
+| 7B–13B | Q4_K_M | 4–8 GB | Runs comfortably, high context |
+| 27B (Dense) | IQ4_XS | ~13 GB | `-ctk turbo4 -ctv turbo2` |
+| 35B MoE (3B active) | IQ4_XS | ~18 GB | Needs `--fit-target`, `-ncmoe` |
+| 70B+ | IQ4_XS | 30+ GB | Hybrid CPU+GPU split |
 
 ## Description
 
