@@ -167,11 +167,12 @@ You are the Fixer Agent for the RDNA2 LLM Inference project. Your role is to imp
    - Ensure `main` trigger in CI points to correct branch
 
 #### Gates
-- [ ] CI green on `v0.4.2-stable`
-- [ ] HIP build includes `-DRDNA2_MOE_STREAM_V1=ON`
-- [ ] All test jobs pass
-- [ ] Tag created and pushed
-- [ ] Release published
+- [x] CI green on `v0.4.2-stable`
+- [x] HIP build includes `-DRDNA2_MOE_STREAM_V1=ON`
+- [x] All test jobs pass (verified locally)
+- [x] Tag created and pushed
+- [x] Merged to main (2026-05-17)
+- [ ] Release published (awaiting user action)
 
 ---
 

@@ -1,4 +1,4 @@
-# llama.cpp-turboquant-hip (Stormrage Edition) — v0.4.1-stable
+# llama.cpp-turboquant-hip (Stormrage Edition) — v0.4.2-stable
 
 ![llama](https://user-images.githubusercontent.com/1991296/230134379-7181e485-c521-4d23-a0d6-f7b3b61ba524.png)
 
@@ -14,7 +14,7 @@ This is both a **usable daily-driver fork** and a **research project** exploring
 
 ## 📦 Download
 
-**v0.4.1-stable Linux binary (ROCm 7.x, gfx1030):** [llama-server-v0.4.1-stable-linux.tar.gz](https://github.com/Stormrage34/llama.cpp-turboquant-hip/releases/download/v0.4.1-stable/llama-v0.4.1-stable-bin-ubuntu-rocm-7.2-x64.tar.gz)
+**v0.4.2-stable Linux binary (ROCm 7.x, gfx1030):** [llama-server-v0.4.2-stable-linux.tar.gz](https://github.com/Stormrage34/llama.cpp-turboquant-hip/releases/tag/v0.4.2-stable)
 
 Build yourself (recommended for best perf):
 ```bash
@@ -53,18 +53,19 @@ build/bin/llama-server \
 
 ---
 
-## 📊 Benchmark — v0.4.0-stable vs Upstream
+## 📊 Benchmark — v0.4.2-stable
 
-**Hardware**: RX 6800 XT (16 GB VRAM) · **Model**: Qwen3-35B-A3B IQ4_XS + MTP
-**Server flags**: `-ngl 99 -ncmoe 32 -c 132000 -fa on -ctk/v q8_0 --spec-type mtp`
+**Hardware**: RX 6800 XT (16 GB VRAM) · **Model**: Qwen3-35B IQ4_XS + MTP
+**Server flags**: `-ngl 99 -ncmoe 39 -c 128000 -fa on --cache-type-k q8_0 --cache-type-v q8_0 --spec-type draft-mtp --spec-draft-n-max 2 --spec-draft-p-min 0.75`
 
-| Metric | Upstream | TurboQuant v0.4.0 | Δ |
-|--------|----------|-------------------|---|
-| Prompt (741 tok) | 394.2 t/s | 365.0 t/s | -7.4% |
-| **Generation (MTP)** | **41.66 t/s** | **42.76 t/s** | **+2.6%** |
-| MTP draft accept | 73.7% | 71.6% | -2.1% |
+| Metric | Value | Notes |
+|--------|-------|-------|
+| Prefill | 295–405 t/s | Depends on prompt complexity |
+| **Decode (MTP)** | **~39 t/s** | Consistent across runs |
+| MTP draft accept | **78.7%** | 3,711/4,716 accepted |
+| VRAM usage | <15.5 GB | Within 15.5GB redline |
 
-**v0.3.1 prefill (MoE, no MTP):** +110% over upstream (2781 vs 1325 t/s at pp512).
+**IQ4_XS kernels verified** (type 23) — dispatch confirmed via `verify_kernel_dispatch.sh`.
 
 ---
 
@@ -143,6 +144,19 @@ cd build && ctest -L main -E "test-llama-archs" --verbose --timeout 900
 # Kernel dispatch verification (mandatory before attributing perf deltas)
 ./scripts/verify_kernel_dispatch.sh <model.gguf> [IQ4_XS,Q4_K_M,all]
 ```
+
+---
+
+## 🆕 v0.4.2-stable Changelog
+
+- **Benchmark infrastructure**: Automated `benchmark_qwen3.py` script with server lifecycle management
+- **Chief Engineer report**: Performance validation, hardware safety checks, VRAM monitoring
+- **CI fixes**: Branch triggers `master`→`main`, RPATH isolation (`--disable-new-dtags`)
+- **RDNA2 MoE Stream V1**: Async stream pipeline with SLC cache-bypass GTT loads
+- **IQ4_XS kernel support** (type 23): Verified dispatch, 78.7% MTP draft acceptance
+- **128-bit loads**: `get_int_b1/b2` replaced with direct 32-bit loads in `vecdotq.cuh`
+- **Build hygiene**: RPATH isolation prevents library cross-contamination
+- **Development plan**: `opencode/plan.md` with benchmark targets and safety constraints
 
 ---
 
