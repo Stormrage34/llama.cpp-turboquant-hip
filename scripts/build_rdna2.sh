@@ -196,8 +196,8 @@ cmake -S "${PROJECT_ROOT}" -B "${BUILD_DIR}" \
     -DGGML_HIP=ON \
     -DGPU_TARGETS:STRING="${OFFLOAD_ARCH}" \
     -DROCM_PATH="${ROCM_PATH}" \
-    -DCMAKE_HIP_COMPILER="${HIPCC}" \
     -DCMAKE_BUILD_TYPE=Release \
+    -DRDNA2_MOE_STREAM_V1=ON \
     -DCMAKE_BUILD_RPATH_USE_ORIGIN=ON \
     -DCMAKE_SHARED_LINKER_FLAGS="-Wl,--disable-new-dtags" \
     -DCMAKE_EXE_LINKER_FLAGS="-Wl,--disable-new-dtags"
@@ -207,8 +207,9 @@ echo ""
 echo -e "${CYAN}Building targets: ${LLAMA_BUILD_TARGETS}...${NC}"
 echo ""
 
-BUILD_OPTS=(--config Release -- -j "$(nproc)")
+BUILD_OPTS=(--config Release)
 [ "${VERBOSE}" -eq 1 ] && BUILD_OPTS+=(--verbose)
+BUILD_OPTS+=(-- -j "$(nproc)")
 
 for target in ${LLAMA_BUILD_TARGETS}; do
     echo -e "  ${GREEN}→ ${target}${NC}"

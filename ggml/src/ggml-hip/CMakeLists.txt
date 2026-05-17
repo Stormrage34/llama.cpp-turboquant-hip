@@ -166,6 +166,10 @@ if (GGML_RDNA2_BFE_DISPATCHER)
     add_compile_definitions(RDNA2_BFE_DISPATCHER)
 endif()
 
+if (RDNA2_MOE_STREAM_V1)
+    add_compile_definitions(RDNA2_MOE_STREAM_V1)
+endif()
+
 # Idea D: gfx1030 LLVM compiler tuning flags (v0.4.0)
 # Applied unconditionally — these hint the scheduler and register allocator
 # for the wave32+dp4a decode pattern on gfx1030.

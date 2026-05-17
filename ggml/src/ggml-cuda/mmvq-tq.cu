@@ -140,7 +140,12 @@ static __global__ void mul_mat_vec_tq4_1s_v12(
         const int ncols_x,
         const int nrows_x) {
 
-    extern __shared__ float s_act[];  // ncols_x floats
+    // LDS bank padding: +2 floats breaks 32-bank symmetry, eliminating
+    // bank conflicts when 32 threads access contiguous shared memory.
+    // RDNA2 gfx1030 has 32 memory banks; contiguous accesses cause 2x latency.
+    constexpr int lds_bank_pad = 2;
+
+    extern __shared__ float s_act[];  // ncols_x + lds_bank_pad floats
 
     const int lane    = threadIdx.x;  // 0-31
     const int warp_id = threadIdx.y;  // 0 to MMVQ_TQ_NWARPS-1
@@ -159,7 +164,7 @@ static __global__ void mul_mat_vec_tq4_1s_v12(
             val = (lane & h) ? (o - val) : (val + o);
         }
         val *= 0.17677669529663688f;  // 1/sqrt(32)
-        s_act[ib * 32 + lane] = val;
+        s_act[ib * 32 + lane + lds_bank_pad] = val;
     }
     __syncthreads();  // ONE sync — between rotation and dot product, NOT in inner loop
 
@@ -171,7 +176,7 @@ static __global__ void mul_mat_vec_tq4_1s_v12(
     float sum = 0.0f;
 
     for (int ib = 0; ib < blocks_per_row; ib++) {
-        const float act = s_act[ib * 32 + lane];
+        const float act = s_act[ib * 32 + lane + lds_bank_pad];
         const float d = (lane < 16) ? __half2float(x_row[ib].d0) : __half2float(x_row[ib].d1);
         const uint8_t idx = (x_row[ib].qs[lane / 2] >> ((lane & 1) * 4)) & 0xF;
         sum += act * TQ4_CENTROIDS_WEIGHT[idx] * d;
@@ -191,7 +196,11 @@ static __global__ void mul_mat_vec_tq3_1s_v12(
         const int ncols_x,
         const int nrows_x) {
 
-    extern __shared__ float s_act[];
+    // LDS bank padding: +2 floats breaks 32-bank symmetry, eliminating
+    // bank conflicts when 32 threads access contiguous shared memory.
+    constexpr int lds_bank_pad = 2;
+
+    extern __shared__ float s_act[];  // ncols_x + lds_bank_pad floats
 
     const int lane    = threadIdx.x;
     const int warp_id = threadIdx.y;
@@ -208,7 +217,7 @@ static __global__ void mul_mat_vec_tq3_1s_v12(
             val = (lane & h) ? (o - val) : (val + o);
         }
         val *= 0.17677669529663688f;
-        s_act[ib * 32 + lane] = val;
+        s_act[ib * 32 + lane + lds_bank_pad] = val;
     }
     __syncthreads();
 
@@ -220,7 +229,7 @@ static __global__ void mul_mat_vec_tq3_1s_v12(
     float sum = 0.0f;
 
     for (int ib = 0; ib < blocks_per_row; ib++) {
-        const float act = s_act[ib * 32 + lane];
+        const float act = s_act[ib * 32 + lane + lds_bank_pad];
         const float d = (lane < 16) ? __half2float(x_row[ib].d0) : __half2float(x_row[ib].d1);
         const uint8_t idx = tq3_extract_index(x_row[ib].qs, lane);
         sum += act * TQ3_CENTROIDS_WEIGHT[idx] * d;
@@ -255,11 +264,14 @@ void ggml_cuda_mul_mat_vec_tq(ggml_backend_cuda_context & ctx,
     float       * dst_d  = (float *) dst->data;
     cudaStream_t stream = ctx.stream();
 
-    const size_t shmem_needed = (size_t)ncols_x * sizeof(float);
+    // LDS bank padding: +2 floats breaks 32-bank symmetry in V12 kernels
+    constexpr int lds_bank_pad = 2;
+    const size_t shmem_data = (size_t)ncols_x * sizeof(float);
+    const size_t shmem_needed = shmem_data + lds_bank_pad * sizeof(float);
 
     // V12: single kernel, activation in shmem (fits for all models up to ncols=12288)
     // V8 fallback: two-phase with global scratch (for hypothetical future huge models)
-    if (shmem_needed <= 48 * 1024) {
+    if (shmem_data <= 48 * 1024) {
         const dim3 block(WARP_SIZE, MMVQ_TQ_NWARPS);
         const dim3 grid((nrows_x + MMVQ_TQ_NWARPS - 1) / MMVQ_TQ_NWARPS);
 
@@ -277,13 +289,13 @@ void ggml_cuda_mul_mat_vec_tq(ggml_backend_cuda_context & ctx,
         cudaStreamIsCapturing(stream, &capture_status);
 
         if (capture_status != cudaStreamCaptureStatusNone) {
-            GGML_ASSERT(d_act_buf != nullptr && d_act_buf_size >= shmem_needed &&
+            GGML_ASSERT(d_act_buf != nullptr && d_act_buf_size >= shmem_data &&
                          "TQ scratch buffer not pre-allocated before graph capture");
         } else {
-            if (shmem_needed > d_act_buf_size) {
+            if (shmem_data > d_act_buf_size) {
                 if (d_act_buf) cudaFree(d_act_buf);
-                cudaMalloc(&d_act_buf, shmem_needed);
-                d_act_buf_size = shmem_needed;
+                CUDA_CHECK(cudaMalloc(&d_act_buf, shmem_data));
+                d_act_buf_size = shmem_data;
             }
         }
 

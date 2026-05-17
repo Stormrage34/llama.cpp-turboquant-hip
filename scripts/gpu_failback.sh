@@ -11,7 +11,6 @@
 
 GPU_FAILBACK_STATE="${GPU_FAILBACK_STATE:-/tmp/llama-server-state.sh}"
 GPU_FAILBACK_VRAM_MIN=$((1 * 1024 * 1024 * 1024))  # 1 GB threshold
-GPU_FAILBACK_KILL_TIMEOUT=10
 GPU_FAILBACK_VRAM_TIMEOUT=30
 
 _gpu_vram_file() {
@@ -114,25 +113,7 @@ gpu_acquire() {
         return 0
     }
 
-    echo "gpu_acquire: stopping llama-server (PID $pid)..."
-
-    # SIGTERM — graceful shutdown
-    kill -TERM "$pid" 2>/dev/null || true
-
-    local waited=0
-    while kill -0 "$pid" 2>/dev/null && (( waited < GPU_FAILBACK_KILL_TIMEOUT )); do
-        sleep 1
-        ((waited++))
-    done
-
-    # SIGKILL if still alive
-    if kill -0 "$pid" 2>/dev/null; then
-        echo "gpu_acquire: force killing llama-server (PID $pid)..."
-        kill -KILL "$pid" 2>/dev/null || true
-        sleep 1
-    fi
-
-    # Wait for VRAM to free
+    # Wait for VRAM to free without killing llama-server
     echo "gpu_acquire: waiting for VRAM to free..."
     if _gpu_wait_vram_below "$GPU_FAILBACK_VRAM_MIN"; then
         local used
@@ -150,7 +131,7 @@ gpu_release() {
     [[ "${GPU_FAILBACK_NORESTORE:-0}" == "1" ]] && { rm -f "$GPU_FAILBACK_STATE"; return 0; }
 
     local restore_cmd
-    restore_cmd=$(grep '^RESTORE_CMD=' "$GPU_FAILBACK_STATE" | cut '-d=' -f2-)
+    restore_cmd=$(grep '^RESTORE_CMD=' "$GPU_FAILBACK_STATE" | cut -d= -f2-)
     restore_cmd="${restore_cmd#\'}"
     restore_cmd="${restore_cmd%\'}"
     [[ -z "$restore_cmd" ]] && { rm -f "$GPU_FAILBACK_STATE"; return 0; }

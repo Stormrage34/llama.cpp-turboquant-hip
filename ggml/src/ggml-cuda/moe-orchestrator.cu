@@ -44,7 +44,7 @@ extern "C" void ggml_hip_moe_init_async_pipeline(int num_experts) {
 extern "C" void ggml_hip_moe_signal_expert_ready(int expert_id) {
     if (!g_moe_pipeline_initialized || expert_id < 0 || expert_id >= RDNA2_MOE_MAX_EXPERTS) return;
 
-    hipStreamWriteValue32(g_moe_stream, &g_moe_semaphores[expert_id], 1, hipStreamWriteValueDefault);
+    hipStreamWriteValue32(g_moe_stream, &g_moe_semaphores[expert_id], 1, 0);
 }
 
 extern "C" void ggml_hip_moe_wait_expert(int expert_id, uintptr_t device_sem_addr) {

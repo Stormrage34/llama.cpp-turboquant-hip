@@ -3483,15 +3483,10 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
 
     constexpr int sz = sizeof(block_q8_1_mmq) / sizeof(int);
 
-    // Runtime-dispatched: experimental (LDS double-buffer) or stable (standard).
-    // Both paths always compiled to eliminate compiler-ghost optimization divergence
-    // between builds with and without RDNA2_MATMUL_OPT_V1 defined.
-    if (use_experimental) {
-    // RDNA2 experimental: LDS double-buffering for tile_x (gfx1030 only)
-    // Overlap loading of next tile_x with current vec_dot computation
-    // Requires 2x tile_x buffer space (prefetch buffer)
-    // Phase 3: +1 LDS padding to break 32-bank symmetry (kills variance from bank conflicts)
-    // FIX: tile_x may be larger than MMQ_TILE_Y_K — derive actual size from quant-specific traits.
+    // VGPR overflow guard: experimental path uses 2x tile_x buffers + tile_y + temporaries.
+    // On gfx1030, >38 VGPR triggers wave serialization → 50%+ performance collapse.
+    // Threshold derived from occupancy analysis: ~150 ints keeps VGPR ≤ 38.
+    // tile_x_size_ints is compile-time const, computed here to share between branches
     constexpr int tile_x_size_ints =
 #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
         mmq_y * mmq_get_mma_tile_x_k(type);
@@ -3501,6 +3496,16 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
             return txs.qs + txs.dm + txs.sc;
         }();
 #endif
+    // Runtime-dispatched: experimental (LDS double-buffer) or stable (standard).
+    // Both paths always compiled to eliminate compiler-ghost optimization divergence
+    // between builds with and without RDNA2_MATMUL_OPT_V1 defined.
+    // VGPR overflow: if tile_x exceeds safe threshold, skip experimental path.
+    if (use_experimental && tile_x_size_ints <= 150) {
+    // RDNA2 experimental: LDS double-buffering for tile_x (gfx1030 only)
+    // Overlap loading of next tile_x with current vec_dot computation
+    // Requires 2x tile_x buffer space (prefetch buffer)
+    // Phase 3: +1 LDS padding to break 32-bank symmetry (kills variance from bank conflicts)
+    // FIX: tile_x may be larger than MMQ_TILE_Y_K — derive actual size from quant-specific traits.
     constexpr int lds_bank_pad = 2;
     int * tile_x_next = tile_x + tile_x_size_ints + lds_bank_pad;
 

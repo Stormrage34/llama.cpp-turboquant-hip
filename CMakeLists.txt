@@ -1,12 +1,32 @@
 cmake_minimum_required(VERSION 3.14...3.28) # for add_link_options and implicit target directories.
 
 # ROCm path configuration — this fork targets gfx1030 (RDNA2)
-# Override via CLI: -DROCM_PATH=/home/stormrage/rocm-7.13-nightly
-# Or set env vars: export HIPCC="$(hipconfig -l)/clang" HIP_PATH="$(hipconfig -R)"
-# Default fallback order: $ROCM_PATH env → /opt/rocm → /home/stormrage/rocm-7.13-nightly
+#
+# ROCm Version Presets (choose one):
+#   -DROCM_PRESET=stable    → /opt/rocm (ROCm 7.2.1, recommended for building)
+#   -DROCM_PRESET=nightly   → /home/stormrage/rocm-7.13-nightly (newer runtime libs)
+#   -DROCM_PRESET=auto      → auto-detect (default)
+#
+# Manual override: -DROCM_PATH=/path/to/rocm
+# Or env var: export ROCM_PATH=/path/to/rocm
+#
+# Difference:
+#   Stable 7.2.1: cmake builds cleanly, no .dll pollution. Use for BUILDING.
+#   Nightly 7.13: newer GPU runtime libs (hipblas 3.4, rocblas 5.4).
+#                 Build with stable, then LD_LIBRARY_PATH to nightly at runtime.
+#   Both use the same LLVM/clang 23.0.0 — generated GPU code is identical.
+
+if(NOT DEFINED ROCM_PRESET)
+    set(ROCM_PRESET "auto")
+endif()
+
 if(NOT DEFINED ROCM_PATH)
     if(DEFINED ENV{ROCM_PATH})
         set(ROCM_PATH "$ENV{ROCM_PATH}")
+    elseif("${ROCM_PRESET}" STREQUAL "stable")
+        set(ROCM_PATH /opt/rocm)
+    elseif("${ROCM_PRESET}" STREQUAL "nightly")
+        set(ROCM_PATH /home/stormrage/rocm-7.13-nightly)
     elseif(EXISTS /opt/rocm/bin/hipcc)
         set(ROCM_PATH /opt/rocm)
     elseif(EXISTS /home/stormrage/rocm-7.13-nightly/bin/hipcc)
@@ -28,14 +48,12 @@ if(GGML_HIP AND NOT CMAKE_HIP_COMPILER)
                 set(HIPCC_C_COMPILER "${ROCM_PATH}/bin/clang")
             endif()
         endif()
-        set(CMAKE_HIP_COMPILER "${ROCM_PATH}/bin/hipcc" CACHE STRING "HIP compiler" FORCE)
         set(CMAKE_CXX_COMPILER "${ROCM_PATH}/bin/hipcc" CACHE STRING "CXX compiler for HIP" FORCE)
         set(CMAKE_C_COMPILER "${HIPCC_C_COMPILER}" CACHE STRING "C compiler for HIP" FORCE)
     # Fallback to hipconfig if available
     elseif(COMPILER)
         find_program(HIPCC_EXECUTABLE NAMES hipcc "${HIPCC}" "${COMPILER}" PATHS ENV HIP_PATH NO_CMAKE_FIND_ROOT_PATH)
         if(HIPCC_EXECUTABLE)
-            set(CMAKE_HIP_COMPILER "${HIPCC_EXECUTABLE}" CACHE STRING "HIP compiler" FORCE)
             set(CMAKE_CXX_COMPILER "${HIPCC_EXECUTABLE}" CACHE STRING "CXX compiler for HIP" FORCE)
             # Also set C compiler to the underlying clang
             if(EXISTS "${ROCM_PATH}/llvm/bin/clang")
@@ -172,6 +190,9 @@ option(LLAMA_TESTS_INSTALL  "llama: install tests"        ON)
 # 3rd party libs
 option(LLAMA_OPENSSL    "llama: use openssl to support HTTPS" ON)
 option(LLAMA_LLGUIDANCE "llama-common: include LLGuidance library for structured output in common utils" OFF)
+
+# RDNA2 experimental features
+option(RDNA2_MOE_STREAM_V1 "RDNA2: enable MoE async stream pipeline (V1)" OFF)
 
 
 # Required for relocatable CMake package

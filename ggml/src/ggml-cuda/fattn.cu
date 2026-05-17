@@ -436,6 +436,11 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
             if (!gqa_opt_applies) {
                 return BEST_FATTN_KERNEL_NONE;
             }
+#ifdef GGML_USE_HIP
+            // Tile kernel excludes D>=576 on HIP (exceeds 64KB local mem limit on gfx1030).
+            // No other kernel (VEC/MFMA/WMMA) handles these sizes on any AMD GPU.
+            return BEST_FATTN_KERNEL_NONE;
+#endif
             break;
         default:
             return BEST_FATTN_KERNEL_NONE;
