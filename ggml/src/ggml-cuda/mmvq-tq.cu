@@ -243,6 +243,20 @@ static __global__ void mul_mat_vec_tq3_1s_v12(
 }
 
 // ============================================================================
+// V8 fallback scratch buffer management
+// ============================================================================
+static float *g_tq_v8_scratch_buf = nullptr;
+static size_t  g_tq_v8_scratch_buf_size = 0;
+
+void ggml_cuda_tq_cleanup() {
+    if (g_tq_v8_scratch_buf) {
+        cudaFree(g_tq_v8_scratch_buf);
+        g_tq_v8_scratch_buf = nullptr;
+        g_tq_v8_scratch_buf_size = 0;
+    }
+}
+
+// ============================================================================
 // Dispatch — V12 shmem when it fits, V8 two-phase fallback
 // ============================================================================
 
@@ -282,20 +296,17 @@ void ggml_cuda_mul_mat_vec_tq(ggml_backend_cuda_context & ctx,
         }
     } else {
         // V8 fallback: two-phase with global scratch buffer
-        static float * d_act_buf = nullptr;
-        static size_t  d_act_buf_size = 0;
-
         cudaStreamCaptureStatus capture_status;
         cudaStreamIsCapturing(stream, &capture_status);
 
         if (capture_status != cudaStreamCaptureStatusNone) {
-            GGML_ASSERT(d_act_buf != nullptr && d_act_buf_size >= shmem_data &&
+            GGML_ASSERT(g_tq_v8_scratch_buf != nullptr && g_tq_v8_scratch_buf_size >= shmem_data &&
                          "TQ scratch buffer not pre-allocated before graph capture");
         } else {
-            if (shmem_data > d_act_buf_size) {
-                if (d_act_buf) cudaFree(d_act_buf);
-                CUDA_CHECK(cudaMalloc(&d_act_buf, shmem_data));
-                d_act_buf_size = shmem_data;
+            if (shmem_data > g_tq_v8_scratch_buf_size) {
+                if (g_tq_v8_scratch_buf) cudaFree(g_tq_v8_scratch_buf);
+                CUDA_CHECK(cudaMalloc(&g_tq_v8_scratch_buf, shmem_data));
+                g_tq_v8_scratch_buf_size = shmem_data;
             }
         }
 
@@ -303,7 +314,7 @@ void ggml_cuda_mul_mat_vec_tq(ggml_backend_cuda_context & ctx,
             const int n_blocks = ncols_x / 32;
             const dim3 rot_block(32, 4);
             const dim3 rot_grid((n_blocks + 3) / 4);
-            tq_prerotate_activation_v8<<<rot_grid, rot_block, 0, stream>>>(src1_d, d_act_buf, ncols_x);
+            tq_prerotate_activation_v8<<<rot_grid, rot_block, 0, stream>>>(src1_d, g_tq_v8_scratch_buf, ncols_x);
         }
 
         {
@@ -311,9 +322,9 @@ void ggml_cuda_mul_mat_vec_tq(ggml_backend_cuda_context & ctx,
             const dim3 grid((nrows_x + MMVQ_TQ_NWARPS - 1) / MMVQ_TQ_NWARPS);
 
             if (src0->type == GGML_TYPE_TQ4_1S) {
-                mul_mat_vec_tq4_1s_v8<<<grid, block, 0, stream>>>(src0_d, d_act_buf, dst_d, ncols_x, nrows_x);
+                mul_mat_vec_tq4_1s_v8<<<grid, block, 0, stream>>>(src0_d, g_tq_v8_scratch_buf, dst_d, ncols_x, nrows_x);
             } else {
-                mul_mat_vec_tq3_1s_v8<<<grid, block, 0, stream>>>(src0_d, d_act_buf, dst_d, ncols_x, nrows_x);
+                mul_mat_vec_tq3_1s_v8<<<grid, block, 0, stream>>>(src0_d, g_tq_v8_scratch_buf, dst_d, ncols_x, nrows_x);
             }
         }
     }

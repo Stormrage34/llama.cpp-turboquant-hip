@@ -347,9 +347,7 @@ template <int mmq_y, bool need_check> static __device__ __forceinline__ void loa
         }
 
         const block_q1_0 * bxi = (const block_q1_0 *) x + kbx0 + i*stride + kbx;
-        const int qs_offset = 4*kqsx;
-        const int qs0 = bxi->qs[qs_offset + 0] | (bxi->qs[qs_offset + 1] << 8) |
-                        (bxi->qs[qs_offset + 2] << 16) | (bxi->qs[qs_offset + 3] << 24);
+        const int qs0 = get_int_b1(bxi->qs, kqsx);
 
         int unpacked_bytes[8];
 #pragma unroll
@@ -3509,6 +3507,11 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
     constexpr int lds_bank_pad = 2;
     int * tile_x_next = tile_x + tile_x_size_ints + lds_bank_pad;
 
+    // tile_y LDS bank conflict mitigation: add padding when stride % 32 == 0
+    const int tile_y_stride = ncols_y * sz;
+    const int tile_y_pad = (tile_y_stride % 32 == 0) ? lds_bank_pad : 0;
+    int * tile_y_padded = tile_y + tile_y_pad;
+
     // Prefetch first tile_x
     load_tiles(x, tile_x, offset_x + kb0_start, tile_x_max_i, stride_row_x);
     __syncthreads();
@@ -3523,7 +3526,7 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
             for (int l0 = 0; l0 < mmq_x * MMQ_TILE_Y_K; l0 += nwarps * warp_size) {
                 int l = l0 + threadIdx.y*warp_size + threadIdx.x;
 
-                tile_y[l] = by0[l];
+                tile_y_padded[l] = by0[l];
             }
         }
 
@@ -3535,7 +3538,7 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
         __syncthreads();
 
         // Compute vec_dot with current tiles
-        vec_dot(tile_x, tile_y, sum, 0);
+        vec_dot(tile_x, tile_y_padded, sum, 0);
 
         __syncthreads();
 
@@ -3546,14 +3549,14 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
             for (int l0 = 0; l0 < mmq_x * MMQ_TILE_Y_K; l0 += nwarps * warp_size) {
                 int l = l0 + threadIdx.y*warp_size + threadIdx.x;
 
-                tile_y[l] = by0[l];
+                tile_y_padded[l] = by0[l];
             }
         }
 
         __syncthreads();
 
         // Compute second vec_dot
-        vec_dot(tile_x, tile_y, sum, MMQ_TILE_NE_K);
+        vec_dot(tile_x, tile_y_padded, sum, MMQ_TILE_NE_K);
 
         __syncthreads();
 

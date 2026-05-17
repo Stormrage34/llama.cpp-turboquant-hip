@@ -11,11 +11,12 @@
 #   baseline   No RDNA2 optimizations
 #
 # Options:
-#   --clean          Remove build dir before building
 #   --verbose        Verbose cmake output
 #   --benchmark      Also build llama-bench-rdna2 (hipcc, needs cmake first)
 #   --no-interactive Skip ROCm selection prompt, use ROCM_PATH or default
 #   --help           Show this message
+#
+# Note: Always does a clean build (removes old build dir first).
 #
 # Environment:
 #   ROCM_PATH        Path to ROCm installation (skip prompt if set)
@@ -69,11 +70,6 @@ for arg in "$@"; do
         *) echo -e "${RED}Unknown: ${arg}${NC}" >&2; exit 1 ;;
     esac
 done
-
-# ─── GPU Failback ─────────────────────────────────────────────────────────
-source "${SCRIPT_DIR}/gpu_failback.sh"
-gpu_failback_trap
-gpu_acquire
 
 # ─── Header ───────────────────────────────────────────────────────────────
 echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════════════════╗${NC}"
@@ -175,12 +171,11 @@ echo -e "${GREEN}✓ cmake: $(cmake --version | head -1)${NC}"
 echo -e "${GREEN}✓ hipcc: ${HIPCC}${NC}"
 echo ""
 
-# ─── Clean ──────────────────────────────────────────────────────────────
-if [ "${CLEAN_BUILD}" -eq 1 ]; then
-    echo -e "${YELLOW}Cleaning: ${BUILD_DIR}${NC}"
-    rm -rf "${BUILD_DIR}"
-    echo ""
-fi
+# ─── Clean (always rebuild from scratch) ────────────────────────────────
+echo -e "${YELLOW}Cleaning: ${BUILD_DIR}${NC}"
+rm -rf "${BUILD_DIR}"
+mkdir -p "${BUILD_DIR}"
+echo ""
 
 # ─── PATH setup for cmake ───────────────────────────────────────────────
 # ROCm nightly's bin/ has .dll files that confuse cmake. Put /opt/rocm first
