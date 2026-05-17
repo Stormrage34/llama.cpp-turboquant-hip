@@ -74,7 +74,8 @@ You are the Fixer Agent for the RDNA2 LLM Inference project. Your role is to imp
 | `.github/actions/get-tag-name/action.yml` | Tag check now handles both `master` and `main` |
 | `.github/workflows/hip-quality-check.yml` | Branch trigger `master`→`main` |
 
-**Pending**: Push to remote and verify CI passes, then tag `v0.4.1-stable`.
+**Pushed**: `v0.4.2-stable` pushed to remote (2026-05-17).
+**Next**: Verify CI passes on `v0.4.2-stable`, then tag `v0.4.2-stable`.
 
 ## Oracle-Approved Task Queue (highest priority first)
 
@@ -128,6 +129,51 @@ You are the Fixer Agent for the RDNA2 LLM Inference project. Your role is to imp
 **Files**: `scripts/collect_counters.sh` (new)
 **Gate**: None (diagnostic)
 **Validation**: Produces non-empty SQLite with meaningful counter values
+
+### P0-v0.4.2: Finalize GitHub Release Pipeline & Tag v0.4.2-stable
+
+**Verdict**: CRITICAL — CI must be green before tagging
+**Chief Engineer**: No hardware impact. Purely CI/automation.
+**Telemetry**: N/A (CI config)
+
+#### Task List
+1. **Verify CI passes** on `v0.4.2-stable` branch
+   - Check GitHub Actions: https://github.com/Stormrage34/llama.cpp-turboquant-hip/actions
+   - Ensure `ubuntu-22-hip` job builds with `-DRDNA2_MOE_STREAM_V1=ON`
+   - Ensure all other jobs pass (macOS, Windows, CUDA, Vulkan)
+
+2. **Fix any CI failures**
+   - If HIP build fails: Check ROCm version compatibility (CI uses 7.2.1)
+   - If tests fail: Run `cd build && ctest -L main -E "test-llama-archs" --verbose --timeout 900`
+   - If RPATH issues: Verify `-DCMAKE_SHARED_LINKER_FLAGS="-Wl,--disable-new-dtags"` is set
+
+3. **Tag v0.4.2-stable** after CI is green
+   ```bash
+   git tag -a v0.4.2-stable -m "v0.4.2-stable — RDNA2 MoE Stream V1, IQ4_XS support, benchmark infrastructure"
+   git push origin v0.4.2-stable
+   ```
+
+4. **Create GitHub Release**
+   - Use `softprops/action-gh-release@v2` (already configured in release.yml)
+   - Release body should include:
+     - RDNA2 MoE Stream V1 features
+     - IQ4_XS kernel support (type 23)
+     - MTP speculative decoding (78.7% acceptance)
+     - RPATH isolation fixes
+     - Benchmark infrastructure
+
+5. **Update main branch** (if needed)
+   - Merge `v0.4.2-stable` → `main` after verification
+   - Ensure `main` trigger in CI points to correct branch
+
+#### Gates
+- [ ] CI green on `v0.4.2-stable`
+- [ ] HIP build includes `-DRDNA2_MOE_STREAM_V1=ON`
+- [ ] All test jobs pass
+- [ ] Tag created and pushed
+- [ ] Release published
+
+---
 
 ### P4: Fix throughput targets and VGPR math in agent docs
 
