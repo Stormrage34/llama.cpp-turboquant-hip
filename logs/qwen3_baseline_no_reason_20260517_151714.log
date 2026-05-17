@@ -1,0 +1,2 @@
+ggml_cuda_init: found 1 ROCm devices (Total VRAM: 16368 MiB):
+  Device 0: AMD Radeon RX 6800 XT, gfx1030 (0x1030), VMM: no, Wave Size: 32, VRAM: 16368 MiB

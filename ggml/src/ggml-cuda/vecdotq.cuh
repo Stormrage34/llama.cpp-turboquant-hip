@@ -4,22 +4,30 @@
 
 #include <cstdint>
 
-// Unaligned 4-byte load via memcpy for safe device access on all architectures.
-// GPU hardware handles unaligned loads natively; byte-by-byte fallback for safety.
+// Unaligned 4-byte load for safe device access on all architectures.
+// AMD GPUs handle unaligned global_load_dword natively — single instruction replaces 4-10 VALU ops.
 static __device__ __forceinline__ int get_int_b1(const void * x, const int i32) {
+#if defined(GGML_USE_HIP)
+    return ((const int *)x)[i32];
+#else
     const uint8_t * x8 = (const uint8_t *) x;
     int x32  = x8[4*i32 + 0] <<  0;
     x32     |= x8[4*i32 + 1] <<  8;
     x32     |= x8[4*i32 + 2] << 16;
     x32     |= x8[4*i32 + 3] << 24;
     return x32;
+#endif
 }
 
 static __device__ __forceinline__ int get_int_b2(const void * x, const int i32) {
+#if defined(GGML_USE_HIP)
+    return ((const int *)x)[i32];
+#else
     const uint16_t * x16 = (const uint16_t *) x;
     int x32  = x16[2*i32 + 0] <<  0;
     x32     |= x16[2*i32 + 1] << 16;
     return x32;
+#endif
 }
 
 static __device__ __forceinline__ int get_int_b4(const void * x, const int i32) {
@@ -686,9 +694,7 @@ static __device__ __forceinline__ float vec_dot_q1_0_q8_1(
     const block_q8_1 * bq8_1_chunk = bq8_1 + iqs;
 
     // Load 32 bits (4 bytes) for this chunk from Q1_0
-    const int offset = iqs * 4;
-    const int v = bq1_0->qs[offset + 0] | (bq1_0->qs[offset + 1] << 8) |
-                  (bq1_0->qs[offset + 2] << 16) | (bq1_0->qs[offset + 3] << 24);
+    const int v = get_int_b1(bq1_0->qs, iqs);
 
     // Unpack 32 bits into 32 signed values (-1 or +1)
     int vi_bytes[8];

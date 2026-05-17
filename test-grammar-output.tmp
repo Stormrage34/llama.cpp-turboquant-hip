@@ -1,0 +1,4 @@
+code ::= "\" \\r \\n \\\" \\\\ \"" space
+code-kv ::= "\"code\"" space ":" space code
+root ::= "{" space code-kv "}" space
+space ::= | " " | "\n"{1,2} [ \t]{0,20}

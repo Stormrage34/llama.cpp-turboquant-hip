@@ -1,0 +1,58 @@
+You are a multidisciplinary research scientist with expertise in machine learning, neuroscience, information theory, and distributed systems. Synthesize findings from multiple domains to analyze the following research question. Your analysis should include formal mathematical formulations, citations to relevant literature, and concrete experimental design proposals.
+
+RESEARCH QUESTION: How can we design a neural-symbolic architecture that combines the pattern-matching capabilities of large language models with the systematic reasoning and causal inference abilities of symbolic AI, while maintaining computational tractability for real-time applications?
+
+FRAMEWORK REQUIREMENTS:
+1. The architecture must process natural language queries and produce verifiable, causally-grounded outputs
+2. It should maintain a differentiable "bridge" between continuous neural representations and discrete symbolic operations
+3. The system must be capable of online learning (adapting to new information without full retraining)
+4. Inference latency must be under 200ms for queries up to 2048 tokens
+5. Memory footprint should not exceed 12GB for the complete system
+
+DELIVERABLES:
+
+A. THEORETICAL FOUNDATION (40% weight)
+- Formalize the problem as a bilevel optimization over a hybrid objective function
+   * Define the neural loss L_n(f_θ(x), y) and symbolic constraints C_s(z, K) where K is background knowledge
+   * Propose a Lagrangian relaxation: L_total = L_n + λ₁·C_s + λ₂·Ω(θ) where Ω is a sparsity regularizer
+- Prove or provide strong theoretical justification for convergence of your proposed training procedure
+- Discuss the trade-off between representational capacity (neural) and systematic generalization (symbolic)
+- Cite at least 5 relevant papers (author, year, key contribution) that your proposal builds upon
+
+B. ARCHITECTURE DESIGN (35% weight)
+- Provide a detailed architectural diagram (described in text with component interfaces)
+- Specify the "neural-symbolic bridge": how do continuous vectors from the LLM become discrete symbolic expressions?
+   * Option A: Differentiable logic programming (e.g., DeepLog, Neural Theorem Provers)
+   * Option B: Neuro-symbolic concept learning (e.g., Concept Bottleneck Models, Neural-Symbolic VQA)
+   * Option C: Hybrid probabilistic programming (e.g., Church, Venture, Pyro with symbolic constraints)
+   * Your choice or combination — justify why
+- Describe the memory-augmented module for online learning:
+   * How does the system separate episodic (experience) from semantic (knowledge) memory?
+   * What forgetting mechanism prevents catastrophic interference?
+   * How is the memory indexed for sub-200ms retrieval at 12GB scale?
+- Explain the causal inference engine:
+   * Does it use Pearl's do-calculus, Neyman-Rubin potential outcomes, or structural causal models?
+   * How does it handle unobserved confounders in natural language inputs?
+   * Provide a worked example of counterfactual reasoning
+
+C. EXPERIMENTAL VALIDATION (25% weight)
+- Design three experiments to validate the architecture:
+   * Experiment 1: Systematic generalization (e.g., SCAN, COGS, or CFQ benchmark) — measure compositional generalization accuracy
+   * Experiment 2: Causal reasoning in natural language (e.g., CLadder, COPA, or a custom counterfactual dataset) — measure causal accuracy vs. pure LLM baselines
+   * Experiment 3: Real-time adaptation — measure online learning performance on a new domain with concept drift
+- For each experiment, specify:
+   * Dataset(s) and evaluation metrics
+   * Baseline methods (at least 3, including a pure LLM, pure symbolic, and hybrid baseline)
+   * Statistical significance criteria (effect size, power analysis)
+   * Expected results and interpretation if results differ from expectations
+- Propose ablation studies to isolate the contribution of each architectural component
+
+PRESENTATION:
+Write your response as the first section of a formal research paper, including:
+- Abstract (150 words max)
+- Introduction with problem motivation and key contributions
+- Related Work section organized by theme (neural, symbolic, hybrid, causal)
+- Formal problem statement with mathematical notation
+- Preliminary experimental results discussion (hypothetical but plausible based on existing literature)
+
+Use LaTeX-style mathematical notation (e.g., $\mathcal{L}_{\text{total}} = \mathbb{E}_{(x,y) \sim \mathcal{D}}[\ell(f_\theta(x), y)] + \lambda \cdot \Omega(\theta)$) within the text. Format section headings and subsections following the NeurIPS template style.

@@ -71,7 +71,6 @@ FLAGS=(
     -fitt 512
     -c 4096
     --repeat-penalty 1.1
-    -n 1024
     -f "$PROMPT_FILE"
     --no-display-prompt
 )

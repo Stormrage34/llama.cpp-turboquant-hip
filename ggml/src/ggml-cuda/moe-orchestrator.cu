@@ -5,7 +5,8 @@
 
 #define RDNA2_MOE_MAX_EXPERTS 128
 
-static uint32_t *g_moe_semaphores = nullptr;
+
+static uint32_t* g_moe_semaphores = nullptr;
 static hipStream_t g_moe_stream = nullptr;
 static bool g_moe_pipeline_initialized = false;
 
@@ -18,7 +19,8 @@ extern "C" void ggml_hip_moe_init_async_pipeline(int num_experts) {
         return;
     }
 
-    err = hipMalloc(&g_moe_semaphores, sizeof(uint32_t) * RDNA2_MOE_MAX_EXPERTS);
+    err = hipHostMalloc(&g_moe_semaphores, sizeof(uint32_t) * RDNA2_MOE_MAX_EXPERTS,
+                         hipHostMallocPortable | hipHostMallocMapped);
     if (err != hipSuccess) {
         fprintf(stderr, "[RDNA2 MOE] Failed to allocate pinned semaphore memory: %s\n", hipGetErrorString(err));
         hipStreamDestroy(g_moe_stream);

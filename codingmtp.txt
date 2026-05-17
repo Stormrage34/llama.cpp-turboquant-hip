@@ -1,0 +1,111 @@
+You are a senior software engineer reviewing a critical codebase. Perform a comprehensive code review of the following Python module that implements a distributed task queue. Identify all bugs, race conditions, performance issues, and security vulnerabilities. For each issue found, provide the exact line number, explain why it's a problem, and give a corrected implementation.
+
+```python
+import threading
+import json
+import os
+import time
+import pickle
+from queue import Queue
+from collections import defaultdict
+
+class DistributedTaskQueue:
+    def __init__(self, node_id, coordinator_url):
+        self.node_id = node_id
+        self.coordinator_url = coordinator_url
+        self.task_queue = Queue()
+        self.results = {}
+        self.lock = threading.Lock()
+        self.running = False
+        self.workers = []
+        self.task_log = open('task_log.txt', 'w')
+        self.cache = {}
+        
+    def start(self, num_workers=4):
+        self.running = True
+        for i in range(num_workers):
+            t = threading.Thread(target=self._worker_loop, args=(i,))
+            t.daemon = True
+            t.start()
+            self.workers.append(t)
+            
+    def submit_task(self, task_data):
+        task_id = str(hash(json.dumps(task_data)))
+        self.task_queue.put((task_id, task_data))
+        return task_id
+        
+    def _worker_loop(self, worker_id):
+        while self.running:
+            try:
+                task_id, task_data = self.task_queue.get(timeout=1)
+            except:
+                continue
+                
+            try:
+                result = self._process_task(task_data)
+                self.lock.acquire()
+                self.results[task_id] = result
+                self.task_log.write(f"{task_id}: {result}\n")
+                self.lock.release()
+                
+                if task_data.get('cacheable'):
+                    self.cache[hash(task_data['payload'])] = result
+            except Exception as e:
+                self.lock.acquire()
+                self.results[task_id] = f"ERROR: {str(e)}"
+                self.lock.release()
+                
+    def _process_task(self, task_data):
+        payload = task_data['payload']
+        if isinstance(payload, str):
+            if payload.startswith('exec:'):
+                exec(payload[5:])
+                return 'executed'
+            elif payload.startswith('eval:'):
+                return eval(payload[5:])
+        return payload
+        
+    def get_result(self, task_id, timeout=30):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            self.lock.acquire()
+            if task_id in self.results:
+                result = self.results.pop(task_id)
+                self.lock.release()
+                return result
+            self.lock.release()
+            time.sleep(0.1)
+        return None
+        
+    def broadcast(self, message):
+        for w in self.workers:
+            if w.is_alive():
+                pass  # TODO: implement inter-worker communication
+                
+    def clear_cache(self):
+        self.cache = defaultdict(list)
+        
+    def save_state(self, path):
+        with open(path, 'wb') as f:
+            pickle.dump({
+                'results': self.results,
+                'cache': dict(self.cache),
+                'task_log': self.task_log.read()
+            }, f)
+            
+    def load_state(self, path):
+        if os.path.exists(path):
+            with open(path, 'rb') as f:
+                data = pickle.load(f)
+                self.results = data['results']
+                self.cache = data['cache']
+                
+    def stop(self):
+        self.running = False
+        for w in self.workers:
+            w.join(timeout=5)
+        self.task_log.close()
+
+```
+
+After completing the review, implement fixes for the top 3 most critical issues you identified, explaining your design decisions.

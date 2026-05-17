@@ -49,8 +49,14 @@ Both use same LLVM/clang 23.0.0 — generated GPU code is identical. Build with 
 ### RDNA2 CMake options
 | Option | Default | Effect |
 |--------|---------|--------|
-| `-DRDNA2_MOE_STREAM_V1` | OFF | MoE async stream pipeline (V1) — SLC cache-bypass GTT loads + semaphore signaling |
+| `-DRDNA2_MOE_STREAM_V1` | OFF | MoE async stream pipeline (V1) — SLC cache-bypass GTT loads + semaphore signaling ✅ **IMPLEMENTED** |
 | `-DGGML_RDNA2_BFE_DISPATCHER` | OFF | BFE `v_bfe_u32` for Q4_K dequant |
+
+SLC=1 GTT optimization status:
+- ✅ **Implemented**: `load_gtt_slc()`, `load_gtt_slc4()` with `global_load_dword slc` modifier
+- ✅ **Verified**: 128 SLC-modified instructions emitted in assembly
+- ✅ **Fixed**: `hipHostMalloc` + `hipHostMallocMapped` for semaphore memory
+- ⏳ **Runtime validation**: Pending MoE model testing with rocprofv3 counters
 
 Always-on: `RDNA2_OPT_V1` (compile definition for dequant kernel), gfx1030 LLVM tuning flags (`-mllvm -amdgpu-*`).
 

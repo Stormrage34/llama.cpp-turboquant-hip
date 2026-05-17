@@ -1509,3 +1509,62 @@ struct ggml_cuda_mm_fusion_args_device {
     const void * gate_bias = nullptr;
     ggml_glu_op glu_op;
 };
+
+// RDNA2 MOE Stream V1: SLC cache-bypass GTT loads + semaphore signaling
+#ifdef RDNA2_MOE_STREAM_V1
+
+// Load from GTT with SLC=1 (Sample Cache Level 1 = bypass L1/L2 cache)
+// This is critical for MoE expert routing where we load expert parameters
+// that are unlikely to be reused, avoiding cache pollution.
+// Per RDNA2 ISA manual Section 8.1.10: global_load_dword slc
+static __device__ __forceinline__ float load_gtt_slc(const float * ptr) {
+    float result;
+    uint32_t ptr_lo = reinterpret_cast<uintptr_t>(ptr) & 0xFFFFFFFF;
+    uint32_t ptr_hi = (reinterpret_cast<uintptr_t>(ptr) >> 32) & 0xFFFFFFFF;
+    asm volatile(
+        "global_load_dword %0, [%1, %2], 0 slc"
+        : "=v"(result)
+        : "s"(ptr_lo), "s"(ptr_hi)
+        : "memory"
+    );
+    return result;
+}
+
+// Load 4 floats from GTT with SLC=1 (coalesced load)
+static __device__ __forceinline__ float4 load_gtt_slc4(const float4 * ptr) {
+    float4 result;
+    uint32_t ptr_lo = reinterpret_cast<uintptr_t>(ptr) & 0xFFFFFFFF;
+    uint32_t ptr_hi = (reinterpret_cast<uintptr_t>(ptr) >> 32) & 0xFFFFFFFF;
+    asm volatile(
+        "global_load_dvec4 %0, [%1, %2], 0 slc"
+        : "=v"(result)
+        : "s"(ptr_lo), "s"(ptr_hi)
+        : "memory"
+    );
+    return result;
+}
+
+// Semaphore polling with s_sleep for low-power waiting
+// Per RDNA2: s_sleep reduces power during wait loops
+static __device__ __forceinline__ void s_sleep_cycles(unsigned cycles) {
+    asm volatile("s_sleep %0" : : "s"(cycles) : "memory");
+}
+
+// Poll semaphore with exponential backoff using s_sleep
+// Returns true when value matches expected, false if timeout exceeded
+static __device__ __forceinline__ bool poll_semaphore(volatile uint32_t *sem, uint32_t expected, uint32_t max_loops) {
+    unsigned sleep_cycles = 10; // Start with ~100ns (3GHz clock)
+    for (uint32_t i = 0; i < max_loops; ++i) {
+        if (*sem == expected) {
+            return true;
+        }
+        s_sleep_cycles(sleep_cycles);
+        // Exponential backoff up to 1024 cycles
+        if (sleep_cycles < 1024) {
+            sleep_cycles *= 2;
+        }
+    }
+    return false;
+}
+
+#endif // RDNA2_MOE_STREAM_V1

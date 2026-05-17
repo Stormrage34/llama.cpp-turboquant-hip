@@ -1,0 +1,15 @@
+{
+            "properties": {
+                "code": {
+                    "const": " \r \n \" \\ ",
+                    "description": "Generated code",
+                    "title": "Code",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "code"
+            ],
+            "title": "DecoderResponse",
+            "type": "object"
+        }

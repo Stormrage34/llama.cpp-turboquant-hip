@@ -1,0 +1,42 @@
+You are a strategic consultant with expertise in operations research, systems thinking, and constraint optimization. Analyze the following complex business problem using a step-by-step reasoning approach. Apply graph theory, queueing theory, and resource allocation optimization. Show all your work.
+
+PROBLEM: A hospital emergency department (ED) faces chronic overcrowding. The ED has the following resources:
+- 5 triage nurses (each can assess 6 patients/hour)
+- 8 examination rooms (average consult time: 45 minutes, stddev: 15 minutes)
+- 2 CT scanners (each scan takes 25 minutes, with 5 minutes of setup/teardown between patients)
+- 3 ultrasound machines (each exam takes 35 minutes, with 10 minutes for report writing)
+- 12 general ward beds
+- 4 ICU beds
+- Staff: 4 attending physicians, 6 residents, 20 nurses (across 3 shifts)
+- On average, 180 patients arrive per day, with a Poisson distribution, peaking between 10 AM and 2 PM (where arrival rate doubles)
+- 30% of patients require CT imaging; 25% require ultrasound; 15% require both
+- 10% of patients are admitted to the general ward; 3% to ICU
+
+Patient flow:
+1. Arrival & Triage (mandatory, 10 min, highest priority for life-threatening cases)
+2. Initial ED consult (mandatory, variable time based on acuity)
+3. Diagnostics (if needed, can be parallel)
+4. Wait for results (15-30 minutes)
+5. Final consult & disposition (discharge, admit, or transfer)
+
+CONSTRAINTS:
+- Patients must leave the ED within 6 hours (regulatory requirement) or the hospital faces penalties of $500/patient/hour over the limit
+- No patient can wait more than 30 minutes for initial triage
+- CT and Ultrasound can operate from 7 AM to 11 PM only (night shift has 50% capacity)
+- ICU occupancy cannot exceed 85% for infection control
+- Staff breaks must be staggered but maintain minimum coverage of 60%
+
+TASKS:
+1. Model this as a constraint satisfaction and queueing problem. Identify the primary bottlenecks using Little's Law and Queueing Theory (M/M/c or M/G/c models).
+2. Calculate the theoretical minimum number of exam rooms, CT scanners, and ultrasound machines needed to meet the 6-hour throughput requirement during peak hours.
+3. Propose two alternative solutions:
+   a. A "low-cost" solution (operational changes only, no capital expenditure)
+   b. A "high-investment" solution (new resources, redesigned flow)
+4. For each solution, provide quantitative projections for:
+   - Average length of stay (LOS) in minutes
+   - 95th percentile wait times for each stage
+   - Staff utilization rates
+   - Reduction in penalty costs
+5. Identify which queueing theory model best fits each stage of the patient journey, and justify your choice. Discuss how variability (coefficient of variation > 1) affects your predictions compared to standard M/M/c models.
+
+Present your analysis as a structured consulting report with clear sections, formulas, and numerical results. Use markdown tables for your quantitative projections.

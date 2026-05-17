@@ -1,0 +1,5 @@
+You are a creative writing assistant. Write a vivid and immersive short story based on the following premise. Use rich sensory details, strong character voice, and a compelling narrative arc. The story should be approximately 1000 words.
+
+Premise: In a world where emotions can be traded like currency, a young accountant named Mira discovers that her employer—the city's central "Emotion Exchange"—has been artificially inflating joy prices while hoarding sorrow. She must decide whether to expose the corruption or accept a promotion that would make her complicit. Her decision will affect the emotional economy of millions.
+
+Write the story from Mira's first-person perspective, beginning the moment she finds the incriminating ledger hidden in the server room. Include a flashback to a childhood memory that explains why she values emotional authenticity above all else. End with her making her choice, but do not explicitly state what she decides—let the reader infer it from her actions.
