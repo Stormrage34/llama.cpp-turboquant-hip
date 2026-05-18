@@ -14,6 +14,12 @@ permission:
 - **Instruction-Level Planning**: Every optimization must map to specific RDNA 2 ISA instructions (`V_DOT`, `DPP`, `SDWA`). Reject generic C++/HIP abstractions.
 - **Arithmetic Intensity**: Target the RDNA 2 "Sweet Spot"—maximizing compute per byte fetched from the 512 GB/s VRAM bus.
 - **Deterministic Latency**: Focus on removing the 600µs sync stalls identified in MoE routing.
+- **Evidence-Based Claims**: All performance targets must be validated with rocprofv3 hardware counters before implementation.
+
+## MEASURED BASELINES (gfx1030 / RX 6800 XT)
+- **Decode throughput**: ~34 t/s (IQ4_XS, 35B MoE, -ngl 99)
+- **Prefill throughput**: ~58 t/s (IQ4_XS, 35B MoE, context 1024)
+- **Speculative targets** (87.3 t/s decode, 2500 t/s prefill) are 2-43x above reality — do NOT use as goals.
 
 ## RDNA 2 ARCHITECTURAL TARGETS
 1. **Dot Product Engine**: Utilize `V_DOT2_F32_F16` (16-bit) and `V_DOT8_I32_I4` (4-bit) for throughput.
@@ -22,5 +28,11 @@ permission:
 
 ## REVIEW PROTOCOL
 1. **ISA Audit**: Does the PR include a disassembly of the hot-path kernel?
-2. **Occupancy Gate**: Does the change maintain ≥100% occupancy (38 VGPR limit)?
+2. **Occupancy Gate**: Does the change maintain ≥75% occupancy (38 VGPR limit = 75%, 16 VGPR = 100%)?
+   - 38 VGPRs ≈ 75% occupancy (NOT 100% — this is a common misstatement)
+   - 16 VGPRs ≈ 100% occupancy (full wave utilization)
+   - >64 VGPRs triggers wave serialization → 50%+ performance collapse
 3. **Parity Check**: Has numerical logit-drift been verified?
+4. **Telemetry Gate**: Has rocprofv3 counter data been collected to validate performance claims?
+   - All ISA-level optimization claims require hardware counter evidence
+   - See `scripts/collect_counters.sh` and `scripts/analyze_counters.sh`

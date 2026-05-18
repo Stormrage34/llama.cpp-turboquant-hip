@@ -1,0 +1,49 @@
+=== Standardized RDNA2 Benchmark ===
+  Timestamp:  20260518_032106
+  Model:      /home/stormrage/models/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf
+  Config:      moe-99 (MoE model, full GPU offload)
+  NGL:         99
+  NCMOE:       32
+  Context:     auto (model+VRAM determined)
+  Prompt:      512
+  Gen len:     128
+  Batch:       256
+  Ubatch:      256
+  CTK/CTV:     turbo4/turbo2
+  Runs:        2
+  Flash attn:  1
+
+=== Git Info ===
+  Branch: v0.4.2-stable
+  Commit: 2a3bb1373
+  Tag:    v0.4.1-stable-4-g2a3bb1373
+
+=== GPU Info ===
+WARNING: AMD GPU device(s) is/are in a low-power state. Check power control/runtime_status
+
+
+
+========================================== ROCm System Management Interface ==========================================
+==================================================== Concise Info ====================================================
+Device  Node  IDs              Temp    Power  Partitions          SCLK     MCLK    Fan  Perf    PwrCap  VRAM%  GPU%  
+[3m              (DID,     GUID)  (Edge)  (Avg)  (Mem, Compute, ID)                                                     [0m
+======================================================================================================================
+0       1     0x73bf,   24192  46.0°C  23.0W  N/A, N/A, 0         2400Mhz  456Mhz  0%   manual  239.0W  4%     0%    
+======================================================================================================================
+================================================ End of ROCm SMI Log =================================================
+
+Running benchmark (2 iterations)...
+
+  rocprofv3: DISABLED (not available or counters file missing)
+
+
+=== Results ===
+  Prefill: Could not parse from bench.log
+  Decode:  Could not parse from bench.log
+
+Results saved to: /home/stormrage/llama.cpp-turboquant-hip/benchmarks/std_bench/20260518_032106_moe-99/
+
+To compare across versions, use identical config:
+  ./scripts/run_std_bench.sh <model.gguf> moe-99
+
+=== Benchmark Complete ===

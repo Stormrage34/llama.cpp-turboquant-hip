@@ -10,6 +10,17 @@
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+# ─── Server Awareness Check ───────────────────────────────────────────────────
+# rocprofv3 MUST NOT run while llama-server is active — profiling corrupts counters
+# and adds overhead that invalidates baseline measurements.
+source "$(cd "$(dirname "$0")" && pwd)/server_check.sh"
+
+if ! check_server_available; then
+    server_blocked_warning "run_rocprof_baseline.sh"
+    exit 1
+fi
+
 MODEL="${1:-}"
 if [ -z "$MODEL" ]; then
     echo "Usage: $0 <model.gguf>"

@@ -24,6 +24,16 @@
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+# ─── Server Awareness Check ───────────────────────────────────────────────────
+# If llama-server is running, abort — GPU is in use and results would be contaminated.
+source "$(cd "$(dirname "$0")" && pwd)/server_check.sh"
+
+if ! check_server_available; then
+    server_blocked_warning "run_std_bench.sh"
+    exit 1
+fi
+
 MODEL="${1:-}"
 CONFIG="${2:-moe-99}"
 
@@ -44,7 +54,8 @@ fi
 
 # ─── Standardized benchmark parameters ────────────────────────────────────────
 # These are FIXED. Do not change them without updating the forensic audit.
-CONTEXT=4096
+# Note: -c (context) removed — current llama-bench auto-calculates context
+# from model capacity and VRAM. Use --fit-target for explicit control.
 PROMPT=512
 GEN_LEN=128
 BATCH=256
@@ -52,24 +63,28 @@ UBATCH=256
 CTK="turbo4"
 CTV="turbo2"
 RUNS=10
-FLASH_ATTN="on"
+FLASH_ATTN="1"
 
 # Config-dependent parameters
 case "${CONFIG}" in
     moe-99)
         NGL=99
+        NCMOE=32
         DESC="MoE model, full GPU offload"
         ;;
     moe-30)
         NGL=30
+        NCMOE=32
         DESC="MoE model, partial GPU offload"
         ;;
     dense-99)
         NGL=99
+        NCMOE=0
         DESC="Dense model, full GPU offload"
         ;;
     dense-30)
         NGL=30
+        NCMOE=0
         DESC="Dense model, partial GPU offload"
         ;;
     *)
@@ -106,7 +121,8 @@ echo "  Timestamp:  ${TIMESTAMP}" | tee -a "${OUTDIR}/summary.txt"
 echo "  Model:      ${MODEL}" | tee -a "${OUTDIR}/summary.txt"
 echo "  Config:      ${CONFIG} (${DESC})" | tee -a "${OUTDIR}/summary.txt"
 echo "  NGL:         ${NGL}" | tee -a "${OUTDIR}/summary.txt"
-echo "  Context:     ${CONTEXT}" | tee -a "${OUTDIR}/summary.txt"
+echo "  NCMOE:       ${NCMOE}" | tee -a "${OUTDIR}/summary.txt"
+echo "  Context:     auto (model+VRAM determined)" | tee -a "${OUTDIR}/summary.txt"
 echo "  Prompt:      ${PROMPT}" | tee -a "${OUTDIR}/summary.txt"
 echo "  Gen len:     ${GEN_LEN}" | tee -a "${OUTDIR}/summary.txt"
 echo "  Batch:       ${BATCH}" | tee -a "${OUTDIR}/summary.txt"
@@ -134,18 +150,22 @@ fi
 # ─── Standardized benchmark command ───────────────────────────────────────────
 BENCH_ARGS=(
     -m "$MODEL"
-    -c $CONTEXT
     -p $PROMPT
     -n $GEN_LEN
     -b $BATCH
     -ub $UBATCH
     -ctk $CTK
     -ctv $CTV
-    --flash-attn $FLASH_ATTN
-    --no-mmap
+    -fa $FLASH_ATTN
+    -mmp 0
     -ngl $NGL
     -r $RUNS
 )
+
+# Only add -ncmoe for MoE models (NCMOE > 0)
+if [ "${NCMOE:-0}" -gt 0 ]; then
+    BENCH_ARGS+=(-ncmoe "$NCMOE")
+fi
 
 echo "Running benchmark (${RUNS} iterations)..." | tee -a "${OUTDIR}/summary.txt"
 echo "" | tee -a "${OUTDIR}/summary.txt"
@@ -172,9 +192,10 @@ fi
 echo "" | tee -a "${OUTDIR}/summary.txt"
 echo "=== Results ===" | tee -a "${OUTDIR}/summary.txt"
 
-# Extract pp512 and tg128 from llama-bench output
-PP512_VALUES=$(grep -oP 'pp512\s+\K[\d.]+' "${OUTDIR}/bench.log" 2>/dev/null || echo "N/A")
-TG128_VALUES=$(grep -oP 'tg128\s+\K[\d.]+' "${OUTDIR}/bench.log" 2>/dev/null || echo "N/A")
+# Extract pp512 and tg128 from llama-bench output (markdown table format)
+# Line format: | ... | pp512 | 302.95 ± 0.69 |
+PP512_VALUES=$(grep -oP '\|\s+pp512\s+\|\s+\K\d+\.\d+' "${OUTDIR}/bench.log" 2>/dev/null || echo "N/A")
+TG128_VALUES=$(grep -oP '\|\s+tg128\s+\|\s+\K\d+\.\d+' "${OUTDIR}/bench.log" 2>/dev/null || echo "N/A")
 
 if [ "$PP512_VALUES" != "N/A" ]; then
     # Calculate median and std dev

@@ -1,0 +1,36 @@
+=== Long Context Benchmark Suite ===
+Model: Qwen3.6-35B-A3B Q4_K_M, moe-99
+RAM: 48 GB | VRAM: 16 GB (RX 6800 XT)
+Date: 18.05.2026 (пн)  3:52:41 EEST
+
+Scenarios to run: 9
+
+--- [64k_balanced] ctx=65536 ctk=q8_0 ctv=turbo3 ---
+  Result: pp512=382.40 t/s  tg128=45.55 t/s
+
+--- [64k_decode] ctx=65536 ctk=turbo3 ctv=turbo3 ---
+  Result: pp512=384.08 t/s  tg128=47.22 t/s
+
+--- [64k_aggressive] ctx=65536 ctk=turbo3 ctv=turbo2 ---
+  Result: pp512=381.09 t/s  tg128=46.99 t/s
+
+--- [128k_balanced] ctx=131072 ctk=q8_0 ctv=turbo3 ---
+  Result: pp512=380.97 t/s  tg128=44.94 t/s
+
+--- [128k_decode] ctx=131072 ctk=turbo3 ctv=turbo3 ---
+  Result: pp512=383.93 t/s  tg128=45.86 t/s
+
+--- [128k_aggressive] ctx=131072 ctk=turbo3 ctv=turbo2 ---
+  Result: pp512=381.16 t/s  tg128=46.52 t/s
+
+--- [256k_balanced] ctx=262144 ctk=q8_0 ctv=turbo3 ---
+  Result: pp512=384.35 t/s  tg128=47.43 t/s
+
+--- [256k_decode] ctx=262144 ctk=turbo3 ctv=turbo3 ---
+  Result: pp512=380.88 t/s  tg128=46.46 t/s
+
+--- [256k_aggressive] ctx=262144 ctk=turbo3 ctv=turbo2 ---
+  Result: pp512=372.35 t/s  tg128=42.62 t/s
+
+=== Long Context Benchmark Complete ===
+Results saved to: benchmarks/std_bench/20260518_035241_longctx/

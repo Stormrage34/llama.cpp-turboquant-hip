@@ -1,0 +1,5 @@
+=== Combo Sweep: finding best KV cache config ===
+Model: Qwen3.6-35B-A3B Q4_K_M, moe-99, -r 1
+ctk: q8_0,turbo4,turbo3,turbo2 | ctv: q8_0,turbo4,turbo3,turbo2
+p: 512,2048 | n: 128,512 | b: 128,512
+

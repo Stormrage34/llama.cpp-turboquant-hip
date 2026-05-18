@@ -1,5 +1,15 @@
 #!/usr/bin/env bash
 
+# ─── Server Awareness Check ───────────────────────────────────────────────────
+# If llama-server is running, abort — GPU is in use.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "${SCRIPT_DIR}/server_check.sh"
+
+if ! check_server_available; then
+    server_blocked_warning "bench-models.sh"
+    exit 1
+fi
+
 RESULTS="bench-models-results.txt"
 : > "$RESULTS"
 

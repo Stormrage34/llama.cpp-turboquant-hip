@@ -1,0 +1,11 @@
+Benchmark: Qwen3.6-35B-A3B Q4_K_M, moe-99, -d 2000,4000,8000,10000, -r 3
+Starting...
+
+
+=== Results ===
+  d2000:  pp512 279.29 ± 2.92 t/s  |  tg128 31.19 ± 0.11 t/s
+  d4000:  pp512 277.15 ± 2.58 t/s  |  tg128 32.63 ± 1.50 t/s
+  d8000:  pp512 274.33 ± 1.60 t/s  |  tg128 32.93 ± 0.77 t/s
+  d10000:  pp512 273.66 ± 2.42 t/s  |  tg128 33.31 ± 0.67 t/s
+
+Results saved to: benchmarks/std_bench/20260518_032500_moe-99_depth/

@@ -12,7 +12,18 @@
 
 set -e
 
-# GPU failback — free VRAM before benchmarking
+# ─── Server Awareness Check ───────────────────────────────────────────────────
+# If llama-server is running, abort — GPU is in use. DO NOT call gpu_acquire()
+# while server is active — it will wait for VRAM to free (which won't happen)
+# and either hang or produce contaminated benchmark results.
+source "$(cd "$(dirname "$0")" && pwd)/server_check.sh"
+
+if ! check_server_available; then
+    server_blocked_warning "run_rdna2_bench.sh"
+    exit 1
+fi
+
+# GPU failback — free VRAM before benchmarking (only reached if server is NOT running)
 source "$(cd "$(dirname "$0")" && pwd)/gpu_failback.sh"
 gpu_failback_trap
 gpu_acquire
