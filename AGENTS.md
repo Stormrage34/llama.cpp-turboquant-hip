@@ -28,6 +28,15 @@ cmake --build build --config Release -- -j 16
 - `build/bin/llama-cli --help` (GPU init check)
 - `./scripts/validate_hygiene.sh` (Compile + VRAM leak check)
 - `./scripts/verify_kernel_dispatch.sh <model.gguf> [IQ4_XS,Q4_K_M,all]` (**Mandatory** for perf validation)
+- **ALWAYS** use `--single-turn` + `timeout 90` on `llama-cli` parity tests (prevents CLI falling into interactive mode, which causes the all-newlines flood).
+- **ALWAYS** set a 90s timeout on `llama-bench` invocations (safety net against runaway processes).
+
+### Cache Comparison Benchmark
+- `./scripts/run_benchmark.sh [model.gguf] [cache_k,cache_v...]`
+  - Standardized benchmark: compares turbo vs standard cache across 4 prompt types
+  - Default cache configs: `q8_0/turbo3` (our), `turbo3/turbo3` (symmetric turbo), `q8_0/q8_0` (original symmetric), `q8_0/q4_0` (original asymmetric), `q4_0/q4_0` (original aggressive)
+  - Always runs sequentially (n=1 GPU) — sources `gpu_failback.sh` before each test
+  - Results saved to `benchmarks/raw/benchmark_<timestamp>.txt`
 
 ### Unit Tests
 - `cd build && ctest -L main -E "test-llama-archs" --verbose --timeout 900`
@@ -38,15 +47,19 @@ cmake --build build --config Release -- -j 16
 - `RDNA2_ASYNC_ROUTING=1`: Async admin stream (MoE routing) - *Experimental*
 
 ### Key CLI (35B MoE on 16GB)
-- `-ngl 99 --ncmoe <N>`: Required for 35B MoE offloading
+- `-ngl 99 --n-cpu-moe <N>`: Required for 35B MoE offloading
 - `--reasoning [on|off|auto]`: Qwen3 defaults to `auto`
 - `--no-display-prompt`: Suppress echo (use if `-n` causes issues)
+- `-st, --single-turn`: Run one turn then exit (prevents interactive mode flood)
 - `-fitt <MiB> -fitc <tokens>`: Target margin/context
+- `--spec-type mtp --spec-draft-n-max 2`: Multi-Token Prediction (built-in MTP head, no separate draft model)
 
 ## ⚠️ Critical Constraints & Gotchas
+- **GPU TESTS ARE SEQUENTIAL (n=1):** Only one GPU (RX 6800 XT). Never launch parallel GPU tests/benchmarks. Run baseline → test → shutdown → RDNA2 build → test → compare sequentially. `process=2` conflicts with `n=1` GPU.
 - **DO NOT** re-introduce alignment forcing in `vecdotq.cuh` (bug #1).
 - **DO NOT** add alignment forcing to `get_int_b1/2/4`.
 - **AVOID** `-n` (count-tokens) with Qwen3-35B IQ4_NL (causes all-newlines).
+  - *Root cause: CLI falls into interactive mode after generation. `-n` only limited the damage; `--single-turn` is the real fix.*
 - **AVOID** root `build.sh`; use `scripts/build_rdna2.sh`.
 - **AVOID** `llama-server` state loss; use `gpu_failback.sh` manually.
 - **LIMIT** tile kernels with D≥576 (exceeds 64KB local memory limit).
