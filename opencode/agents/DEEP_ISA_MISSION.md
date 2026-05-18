@@ -44,9 +44,9 @@ Map the 5 research ideas (A–E) to specific RDNA2 ISA instructions. Each idea m
 **ISA Target**: Force compiler to emit optimal scheduling for the gfx1030 wave32+dp4a pattern.
 
 - **Implementation**: Applied unconditionally in `ggml/src/ggml-hip/CMakeLists.txt`:
-  - `-mllvm -amdgpu-spill-sgpr-to-vgpr`
-  - `-mllvm -amdgpu-enable-rewrite-out-of-range-value=1`
-  - `-mllvm -amdgpu-early-inline-all=true`
+  - `-mllvm -amdgpu-early-inline-all=true` — **active**
+  - `-mllvm -amdgpu-spill-sgpr-to-vgpr` — **active**
+  - `-mllvm -amdgpu-enable-rewrite-out-of-range-value=1` — **commented out** (not supported in ROCm 7.13)
 - **These flags are always-on in v0.4.0+** (previously env-gated by `RDNA2_LLVM_OPT=1`).
 - **Gate**: No regression expected — all flags are LLVM upstream, safe defaults.
 - **2026-05-16**: Re-enabled after false accusation of all-newline bug. Real cause was `-n` flag (count-tokens mode).
@@ -64,6 +64,19 @@ Map the 5 research ideas (A–E) to specific RDNA2 ISA instructions. Each idea m
 
 ---
 
+## [x] Idea F: VGPR_OPT Launch Bounds Tuning — SHIPPED v0.4.2
+
+**ISA Target**: Reduce VGPR pressure by changing `__launch_bounds__` minBlocks from 1→3 in mmvq kernels.
+
+- **Implementation**: `#ifdef RDNA2_VGPR_OPT_V1` in `mmvq.cu:395,615`:
+  - `__launch_bounds__(nwarps*warp_size, 3)` instead of `(nwarps*warp_size, 1)`
+  - Also applies `#pragma nounroll` to small loops in `vecdotq.cuh:1283`
+- **Measured effect**: IQ4_NL 32→24 VGPRs (8→10 waves/CU); IQ4_XS unchanged at 48
+- **Throughput impact**: Neutral (±0.5%, within noise)
+- **Gate**: No regression; safe to enable by default
+
+---
+
 ## Execution Order
 
 ```
@@ -74,13 +87,26 @@ Map the 5 research ideas (A–E) to specific RDNA2 ISA instructions. Each idea m
  └─────────────────┘     └─────────────────┘       └─────────────────┘
 ```
 
-## VGPR Budget
-| Component | VGPRs | Source |
-|-----------|-------|--------|
-| Baseline decode (gfx1030) | 38 | Hardware limit for 100% occupancy |
-| Idea A (int4 load) | +2 to +4 | per-thread load registers |
-| Idea E (DPP shuffle) | +2 | shuffle target registers |
-| Total with A+E | 42-44 | Exceeds 38 — only one feasible |
+**MTP Optimization Track** (parallel to ISA roadmap):
+- [x] **Triple-sync bug identified** (2026-05-18): Found in `server-context.cpp`, fix needed in `speculative.cpp`
+- [ ] **MTP PP Overhead**: D2H transfer barrier — pinned memory solution planned (v0.4.4)
+- [ ] **MTP Parallel Decoding**: Batched verification — shared draft context across slots (v0.4.4)
+- [ ] **Double-buffer MTP AR loop**: Overlap draft generation with verification (v0.6.0)
+
+**Updated 2026-05-18**: Added P0 triple-sync fix, P1 MTP pinned memory, P2 shared draft context priorities.
+
+## VGPR Budget (per-quantization)
+| Quant Type | Baseline VGPR | With VGPR_OPT | Occupancy |
+|------------|---------------|---------------|-----------|
+| Q8_0 (type 8) | 16 | N/A | 100% (16 VGPRs) |
+| Q4_0 (type 2) | 24 | N/A | 100% |
+| Q4_1 (type 3) | 24 | N/A | 100% |
+| IQ4_NL (type 20) | 32 | 24 | 100% with VGPR_OPT |
+| IQ4_XS (type 23) | 48 | 48 (no change) | 50% |
+| Q3_K (type 11) | 64 | N/A | 40% |
+| IQ1_M (type 29) | 128 | N/A | 20% |
+| Idea A (int4 load) | +0 (actual fix uses 32-bit) | — | — |
+| Idea E (DPP shuffle) | +2 | — | Feasible: IQ4_NL only |
 
 ## Telemetry Gates
 All future ideas require:
@@ -100,3 +126,61 @@ All future ideas require:
 - [x] PEG parser crash defense — try-catch in server-task.cpp
 - [x] smoke_rdna2.cpp ROCm 7.13 compat — gcnArch → gcnArchName, half→uint16_t
 - [x] Unified build script — interactive ROCm selection + RPATH isolation
+
+---
+
+## Updated Roadmap — 2026-05-18 (Post-Benchmark)
+
+### P0: Critical Fixes (v0.4.3-beta)
+- [ ] **Apply triple-sync removal in `speculative.cpp`**: Already identified in `server-context.cpp`, needs implementation in speculative decoding path
+  - **Why**: Triple-sync bug causes unnecessary synchronization barriers in MTP speculative decoding
+  - **Files**: `src/speculative.cpp`, `ggml/src/ggml-hip/server-context.cpp`
+  - **Gate**: No regression in MTP acceptance rate (must maintain 78.7%)
+
+- [ ] **Wire `load_gtt_slc()` into MoE weight fetch path**: Pillar 2 from Librarian research — currently dead code in MoE decode path
+  - **Why**: SLC cache-bypass GTT loads not connected to MoE expert weight fetch
+  - **Files**: `ggml/src/ggml-hip/moe_stream.cu`, `ggml/src/ggml-hip/mmvq.cu`
+  - **Gate**: MoE decode t/s improvement ≥5%
+
+### P1: MTP Optimization (v0.4.4)
+- [ ] **Pinned memory for MTP D2H transfers**: Eliminate prompt processing overhead via `hipHostMalloc`
+  - **Why**: D2H transfer barrier causes MTP prompt processing overhead
+  - **Files**: `src/speculative.cpp`, `ggml/src/ggml-hip/hip-common.h`
+  - **Gate**: PP overhead reduced by ≥50%
+
+- [ ] **Shared MTP draft context across server slots**: Reduce memory duplication in multi-user scenarios
+  - **Why**: Multiple slots duplicate draft model context unnecessarily
+  - **Files**: `src/server-context.cpp`, `src/llama-context.h`
+  - **Gate**: VRAM usage reduced by ≥20% in multi-slot scenarios
+
+### P2: ISA-Level Optimizations (v0.5.0)
+- [ ] **128-bit vector loads** (`BUFFER_LOAD_DWORD4`): Replace scalar loads in `vec_dot_q*_K_q8_1()`
+  - **Why**: Reduce transactions per warp from 32×32B → 8×128B
+  - **Files**: `ggml/src/ggml-cuda/vecdotq.cuh`
+  - **Gate**: `MemUnitBusy` ↑, VGPR ≤ 38
+
+- [ ] **Software prefetch** (`s_buffer_load_dword`): Hide VRAM latency in weight fetch loop
+  - **Why**: Hide 600-800 cycle VRAM latency by pre-loading next row's pointer
+  - **Files**: `ggml/src/ggml-hip/mmvq.cu`
+  - **Gate**: `WAVE_ISSUE_WAIT` ↓, tg128 regression < 2%
+
+- [ ] **MoE decode weight preload** (Admin Stream V2): Extend `RDNA2_ASYNC_ROUTING` from prefill to decode path
+  - **Why**: Eliminate remaining ~600µs sync stall for MoE decode
+  - **Files**: `ggml/src/ggml-hip/moe_stream.cu`, `ggml/src/ggml-hip/mmvq.cu`
+  - **Gate**: MoE tg128 decode throughput delta ≥10%
+
+### P3: Advanced Research (v0.6.0)
+- [ ] **Double-buffer MTP AR loop**: Overlap draft generation with verification
+  - **Why**: MTP AR loop currently sequential — draft then verify
+  - **Files**: `src/speculative.cpp`
+  - **Gate**: MTP throughput ↑ ≥15%
+
+- [ ] **Cooperative warp shuffle** (`DS_SWIZZLE` / `V_DPP`): IQ4_NL only, wave-level weight distribution
+  - **Why**: 4 threads load 128B each, then DPP butterfly shuffle distributes across 32 lanes
+  - **Files**: `ggml/src/ggml-cuda/vecdotq.cuh`
+  - **Gate**: VGPR ≤ 38, LDS usage = 0
+
+- [ ] **SDWA register packing**: Goal: 32 VGPR sustained for 100% occupancy
+  - **Why**: Pack two 16-bit weights into one 32-bit VGPR using SDWA
+  - **Files**: `ggml/src/ggml-cuda/vecdotq.cuh`, `ggml/src/ggml-cuda/mmvq.cu`
+  - **Gate**: VGPR ≤ 32, occupancy = 100%

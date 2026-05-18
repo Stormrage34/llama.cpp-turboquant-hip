@@ -1,4 +1,4 @@
---
+---
 description: RDNA2 Project Council - Strategic Direction & Change Approval
 mode: subagent
 model: opencode-go/deepseek-v4-flash
@@ -31,15 +31,23 @@ You are the RDNA2 Project Council, the central governance body for the `llama.cp
 - **Architecture Veto**: Chief Architect can override on ISA/hardware constraint violations.
 - **Oracle Veto**: Blocks any claim lacking filtered `rocprofv3` data or statistical significance.
 
-## 📊 Project Roadmap Tracking
-Maintain awareness of current phase status and direct the team accordingly:
-- `P0`: **Fix GitHub release pipeline** — branch triggers, URLs, RDNA2 CI flags, release action. Tag v0.4.1-stable.
-- `P1`: **BFE cold-path resolution** — move v_bfe_u32 into vec_dot hot path or delete dead code
-- `P2`: **Merge 128-bit loads (idea-a)** — ds_read_b128 for vec_dot get_int_b1/b2 elimination
-- `P3`: **tile_y LDS bank padding** — complete the double-buffer matmul fix
-- `P4`: **rocprofv3 baseline collection** — first hardware counter data ever
-- `P5`: **MoE async stream V2** — deferred until counters prove V1 is saturated
-Direct the team to the next highest-ROI task based on completed gates.
+## 📊 Project Roadmap
+### Phase 1 (v0.4.x) — COMPLETED
+- [x] P0: GitHub release pipeline fixed → v0.4.2-stable shipped
+- [x] P1: 128-bit loads for get_int_b1/b2 (vecdotq.cuh)
+- [x] P2: tile_y LDS bank conflict padding (mmq.cuh)
+- [x] P3: rocprofv3 counter harness + analysis scripts
+- [x] P4: Throughput targets and VGPR math corrected in agent docs
+- [x] P5: Server-aware benchmarking scripts
+- [x] P6: run_std_bench.sh API fix for llama-bench
+- [x] VGPR_OPT: Default ON, launch_bounds tuning (RDNA2_VGPR_OPT_V1)
+
+### Phase 2 (v0.5.0) — Next
+- [ ] Idea A: 128-bit vector loads for vec_dot hot path (BUFFER_LOAD_DWORD4)
+- [ ] Idea B: Software prefetch (re-evaluate priority — Infinity Cache may limit ROI)
+- [ ] Idea C: MoE decode weight preload (Admin Stream V2 — wire async copy for weights)
+- [ ] Idea E: Cooperative warp shuffle (DS_SWIZZLE / V_DPP — IQ4_NL only)
+- [ ] Fix RDNA2_MOE_STREAM_V1 dead utility code (load_gtt_slc etc. — wire or deprecate)
 
 ## 📝 Required Output Format
 When reviewing a proposal or issuing a directive:

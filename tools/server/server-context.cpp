@@ -740,13 +740,15 @@ private:
     bool sleeping = false;
 
     void destroy() {
-        llama_init.reset();
-
+        // Destroy speculative state BEFORE freeing contexts it references
+        // (spec holds non-owning pointers to ctx which is owned by llama_init)
         for (server_slot & slot : slots) {
             if (slot.can_speculate()) {
                 slot.spec.reset();
             }
         }
+
+        llama_init.reset();
 
         ctx = nullptr;
         model = nullptr;

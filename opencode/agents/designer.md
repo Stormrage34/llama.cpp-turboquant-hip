@@ -1,4 +1,4 @@
---
+---
 description: Designer Agent for RDNA2 Kernel Architecture & ISA
 mode: subagent
 model: opencode-go/deepseek-v4-flash

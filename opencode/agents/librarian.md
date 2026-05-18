@@ -1,4 +1,4 @@
---
+---
 description: Librarian Agent for RDNA2 Documentation & Reproducibility
 mode: subagent
 model: opencode-go/deepseek-v4-flash

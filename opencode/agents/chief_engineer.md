@@ -1,6 +1,10 @@
 ---
 description: System Integration, Hardware Safety, and Driver-Level Oversight
 mode: subagent
+model: opencode-go/deepseek-v4-flash
+permission:
+  edit: deny
+  bash: deny
 ---
 # CHIEF_ENGINEER.md - Integration & Safety Mandate
 

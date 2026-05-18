@@ -1544,6 +1544,20 @@ static __device__ __forceinline__ float4 load_gtt_slc4(const float4 * ptr) {
     return result;
 }
 
+// Convenience wrapping macros for MoE expert weight loads via Admin Stream.
+// These should be used in the expert weight copy path (Host→Device DMA prep)
+// where each thread loads a weight with SLC=1 to avoid L1/L2 cache pollution.
+// The SLC hint tells the hardware these loads have "streaming" behavior —
+// data is consumed once and not reused — avoiding eviction of hot cache data.
+//
+// Integration point (future):
+//   In the Admin Stream expert weight copy loop (ggml-cuda.cu:admin_stream_copy_experts
+//   or similar), replace direct float reads from pinned host memory:
+//     float w = src[i];  →  float w = LOAD_EXPERT_F32(&src[i]);
+//     float4 w4 = ((float4*)src)[i];  →  float4 w4 = LOAD_EXPERT_F32X4(&((float4*)src)[i]);
+#define LOAD_EXPERT_F32(ptr)    load_gtt_slc(ptr)
+#define LOAD_EXPERT_F32X4(ptr)  load_gtt_slc4(ptr)
+
 // Semaphore polling with s_sleep for low-power waiting
 // Per RDNA2: s_sleep reduces power during wait loops
 static __device__ __forceinline__ void s_sleep_cycles(unsigned cycles) {

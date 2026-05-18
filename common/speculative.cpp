@@ -707,12 +707,14 @@ struct common_speculative_state_mtp : public common_speculative_state {
                 } else {
                     src_row = last_n_accepted;
                 }
-                llama_synchronize(ctx_tgt);
+                // Sync removed — ggml_backend_tensor_get() issues cudaMemcpyAsync + cudaStreamSynchronize internally
+                // llama_synchronize(ctx_tgt);  // redundant
             } else {
                 // for the AR path get the mtp_out from the mtp ctx
                 src = llama_context_get_t_mtp_out(ctx_mtp);
                 src_row = src ? (int32_t) src->ne[1] - 1 : 0;
-                llama_synchronize(ctx_mtp);
+                // Sync removed — ggml_backend_tensor_get() syncs internally, llama_decode() at line 728 also syncs
+                // llama_synchronize(ctx_mtp);  // redundant
             }
             if (!src) {
                 LOG_WRN("%s: missing source tensor at k=%d; stopping chain\n", __func__, k);

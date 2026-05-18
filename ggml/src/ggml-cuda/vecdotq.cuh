@@ -1280,13 +1280,25 @@ static __device__ __forceinline__ float vec_dot_iq4_nl_q8_1(
     const int * q8 = (const int *) bq8_1->qs + iqs;
 
     int sumi = 0;
-#pragma unroll
-    for (int l = 0; l < VDR_Q4_0_Q8_1_MMVQ; ++l) {
+#ifdef RDNA2_VGPR_OPT_V1
+    #pragma nounroll
+#else
+    #pragma unroll
+#endif
+    for (int l = 0; l < VDR_IQ4_NL_Q8_1_MMVQ; ++l) {
+#ifdef RDNA2_VGPR_OPT_V1
         const int aux_q4 = get_int_b2(bq4->qs, iqs + l);
         const int2 v = get_int_from_table_16(aux_q4, kvalues_iq4nl);
 
         sumi = ggml_cuda_dp4a(v.x, q8[l + 0], sumi);
         sumi = ggml_cuda_dp4a(v.y, q8[l + 4], sumi);
+#else
+        const int aux_q4 = get_int_b2(bq4->qs, iqs + l);
+        const int2 v = get_int_from_table_16(aux_q4, kvalues_iq4nl);
+
+        sumi = ggml_cuda_dp4a(v.x, q8[l + 0], sumi);
+        sumi = ggml_cuda_dp4a(v.y, q8[l + 4], sumi);
+#endif
     }
 
     const float d = __half2float(bq4->d) * __low2float(bq8_1->ds);

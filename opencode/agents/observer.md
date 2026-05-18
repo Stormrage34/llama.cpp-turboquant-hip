@@ -1,4 +1,4 @@
---
+---
 description: Observer Agent for RDNA2 System Health & Telemetry
 mode: subagent
 model: opencode-go/deepseek-v4-flash

@@ -138,3 +138,167 @@
 | No model/quant matrix | Unknown which flags affect which models | `docs/rdna2-flags.md` |
 
 **Rule**: No new `#ifdef` kernel work until the validation pipeline proves isolation, normalization, and reproducibility.
+
+---
+
+## MTP Optimization Research Notes (2026-05-18)
+
+### MTP Prompt Processing (PP) Overhead — D2H Transfer Barrier
+
+**Status**: ⚠️ Known architectural limitation — future optimization target
+
+**Observation**: Prompt processing (PP) speed takes a negative hit when MTP is enabled, mainly due to Device-To-Host (D2H) embedding transfers.
+
+**Root Cause**: The MTP speculative decoding implementation requires embedding vectors to be transferred from GPU (device) to CPU (host) for draft token verification. This D2H transfer creates a **synchronization barrier** between GPU compute and host reads:
+
+```
+GPU: Generate draft tokens → Compute embeddings
+     │
+     ├─→ [SYNC BARRIER] ← D2H transfer (hipMemcpyAsync, blocking)
+     │
+CPU: Verify draft tokens → Accept/reject
+     │
+     └─→ Signal GPU to continue
+```
+
+**Impact**:
+- During prompt processing phase, the GPU must wait for host-side verification before proceeding
+- The synchronization barrier prevents overlap of PP computation with verification
+- Measured effect: PP throughput degradation proportional to prompt length
+
+**Files Involved**:
+- `tools/server/server-context.cpp` — MTP draft token verification logic
+- `tools/server/server-task.cpp` — Speculative decoding orchestration
+
+**Future Work**:
+- [ ] Investigate pinned memory for D2H transfers (`hipHostMalloc`)
+- [ ] Explore batched verification to amortize sync overhead
+- [ ] Consider GPU-side verification kernel (keep verification on device)
+- [ ] Profile with `rocprofv3 --dispatch-filter` to quantify exact sync stall duration
+
+**Gate**: PP throughput with MTP enabled should match baseline within ±5%
+
+---
+
+### MTP Parallel Decoding Support Gap
+
+**Status**: ⚠️ Supported but not optimized — future optimization target
+
+**Observation**: Parallel decoding with MTP is supported, but not fully optimized yet.
+
+**Root Cause**: The MTP speculative decoding implementation supports parallel decoding in theory, but the **draft token verification path has not been optimized for parallel execution**. This creates unnecessary serialization:
+
+```
+Current (serialized):
+  Batch: [prompt_1, prompt_2, ..., prompt_N]
+  
+  For each prompt in batch:
+    1. Generate draft tokens (GPU)
+    2. D2H transfer (blocking)
+    3. CPU verification
+    4. H2D result transfer
+    5. Continue generation
+  
+  → Sequential bottleneck: each request waits for previous verification
+```
+
+**Expected (parallel)**:
+```
+  Batch: [prompt_1, prompt_2, ..., prompt_N]
+  
+  1. Generate all draft tokens (GPU, parallel)
+  2. Batched D2H transfer (single async copy)
+  3. Parallel CPU verification (thread pool)
+  4. Batched H2D result transfer
+  5. Continue all generations
+  
+  → Amortized sync overhead across batch
+```
+
+**Impact**:
+- Multi-request scenarios (server with concurrent users) see sub-linear scaling
+- Single-request throughput unaffected, but batched throughput limited
+- MTP acceptance rate (78.7% measured) remains strong, but verification latency adds up
+
+**Files Involved**:
+- `tools/server/server-context.cpp` — Draft token verification (serialization point)
+- `tools/server/server-task.cpp` — Request batching logic
+- `tools/server/server.cpp` — HTTP request handling
+
+**Future Work**:
+- [ ] Profile multi-request scenario with `rocprofv3` + server metrics (`/stats` endpoint)
+- [ ] Implement batched D2H/H2D transfers for draft verification
+- [ ] Add thread pool for parallel CPU-side verification
+- [ ] Consider async streams for overlapping verification with generation
+- [ ] Measure scaling: 1, 2, 4, 8 concurrent requests with MTP enabled
+
+**Gate**: Multi-request throughput should scale linearly (N requests → N× throughput)
+
+---
+
+### Cross-Reference: MTP in DEEP_ISA_MISSION.md
+
+The MTP optimization notes complement the existing roadmap in `opencode/agents/DEEP_ISA_MISSION.md`:
+
+- **Idea C: MoE Decode Weight Preload** — Related to MTP async optimization (both involve async ACE streams)
+- **Infrastructure Gaps** — MTP PP overhead and parallel decoding gap are now documented as specific optimization targets
+
+**MTP Configuration (validated)**:
+```bash
+--spec-type mtp --spec-draft-n-max 2 --spec-draft-p-min 0.75
+```
+
+**Measured Performance** (Qwen3_35BMTPIQ4, IQ4_XS, RX 6800 XT):
+- Draft acceptance rate: **78.7%** (3,711/4,716 tokens)
+- Decode throughput: **~39 t/s** (with MTP enabled)
+- Effective throughput boost: **~21%** reduction in full forward passes
+
+See `opencode/agents/chief_engineer.md` for full benchmark report (2026-05-17).
+
+---
+
+### Deep-Dive Findings — Explorer Code Analysis (2026-05-18)
+
+**Source**: `opencode/reports/mtp_optimization_targets.md` (full structured report)
+
+#### Issue 1: D2H Transfer Barrier — Triple Sync Confirmed
+
+The D2H barrier is worse than initially documented. There are **two distinct D2H paths** and a **triple-sync waterfall** in the decode path.
+
+**Decode path triple sync** (`common/speculative.cpp:698-738`):
+1. `llama_synchronize(ctx_tgt)` — L710: Full GPU drain (redundant)
+2. `llama_synchronize(ctx_mtp)` — L715: Full GPU drain (redundant)
+3. `ggml_backend_tensor_get()` — L721-722: D2H copy + internal `cudaStreamSynchronize`
+
+Each `llama_synchronize()` calls `ggml_backend_sched_synchronize()` — a full pipeline drain. The D2H copy already syncs internally via `cudaStreamSynchronize` after `cudaMemcpyAsync(D2H)`. The pre-syncs are **redundant** — stream ordering guarantees the compute is done before D2H starts.
+
+**PP hook path** (`src/llama-context.cpp:3262-3301`):
+- `synchronize()` at L3262 — redundant (same reasoning)
+- Two `ggml_backend_tensor_get()` calls at L3281 and L3298 — each with internal sync
+- `flush_mtp_data()` at L3314 — another `synchronize()` before staged batch drain
+
+**P0 fixes identified**: Remove 3 redundant sync points → immediate throughput gain, zero risk.
+
+#### Issue 2: Serialized Verification — Three Levels Confirmed
+
+The serialization exists at three levels:
+
+1. **Per-slot** (`server-context.cpp:2375-2387`, L3146): Each server slot's draft generation and verification runs sequentially in `for(auto & slot : slots)` loops. The existing TODO at L369 explicitly targets this: "rework to have a single draft llama_context shared across all slots."
+
+2. **Per-draft-token** (`common/speculative.cpp:698-738`): The MTP AR loop is inherently sequential (each step depends on the previous), but the sync+copy could be pipelined with double-buffered embedding buffers.
+
+3. **Per-batch-flush** (`src/llama-context.cpp:3360-3393`): `flush_mtp_data()` calls `llama_decode()` once per staged batch sequentially.
+
+#### Optimization Priorities
+
+| Priority | Optimization | File:Lines | Risk | Gain |
+|----------|-------------|------------|------|------|
+| **P0** | Remove redundant `llama_synchronize(ctx_tgt)` | `speculative.cpp:710` | None | ~1 sync/decode step |
+| **P0** | Remove redundant `llama_synchronize(ctx_mtp)` | `speculative.cpp:715` | None | ~1 sync/decode step |
+| **P0** | Remove redundant `synchronize()` in `collect_mtp_data` | `llama-context.cpp:3262` | Low | ~1 sync/ubatch during PP |
+| **P1** | Pinned memory for MTP draft loop `batch.embd` | `speculative.cpp:721` | Low | Async D2H, no blocking |
+| **P1** | Shared MTP draft context across server slots | `server-context.cpp:369` | Medium | N× throughput multi-slot |
+| **P2** | Double-buffer MTP AR loop embed copies | `speculative.cpp:698-738` | Medium | Overlap D2H + compute |
+| **P2** | Batch staged MTP batches | `llama-context.cpp:3360-3393` | Low | Fewer graph allocs |
+
+**Full report**: `opencode/reports/mtp_optimization_targets.md`

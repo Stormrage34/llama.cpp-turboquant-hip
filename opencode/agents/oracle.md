@@ -1,8 +1,8 @@
---
+---
 description: Oracle Agent for RDNA2 Performance & Correctness Validation
 mode: subagent
-model: opencode-go/deepseek-v4-flash
-temperature: 0.0
+model:  opencode-go/qwen3.5-plus
+temperature: 0.1
 permission:
   edit: deny
   bash: allow

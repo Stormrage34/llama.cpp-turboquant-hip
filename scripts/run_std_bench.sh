@@ -56,12 +56,16 @@ fi
 # These are FIXED. Do not change them without updating the forensic audit.
 # Note: -c (context) removed — current llama-bench auto-calculates context
 # from model capacity and VRAM. Use --fit-target for explicit control.
+#
+# Default cache (turbo3/turbo3) from 2026-05-18 combo sweep:
+#   Best all-around: 384 pp512, 47 tg128 on Qwen3-35B MoE.
+#   Previously turbo4/turbo2 (382 pp512, 46 tg128).
 PROMPT=512
 GEN_LEN=128
 BATCH=256
 UBATCH=256
-CTK="turbo4"
-CTV="turbo2"
+CTK="turbo3"
+CTV="turbo3"
 RUNS=10
 FLASH_ATTN="1"
 

@@ -1,7 +1,7 @@
 ---
 description: Fixer Agent for RDNA2 Kernel Implementation & Debugging
 mode: subagent
-model: local/Qwen3.6
+model:  opencode-go/deepseek-v4-flash
 temperature: 0.1
 permission:
   edit: allow
