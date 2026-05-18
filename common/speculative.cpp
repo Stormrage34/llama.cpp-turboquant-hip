@@ -2,6 +2,9 @@
 
 #include "common.h"
 #include "ggml.h"
+#if defined(GGML_USE_HIP)
+#include <hip/hip_runtime.h>
+#endif
 #include "llama.h"
 #include "log.h"
 #include "ngram-cache.h"
@@ -608,6 +611,7 @@ struct common_speculative_state_mtp : public common_speculative_state {
     llama_batch       batch;       // single token draft step
     common_sampler  * smpl = nullptr;
     int32_t           n_embd = 0;
+    bool              embd_is_pinned = false;  // true when batch.embd uses hipHostMalloc
 
     uint16_t last_n_drafted  = 0;
     int32_t  last_n_accepted = -1;
@@ -630,6 +634,19 @@ struct common_speculative_state_mtp : public common_speculative_state {
 
         // TODO: multiple seq support
         batch = llama_batch_init(/*n_tokens=*/ 1, /*embd=*/ n_embd, /*n_seq_max=*/ 1);
+#if defined(GGML_USE_HIP)
+        // Replace batch.embd with pinned (page-locked) memory for faster D2H transfer.
+        // ggml_backend_tensor_get() at line 723 uses cudaMemcpyAsync internally;
+        // with pinned memory, this bypasses CPU page-fault overhead.
+        float * pinned_embd = nullptr;
+        hipError_t err = hipHostMalloc(&pinned_embd, sizeof(float) * n_embd, hipHostMallocDefault);
+        if (err == hipSuccess && pinned_embd) {
+            free(batch.embd);  // free the malloc'd buffer from llama_batch_init
+            batch.embd = pinned_embd;
+            embd_is_pinned = true;
+        }
+        // If hipHostMalloc fails, batch.embd remains as the malloc'd buffer — safe fallback
+#endif
         batch.token = (llama_token *) malloc(sizeof(llama_token));
         batch.n_tokens     = 1;
         batch.n_seq_id[0]  = 1;
@@ -641,6 +658,13 @@ struct common_speculative_state_mtp : public common_speculative_state {
 
     ~common_speculative_state_mtp() override {
         llama_set_mtp(ctx_tgt, nullptr);
+#if defined(GGML_USE_HIP)
+        // Free pinned memory with hipHostFree before the generic batch free
+        if (embd_is_pinned && batch.embd) {
+            hipHostFree(batch.embd);
+            batch.embd = nullptr;  // nullify so llama_batch_free doesn't double-free
+        }
+#endif
         llama_batch_free(batch);
         common_sampler_free(smpl);
         if (ctx_mtp) {
@@ -676,7 +700,7 @@ struct common_speculative_state_mtp : public common_speculative_state {
         // accept with no-accepts (i.e. 0 accepts) returns early, but we still need to remove from the MTP kv-cache
         // TODO: check if bug in other spec states
         if (last_n_drafted > 0) {
-            const int32_t n_to_drop = (int32_t) last_n_drafted - 1;
+            const int32_t n_to_drop = (int32_t) last_n_drafted;
             if (n_to_drop > 0) {
                 const llama_pos pos_max = llama_memory_seq_pos_max(llama_get_memory(ctx_mtp), 0);
                 if (pos_max >= 0) {
@@ -745,7 +769,7 @@ struct common_speculative_state_mtp : public common_speculative_state {
     void accept(uint16_t n_accepted) override {
         const llama_pos pos_max = llama_memory_seq_pos_max(llama_get_memory(ctx_mtp), 0);
         const int32_t n_drafted_last = (int32_t) last_n_drafted;
-        const int32_t n_to_drop = std::max(0, n_drafted_last - (int32_t) n_accepted - 1);
+        const int32_t n_to_drop = std::max(0, n_drafted_last - (int32_t) n_accepted);
         if (pos_max < 0) {
             last_n_accepted = (int32_t) n_accepted;
             return;

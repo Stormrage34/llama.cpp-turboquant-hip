@@ -1536,7 +1536,7 @@ static __device__ __forceinline__ float4 load_gtt_slc4(const float4 * ptr) {
     uint32_t ptr_lo = reinterpret_cast<uintptr_t>(ptr) & 0xFFFFFFFF;
     uint32_t ptr_hi = (reinterpret_cast<uintptr_t>(ptr) >> 32) & 0xFFFFFFFF;
     asm volatile(
-        "global_load_dvec4 %0, [%1, %2], 0 slc"
+        "global_load_dwordx4 %0, [%1, %2], 0 slc"
         : "=v"(result)
         : "s"(ptr_lo), "s"(ptr_hi)
         : "memory"
@@ -1557,6 +1557,10 @@ static __device__ __forceinline__ float4 load_gtt_slc4(const float4 * ptr) {
 //     float4 w4 = ((float4*)src)[i];  →  float4 w4 = LOAD_EXPERT_F32X4(&((float4*)src)[i]);
 #define LOAD_EXPERT_F32(ptr)    load_gtt_slc(ptr)
 #define LOAD_EXPERT_F32X4(ptr)  load_gtt_slc4(ptr)
+
+#ifndef __CUDA_ARCH__
+_Pragma("GCC warning \"RDNA2_MOE_STREAM_V1: LOAD_EXPERT_F32/F32X4 macros defined — wire into Admin Stream V2 (see Idea C)\"")
+#endif
 
 // Semaphore polling with s_sleep for low-power waiting
 // Per RDNA2: s_sleep reduces power during wait loops
