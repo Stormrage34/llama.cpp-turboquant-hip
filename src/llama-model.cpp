@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cfloat>
+#include <cinttypes>
 #include <cstdint>
 #include <cstring>
 #include <cmath>
@@ -1174,6 +1175,8 @@ void llama_model_base::load_vocab(llama_model_loader & ml) {
     vocab.load(ml, kv);
 }
 
+static bool convert_output_to_q8_0(struct ggml_tensor * tensor);
+
 bool llama_model_base::load_tensors(llama_model_loader & ml) {
     const auto & split_mode   = params.split_mode;
     const auto & use_mlock    = params.use_mlock;
@@ -1549,6 +1552,38 @@ bool llama_model_base::load_tensors(llama_model_loader & ml) {
     for (auto & [ctx, buf_map] : ctx_buf_maps) {
         if (!ml.load_all_data(ctx, buf_map, use_mlock ? &pimpl->mlock_mmaps : NULL, params.progress_callback, params.progress_callback_user_data)) {
             return false;
+        }
+    }
+
+    // CPU lm_head offload: ensure output.weight is on CPU buffer (handled by tensor_buft_overrides).
+    // The CPU backend natively handles Q6_K, Q8_0, and other common quantization types via
+    // existing vec_dot kernels. Only convert to Q8_0 as a fallback for types without
+    // efficient CPU GEMV support (e.g., MTP spec heads, V_DOT4 alignment workarounds).
+    if (params.cpu_lm_head) {
+        for (auto & [name, tensor] : tensors_by_name) {
+            if (name == "output.weight") {
+                const auto src_type = tensor->type;
+                if (src_type == GGML_TYPE_Q8_0) {
+                    LLAMA_LOG_INFO("%s: cpu_lm_head enabled, output.weight already Q8_0 on CPU\n", __func__);
+                } else if (src_type == GGML_TYPE_Q6_K) {
+                    LLAMA_LOG_INFO("%s: cpu_lm_head enabled, keeping output.weight as Q6_K on CPU (native vec_dot)\n", __func__);
+                } else {
+                    // For exotic types without efficient CPU vec_dot (IQ4_XS, IQ4_NL, etc.),
+                    // or types that lack to_float, fall back to Q8_0 conversion
+                    const auto * traits = ggml_get_type_traits(src_type);
+                    if (traits && traits->to_float) {
+                        LLAMA_LOG_INFO("%s: cpu_lm_head enabled, converting output.weight from %s to Q8_0\n",
+                            __func__, ggml_type_name(src_type));
+                        if (!convert_output_to_q8_0(tensor)) {
+                            LLAMA_LOG_WARN("%s: failed to convert output.weight, continuing with original type\n", __func__);
+                        }
+                    } else {
+                        LLAMA_LOG_WARN("%s: cpu_lm_head enabled but %s has no to_float, keeping original type\n",
+                            __func__, ggml_type_name(src_type));
+                    }
+                }
+                break;
+            }
         }
     }
 
@@ -2095,6 +2130,79 @@ ggml_cgraph * llama_model::build_graph(const llm_graph_params & params) const {
 
 
 //
+// CPU lm_head offload: fallback conversion from arbitrary type to Q8_0.
+// Used when the CPU backend doesn't have efficient vec_dot for the source type
+// (e.g., IQ4_XS, IQ4_NL, or V_DOT4 alignment workarounds for MTP spec heads).
+// Q6_K and Q8_0 are handled natively via existing CPU vec_dot kernels and skip conversion.
+//
+static bool convert_output_to_q8_0(struct ggml_tensor * tensor) {
+    const int64_t ncols = tensor->ne[0];
+    const int64_t nrows = tensor->ne[1];
+    const enum ggml_type src_type = tensor->type;
+
+    if (src_type == GGML_TYPE_Q8_0) {
+        LLAMA_LOG_INFO("%s: output.weight already Q8_0\n", __func__);
+        return true;
+    }
+
+    LLAMA_LOG_INFO("%s: converting output.weight from %s to Q8_0 (%" PRId64 " rows, %" PRId64 " cols)\n",
+        __func__, ggml_type_name(src_type), nrows, ncols);
+
+    const auto * src_traits = ggml_get_type_traits(src_type);
+    const auto * dst_traits = ggml_get_type_traits(GGML_TYPE_Q8_0);
+
+    if (!src_traits->to_float) {
+        LLAMA_LOG_WARN("%s: no to_float for %s\n", __func__, ggml_type_name(src_type));
+        return false;
+    }
+    if (!dst_traits->from_float_ref) {
+        LLAMA_LOG_WARN("%s: no from_float for Q8_0\n", __func__);
+        return false;
+    }
+
+    const size_t row_size_src = ggml_row_size(src_type, ncols);
+    const size_t row_size_dst = ggml_row_size(GGML_TYPE_Q8_0, ncols);
+    const size_t total_dst = nrows * row_size_dst;
+
+    void * dst_data;
+    if (posix_memalign(&dst_data, 64, total_dst) != 0) {
+        LLAMA_LOG_ERROR("%s: failed to allocate %zu bytes\n", __func__, total_dst);
+        return false;
+    }
+
+    void * tmp;
+    if (posix_memalign(&tmp, 64, ncols * sizeof(float)) != 0) {
+        LLAMA_LOG_ERROR("%s: failed to allocate temp buffer\n", __func__);
+        free(dst_data);
+        return false;
+    }
+
+    for (int64_t r = 0; r < nrows; r++) {
+        const void * src_row = (const char *)tensor->data + r * row_size_src;
+        void * dst_row = (char *)dst_data + r * row_size_dst;
+
+        src_traits->to_float(src_row, (float *)tmp, ncols);
+        dst_traits->from_float_ref((const float *)tmp, dst_row, ncols);
+    }
+
+    free(tmp);
+
+    tensor->data  = dst_data;
+    tensor->type  = GGML_TYPE_Q8_0;
+    tensor->nb[0] = ggml_type_size(GGML_TYPE_Q8_0);
+    tensor->nb[1] = row_size_dst;
+    tensor->nb[2] = row_size_dst * tensor->ne[1];
+    tensor->nb[3] = tensor->nb[2] * (tensor->ne[2] > 0 ? tensor->ne[2] : 1);
+
+    LLAMA_LOG_INFO("%s: output.weight converted %.2f MB -> %.2f MB\n",
+        __func__,
+        (double)(nrows * row_size_src) / (1024.0 * 1024.0),
+        (double)(nrows * row_size_dst) / (1024.0 * 1024.0));
+
+    return true;
+}
+
+//
 // interface implementation
 //
 
@@ -2119,6 +2227,7 @@ llama_model_params llama_model_default_params() {
         /*.no_host                     =*/ false,
         /*.no_alloc                    =*/ false,
         /*.use_hugepages               =*/ false,
+        /*.cpu_lm_head                 =*/ false,
     };
 
     return result;

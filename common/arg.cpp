@@ -2039,6 +2039,13 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         }
     ).set_env("LLAMA_ARG_NO_HOST"));
     add_opt(common_arg(
+        {"--cpu-lm-head"},
+        "keep output.weight on CPU, convert to Q8_0 for hand-tuned AVX2 GEMV",
+        [](common_params & params) {
+            params.cpu_lm_head = true;
+        }
+    ).set_env("LLAMA_ARG_CPU_LM_HEAD"));
+    add_opt(common_arg(
         {"-ctk", "--cache-type-k"}, "TYPE",
         string_format(
             "KV cache data type for K\n"
@@ -2346,6 +2353,26 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
             }
         }
     ).set_env("LLAMA_ARG_N_CPU_MOE"));
+    add_opt(common_arg(
+        {"--n-cpu-moe-range"}, "START-END",
+        "offload MoE expert tensors for layer range START-END to CPU (e.g., 10-30); mutually exclusive with --n-cpu-moe",
+        [](common_params & params, const std::string & value) {
+            auto dash = value.find('-');
+            if (dash == std::string::npos || dash == 0 || dash == value.size() - 1) {
+                throw std::invalid_argument("expected START-END format (e.g., 10-30)");
+            }
+            int start = std::stoi(value.substr(0, dash));
+            int end   = std::stoi(value.substr(dash + 1));
+            if (start < 0 || end < 0) {
+                throw std::invalid_argument("start and end must be >= 0");
+            }
+            if (start > end) {
+                throw std::invalid_argument("start must be <= end");
+            }
+            params.n_cpu_moe_start = start;
+            params.n_cpu_moe_end   = end;
+        }
+    ).set_env("LLAMA_ARG_N_CPU_MOE_RANGE"));
     GGML_ASSERT(params.n_gpu_layers < 0); // string_format would need to be extended for a default >= 0
     add_opt(common_arg(
         {"-ngl", "--gpu-layers", "--n-gpu-layers"}, "N",

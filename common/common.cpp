@@ -1457,6 +1457,24 @@ void common_set_adapter_lora(struct llama_context * ctx, std::vector<common_adap
     llama_set_adapters_lora(ctx, loras.data(), loras.size(), scales.data());
 }
 
+bool common_ensure_lm_head_cpu_override(
+    std::vector<llama_model_tensor_buft_override> & overrides,
+    std::vector<std::string>                        & name_storage) {
+
+    for (const auto & o : overrides) {
+        if (o.pattern && std::string(o.pattern) == "output.weight") {
+            return false; // already present
+        }
+    }
+
+    // Store the pattern string in the lifetime-managed storage vector.
+    // This ensures the const char* in the override remains valid.
+    name_storage.push_back("output.weight");
+    overrides.insert(overrides.begin(),
+        {name_storage.back().c_str(), ggml_backend_cpu_buffer_type()});
+    return true;
+}
+
 struct llama_model_params common_model_params_to_llama(common_params & params) {
     auto mparams = llama_model_default_params();
 
@@ -1475,12 +1493,44 @@ struct llama_model_params common_model_params_to_llama(common_params & params) {
     mparams.check_tensors   = params.check_tensors;
     mparams.use_extra_bufts = !params.no_extra_bufts;
     mparams.no_host         = params.no_host;
+    mparams.cpu_lm_head     = params.cpu_lm_head;
 
     if (params.kv_overrides.empty()) {
         mparams.kv_overrides = NULL;
     } else {
         GGML_ASSERT(params.kv_overrides.back().key[0] == 0 && "KV overrides not terminated with empty key");
         mparams.kv_overrides = params.kv_overrides.data();
+    }
+
+    // when cpu_lm_head is enabled, automatically override output.weight to CPU
+    if (params.cpu_lm_head) {
+        common_ensure_lm_head_cpu_override(params.tensor_buft_overrides, params._override_pattern_storage);
+    }
+
+    // when n_cpu_moe_range is set, generate per-layer MoE CPU overrides for the given range
+    if (params.n_cpu_moe_start > 0 || params.n_cpu_moe_end > 0) {
+        // check for conflict with existing overrides from --n-cpu-moe, --cpu-moe, or --override-tensor
+        // tensor_buft_overrides may already be padded with {nullptr, nullptr} entries by arg.cpp,
+        // so check if ANY entry has a non-null pattern
+        for (const auto & ovr : params.tensor_buft_overrides) {
+            if (ovr.pattern != nullptr) {
+                fprintf(stderr, "error: --n-cpu-moe-range is mutually exclusive with --n-cpu-moe, --cpu-moe, --cpu-lm-head, and --override-tensor\n");
+                fflush(stderr);
+                _exit(1);
+            }
+        }
+        // The vector is padded with null entries; we need to clear them and fill with our range overrides
+        params.tensor_buft_overrides.clear();
+        for (int i = params.n_cpu_moe_start; i <= params.n_cpu_moe_end; i++) {
+            std::string pattern = llm_ffn_exps_block_regex(i);
+            params._override_pattern_storage.push_back(pattern);
+            params.tensor_buft_overrides.push_back({
+                params._override_pattern_storage.back().c_str(),
+                ggml_backend_cpu_buffer_type()
+            });
+        }
+        // add sentinel
+        params.tensor_buft_overrides.push_back({ nullptr, nullptr });
     }
 
     if (params.tensor_buft_overrides.empty()) {

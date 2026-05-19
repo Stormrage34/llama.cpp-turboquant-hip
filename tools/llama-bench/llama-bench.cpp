@@ -334,6 +334,8 @@ struct cmd_params {
     std::vector<int>                 poll;
     std::vector<int>                 n_gpu_layers;
     std::vector<int>                 n_cpu_moe;
+    int                              n_cpu_moe_start;
+    int                              n_cpu_moe_end;
     std::vector<llama_split_mode>    split_mode;
     std::vector<int>                 main_gpu;
     std::vector<bool>                no_kv_offload;
@@ -346,6 +348,7 @@ struct cmd_params {
     std::vector<bool>                embeddings;
     std::vector<bool>                no_op_offload;
     std::vector<bool>                no_host;
+    std::vector<bool>                cpu_lm_head;
     std::vector<size_t>              fit_params_target;
     std::vector<uint32_t>            fit_params_min_ctx;
     ggml_numa_strategy               numa;
@@ -378,6 +381,8 @@ static const cmd_params cmd_params_defaults = {
     /* poll                 */ { 50 },
     /* n_gpu_layers         */ { 99 },
     /* n_cpu_moe            */ { 0 },
+    /* n_cpu_moe_start      */ 0,
+    /* n_cpu_moe_end        */ 0,
     /* split_mode           */ { LLAMA_SPLIT_MODE_LAYER },
     /* main_gpu             */ { 0 },
     /* no_kv_offload        */ { false },
@@ -390,6 +395,7 @@ static const cmd_params cmd_params_defaults = {
     /* embeddings           */ { false },
     /* no_op_offload        */ { false },
     /* no_host              */ { false },
+    /* cpu_lm_head          */ { false },
     /* fit_params_target    */ { 0 },
     /* fit_params_min_ctx   */ { 0 },
     /* numa                 */ GGML_NUMA_STRATEGY_DISABLED,
@@ -448,6 +454,7 @@ static void print_usage(int /* argc */, char ** argv) {
     printf("  --poll <0...100>                            (default: %s)\n", join(cmd_params_defaults.poll, ",").c_str());
     printf("  -ngl, --n-gpu-layers <n>                    (default: %s)\n", join(cmd_params_defaults.n_gpu_layers, ",").c_str());
     printf("  -ncmoe, --n-cpu-moe <n>                     (default: %s)\n", join(cmd_params_defaults.n_cpu_moe, ",").c_str());
+    printf("  --n-cpu-moe-range <START-END>               (default: disabled)\n");
     printf("  -sm, --split-mode <none|layer|row|tensor>   (default: %s)\n", join(transform_to_str(cmd_params_defaults.split_mode, split_mode_str), ",").c_str());
     printf("  -mg, --main-gpu <i>                         (default: %s)\n", join(cmd_params_defaults.main_gpu, ",").c_str());
     printf("  -nkvo, --no-kv-offload <0|1>                (default: %s)\n", join(cmd_params_defaults.no_kv_offload, ",").c_str());
@@ -461,6 +468,7 @@ static void print_usage(int /* argc */, char ** argv) {
     printf("                                              (default: disabled)\n");
     printf("  -nopo, --no-op-offload <0|1>                (default: 0)\n");
     printf("  --no-host <0|1>                             (default: %s)\n", join(cmd_params_defaults.no_host, ",").c_str());
+    printf("  --cpu-lm-head <0|1>                          (default: %s)\n", join(cmd_params_defaults.cpu_lm_head, ",").c_str());
     printf("\n");
     printf(
         "Multiple values can be given for each parameter by separating them with ','\n"
@@ -728,6 +736,24 @@ static cmd_params parse_cmd_params(int argc, char ** argv) {
                 }
                 auto p = parse_int_range(argv[i]);
                 params.n_cpu_moe.insert(params.n_cpu_moe.end(), p.begin(), p.end());
+            } else if (arg == "--n-cpu-moe-range") {
+                if (++i >= argc) {
+                    invalid_param = true;
+                    break;
+                }
+                std::string val(argv[i]);
+                auto dash = val.find('-');
+                if (dash == std::string::npos || dash == 0 || dash == val.size() - 1) {
+                    invalid_param = true;
+                    break;
+                }
+                params.n_cpu_moe_start = std::stoi(val.substr(0, dash));
+                params.n_cpu_moe_end   = std::stoi(val.substr(dash + 1));
+                if (params.n_cpu_moe_start < 0 || params.n_cpu_moe_end < 0 ||
+                    params.n_cpu_moe_start > params.n_cpu_moe_end) {
+                    invalid_param = true;
+                    break;
+                }
             } else if (llama_supports_rpc() && (arg == "-rpc" || arg == "--rpc")) {
                 if (++i >= argc) {
                     invalid_param = true;
@@ -839,6 +865,13 @@ static cmd_params parse_cmd_params(int argc, char ** argv) {
                 }
                 auto p = string_split<bool>(argv[i], split_delim);
                 params.no_host.insert(params.no_host.end(), p.begin(), p.end());
+            } else if (arg == "--cpu-lm-head") {
+                if (++i >= argc) {
+                    invalid_param = true;
+                    break;
+                }
+                auto p = string_split<bool>(argv[i], split_delim);
+                params.cpu_lm_head.insert(params.cpu_lm_head.end(), p.begin(), p.end());
             } else if (arg == "-ts" || arg == "--tensor-split") {
                 if (++i >= argc) {
                     invalid_param = true;
@@ -1107,6 +1140,9 @@ static cmd_params parse_cmd_params(int argc, char ** argv) {
     if (params.no_host.empty()) {
         params.no_host = cmd_params_defaults.no_host;
     }
+    if (params.cpu_lm_head.empty()) {
+        params.cpu_lm_head = cmd_params_defaults.cpu_lm_head;
+    }
     if (params.n_threads.empty()) {
         params.n_threads = cmd_params_defaults.n_threads;
     }
@@ -1124,6 +1160,13 @@ static cmd_params parse_cmd_params(int argc, char ** argv) {
     }
     if (params.fit_params_min_ctx.empty()) {
         params.fit_params_min_ctx = cmd_params_defaults.fit_params_min_ctx;
+    }
+
+    // mutual exclusivity check for --n-cpu-moe-range and --n-cpu-moe
+    if ((params.n_cpu_moe_start > 0 || params.n_cpu_moe_end > 0) &&
+        !params.n_cpu_moe.empty() && params.n_cpu_moe != cmd_params_defaults.n_cpu_moe) {
+        fprintf(stderr, "error: --n-cpu-moe-range is mutually exclusive with --n-cpu-moe\n");
+        exit(1);
     }
 
     return params;
@@ -1144,6 +1187,8 @@ struct cmd_params_instance {
     int                poll;
     int                n_gpu_layers;
     int                n_cpu_moe;
+    int                n_cpu_moe_start;
+    int                n_cpu_moe_end;
     llama_split_mode   split_mode;
     int                main_gpu;
     bool               no_kv_offload;
@@ -1156,8 +1201,10 @@ struct cmd_params_instance {
     bool               embeddings;
     bool               no_op_offload;
     bool               no_host;
+    bool               cpu_lm_head;
     size_t             fit_target;
     uint32_t           fit_min_ctx;
+    std::vector<std::string> _override_pattern_storage;
 
     llama_model_params to_llama_mparams() const {
         llama_model_params mparams = llama_model_default_params();
@@ -1172,8 +1219,46 @@ struct cmd_params_instance {
         mparams.use_mmap      = use_mmap;
         mparams.use_direct_io = use_direct_io;
         mparams.no_host       = no_host;
+        mparams.cpu_lm_head   = cpu_lm_head;
 
-        if (n_cpu_moe <= 0) {
+        if (n_cpu_moe_start > 0 || n_cpu_moe_end > 0) {
+            // range-based MoE CPU offloading
+            static std::vector<llama_model_tensor_buft_override> merged_range;
+            static std::vector<std::string> patterns_range;
+
+            // check for conflict with --n-cpu-moe and --cpu-lm-head
+            for (const auto & ovr : tensor_buft_overrides) {
+                if (ovr.pattern != nullptr) {
+                    fprintf(stderr, "error: --n-cpu-moe-range is mutually exclusive with --n-cpu-moe, --cpu-moe, --cpu-lm-head, and --override-tensor\n");
+                    fflush(stderr);
+                    exit(1);
+                }
+            }
+
+            merged_range.clear();
+            patterns_range.clear();
+
+            auto first = tensor_buft_overrides.begin();
+            auto last  = tensor_buft_overrides.end();
+            if (first != last && (last - 1)->pattern == nullptr) {
+                --last;
+            }
+            merged_range.insert(merged_range.end(), first, last);
+
+            int count = n_cpu_moe_end - n_cpu_moe_start + 1;
+            patterns_range.reserve((size_t) count);
+            merged_range.reserve(merged_range.size() + (size_t) count + 1);
+
+            for (int i = n_cpu_moe_start; i <= n_cpu_moe_end; ++i) {
+                patterns_range.push_back(llm_ffn_exps_block_regex(i));
+                merged_range.push_back({ patterns_range.back().c_str(),
+                                       ggml_backend_cpu_buffer_type() });
+            }
+
+            merged_range.push_back({ nullptr, nullptr });
+
+            mparams.tensor_buft_overrides = merged_range.data();
+        } else if (n_cpu_moe <= 0) {
             if (tensor_buft_overrides.empty()) {
                 mparams.tensor_buft_overrides = nullptr;
             } else {
@@ -1214,10 +1299,12 @@ struct cmd_params_instance {
 
     bool equal_mparams(const cmd_params_instance & other) const {
         return model == other.model && n_gpu_layers == other.n_gpu_layers && n_cpu_moe == other.n_cpu_moe &&
+               n_cpu_moe_start == other.n_cpu_moe_start && n_cpu_moe_end == other.n_cpu_moe_end &&
                split_mode == other.split_mode &&
                main_gpu == other.main_gpu && tensor_split == other.tensor_split &&
-               use_mmap == other.use_mmap && use_direct_io == other.use_direct_io &&
-               devices == other.devices &&
+                use_mmap == other.use_mmap && use_direct_io == other.use_direct_io &&
+                cpu_lm_head == other.cpu_lm_head &&
+                devices == other.devices &&
                no_host == other.no_host &&
                vec_tensor_buft_override_equal(tensor_buft_overrides, other.tensor_buft_overrides);
     }
@@ -1258,6 +1345,7 @@ static std::vector<cmd_params_instance> get_cmd_params_instances(const cmd_param
     for (const auto & mmp : params.use_mmap)
     for (const auto & dio : params.use_direct_io)
     for (const auto & noh : params.no_host)
+    for (const auto & clh : params.cpu_lm_head)
     for (const auto & embd : params.embeddings)
     for (const auto & nopo : params.no_op_offload)
     for (const auto & nb : params.n_batch)
@@ -1290,6 +1378,8 @@ static std::vector<cmd_params_instance> get_cmd_params_instances(const cmd_param
                 /* .poll         = */ pl,
                 /* .n_gpu_layers = */ nl,
                 /* .n_cpu_moe    = */ ncmoe,
+                /* .n_cpu_moe_start = */ params.n_cpu_moe_start,
+                /* .n_cpu_moe_end   = */ params.n_cpu_moe_end,
                 /* .split_mode   = */ sm,
                 /* .main_gpu     = */ mg,
                 /* .no_kv_offload= */ nkvo,
@@ -1302,6 +1392,7 @@ static std::vector<cmd_params_instance> get_cmd_params_instances(const cmd_param
                 /* .embeddings   = */ embd,
                 /* .no_op_offload= */ nopo,
                 /* .no_host      = */ noh,
+                /* .cpu_lm_head  = */ clh,
                 /* .fit_target   = */ fpt,
                 /* .fit_min_ctx  = */ fpc,
             };
@@ -1327,6 +1418,8 @@ static std::vector<cmd_params_instance> get_cmd_params_instances(const cmd_param
                 /* .poll         = */ pl,
                 /* .n_gpu_layers = */ nl,
                 /* .n_cpu_moe    = */ ncmoe,
+                /* .n_cpu_moe_start = */ params.n_cpu_moe_start,
+                /* .n_cpu_moe_end   = */ params.n_cpu_moe_end,
                 /* .split_mode   = */ sm,
                 /* .main_gpu     = */ mg,
                 /* .no_kv_offload= */ nkvo,
@@ -1339,6 +1432,7 @@ static std::vector<cmd_params_instance> get_cmd_params_instances(const cmd_param
                 /* .embeddings   = */ embd,
                 /* .no_op_offload= */ nopo,
                 /* .no_host      = */ noh,
+                /* .cpu_lm_head  = */ clh,
                 /* .fit_target   = */ fpt,
                 /* .fit_min_ctx  = */ fpc,
             };
@@ -1364,6 +1458,8 @@ static std::vector<cmd_params_instance> get_cmd_params_instances(const cmd_param
                 /* .poll         = */ pl,
                 /* .n_gpu_layers = */ nl,
                 /* .n_cpu_moe    = */ ncmoe,
+                /* .n_cpu_moe_start = */ params.n_cpu_moe_start,
+                /* .n_cpu_moe_end   = */ params.n_cpu_moe_end,
                 /* .split_mode   = */ sm,
                 /* .main_gpu     = */ mg,
                 /* .no_kv_offload= */ nkvo,
@@ -1376,6 +1472,7 @@ static std::vector<cmd_params_instance> get_cmd_params_instances(const cmd_param
                 /* .embeddings   = */ embd,
                 /* .no_op_offload= */ nopo,
                 /* .no_host      = */ noh,
+                /* .cpu_lm_head  = */ clh,
                 /* .fit_target   = */ fpt,
                 /* .fit_min_ctx  = */ fpc,
             };
@@ -2213,7 +2310,11 @@ int main(int argc, char ** argv) {
 
     int  params_idx   = 0;
     auto params_count = params_instances.size();
-    for (const auto & inst : params_instances) {
+    for (auto & inst : params_instances) {
+        // ensure cpu_lm_head override is added before constructing mparams
+        if (inst.cpu_lm_head) {
+            common_ensure_lm_head_cpu_override(inst.tensor_buft_overrides, inst._override_pattern_storage);
+        }
         params_idx++;
         if (params.progress) {
             fprintf(stderr, "llama-bench: benchmark %d/%zu: starting\n", params_idx, params_count);

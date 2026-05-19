@@ -501,6 +501,10 @@ struct common_params {
     std::vector<llama_model_kv_override> kv_overrides;
     std::vector<llama_model_tensor_buft_override> tensor_buft_overrides;
 
+    // Backing storage for pattern strings in tensor_buft_overrides.
+    // Ensures the const char* pointers remain valid for the lifetime of the struct.
+    std::vector<std::string> _override_pattern_storage;
+
     bool lora_init_without_apply = false; // only load lora to memory, but do not apply it to ctx (user can manually apply lora later using llama_adapter_lora_apply)
     std::vector<common_adapter_lora_info> lora_adapters; // lora adapter path with user defined scale
 
@@ -515,6 +519,10 @@ struct common_params {
     int32_t ppl_output_type = 0;     // = 0 -> ppl output is as usual, = 1 -> ppl output is num_tokens, ppl, one per line
                                      //                                       (which is more convenient to use for plotting)
                                      //
+    // MoE expert layer range offloading
+    int32_t n_cpu_moe_start = 0;  // first layer index for --n-cpu-moe-range (0 = disabled)
+    int32_t n_cpu_moe_end   = 0;  // last layer index for --n-cpu-moe-range (0 = disabled)
+
     bool   hellaswag        = false; // compute HellaSwag score over random tasks from datafile supplied in prompt
     size_t hellaswag_tasks  = 400;   // number of tasks to use when computing the HellaSwag score
 
@@ -560,6 +568,7 @@ struct common_params {
     bool no_op_offload     = false; // globally disable offload host tensor operations to device
     bool no_extra_bufts    = false; // disable extra buffer types (used for weight repacking)
     bool no_host           = false; // bypass host buffer allowing extra buffers to be used
+    bool cpu_lm_head       = false; // keep output.weight on CPU, convert to Q8_0 for AVX2 GEMV
 
     bool single_turn       = false; // single turn chat conversation
 
@@ -875,6 +884,13 @@ common_init_result_ptr common_init_from_params(common_params & params);
 struct llama_model_params     common_model_params_to_llama  (      common_params & params);
 struct llama_context_params   common_context_params_to_llama(const common_params & params);
 struct ggml_threadpool_params ggml_threadpool_params_from_cpu_params(const common_cpu_params & params);
+
+// Ensure the output.weight tensor has a CPU buffer type override for lm_head offload.
+// Adds the entry to overrides if not already present, storing the pattern string
+// in name_storage for lifetime management. Returns true if an entry was added.
+bool common_ensure_lm_head_cpu_override(
+    std::vector<llama_model_tensor_buft_override> & overrides,
+    std::vector<std::string>                        & name_storage);
 
 // clear LoRA adapters from context, then apply new list of adapters
 void common_set_adapter_lora(struct llama_context * ctx, std::vector<common_adapter_lora_info> & lora);

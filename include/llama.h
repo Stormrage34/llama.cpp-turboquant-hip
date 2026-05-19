@@ -325,6 +325,7 @@ extern "C" {
         bool no_host;         // bypass host buffer allowing extra buffers to be used
         bool no_alloc;        // only load metadata and simulate memory allocations
         bool use_hugepages;   // back model memory with anonymous hugetlb pages (Linux only)
+        bool cpu_lm_head;     // keep output.weight on CPU for VRAM savings; uses native type if CPU-backed, converts to Q8_0 for exotic types
     };
 
     struct llama_sampler_seq_config {
