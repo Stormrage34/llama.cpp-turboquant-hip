@@ -333,7 +333,7 @@ jobs:
       ) &&
       (needs.ubuntu-22-hip-turboquant.result == 'success' || 
        needs.ubuntu-22-hip-turboquant.result == 'skipped' ||
-       needs.ubuntu-22-hip-turboquant.result == 'failure') &&  # Allow release even if HIP failed
+       needs.ubuntu-22-hip-turboquant.result == 'failure') &&
       (needs.ubuntu-cpu.result == 'success' || needs.ubuntu-cpu.result == 'skipped') &&
       (needs.ubuntu-vulkan.result == 'success' || needs.ubuntu-vulkan.result == 'skipped')
 
