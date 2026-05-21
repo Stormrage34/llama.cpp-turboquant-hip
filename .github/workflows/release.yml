@@ -45,166 +45,11 @@ env:
   STABLE_VERSION: ${{ github.event.inputs.version || '' }}
 
 jobs:
-  ubuntu-cpu:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - build: 'x64'
-            os: ubuntu-22.04
-          - build: 'arm64'
-            os: ubuntu-24.04-arm
-          - build: 's390x'
-            os: ubuntu-24.04-s390x
-
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - name: Clone
-        id: checkout
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: ccache
-        if: ${{ matrix.build != 's390x' }}
-        uses: ggml-org/ccache-action@v1.2.21
-        with:
-          key: ubuntu-cpu-${{ matrix.build }}
-          evict-old-files: 1d
-
-      - name: Dependencies
-        id: depends
-        run: |
-          sudo apt-get update
-          sudo apt-get install build-essential libssl-dev
-
-      - name: Toolchain workaround (GCC 14)
-        if: ${{ contains(matrix.os, 'ubuntu-24.04') }}
-        run: |
-          sudo apt-get install -y gcc-14 g++-14
-          echo "CC=gcc-14" >> "$GITHUB_ENV"
-          echo "CXX=g++-14" >> "$GITHUB_ENV"
-
-      - name: Build
-        id: cmake_build
-        run: |
-          cmake -B build \
-            -DCMAKE_INSTALL_RPATH='$ORIGIN' \
-            -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
-            -DGGML_BACKEND_DL=ON \
-            -DGGML_NATIVE=OFF \
-            -DGGML_CPU_ALL_VARIANTS=ON \
-            -DLLAMA_FATAL_WARNINGS=ON \
-            ${{ env.CMAKE_ARGS }}
-          cmake --build build --config Release -j $(nproc)
-
-      - name: Determine tag name
-        id: tag
-        uses: ./.github/actions/get-tag-name
-        with:
-          stable_version: ${{ env.STABLE_VERSION }}
-
-      - name: Verify binaries exist
-        run: |
-          for bin in llama-server llama-cli llama-bench; do
-            [ -x "build/bin/$bin" ] || { echo "$bin missing"; exit 1; }
-          done
-
-      - name: Pack artifacts
-        id: pack_artifacts
-        run: |
-          cp LICENSE ./build/bin/
-          tar -czvf llama-${{ steps.tag.outputs.name }}-bin-ubuntu-${{ matrix.build }}.tar.gz --transform "s,./,llama-${{ steps.tag.outputs.name }}/," -C ./build/bin .
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v6
-        with:
-          path: llama-${{ steps.tag.outputs.name }}-bin-ubuntu-${{ matrix.build }}.tar.gz
-          name: llama-bin-ubuntu-${{ matrix.build }}.tar.gz
-
-  ubuntu-vulkan:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - build: 'x64'
-            os: ubuntu-22.04
-          - build: 'arm64'
-            os: ubuntu-24.04-arm
-
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - name: Clone
-        id: checkout
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: ccache
-        uses: ggml-org/ccache-action@v1.2.21
-        with:
-          key: ubuntu-vulkan-${{ matrix.build }}
-          evict-old-files: 1d
-
-      - name: Dependencies
-        id: depends
-        run: |
-          if [[ "${{ matrix.os }}" =~ "ubuntu-22.04" ]]; then
-            wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
-            sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
-            sudo apt-get update -y
-            sudo apt-get install -y build-essential mesa-vulkan-drivers vulkan-sdk libssl-dev
-          else
-            sudo apt-get update -y
-            sudo apt-get install -y gcc-14 g++-14 build-essential glslc libvulkan-dev spirv-headers libssl-dev ninja-build
-            echo "CC=gcc-14" >> "$GITHUB_ENV"
-            echo "CXX=g++-14" >> "$GITHUB_ENV"
-          fi
-
-      - name: Build
-        id: cmake_build
-        run: |
-          cmake -B build \
-            -DCMAKE_INSTALL_RPATH='$ORIGIN' \
-            -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
-            -DGGML_BACKEND_DL=ON \
-            -DGGML_NATIVE=OFF \
-            -DGGML_CPU_ALL_VARIANTS=ON \
-            -DGGML_VULKAN=ON \
-            ${{ env.CMAKE_ARGS }}
-          cmake --build build --config Release -j $(nproc)
-
-      - name: Determine tag name
-        id: tag
-        uses: ./.github/actions/get-tag-name
-        with:
-          stable_version: ${{ env.STABLE_VERSION }}
-
-      - name: Verify binaries exist
-        run: |
-          for bin in llama-server llama-cli llama-bench; do
-            [ -x "build/bin/$bin" ] || { echo "$bin missing"; exit 1; }
-          done
-
-      - name: Pack artifacts
-        id: pack_artifacts
-        run: |
-          cp LICENSE ./build/bin/
-          tar -czvf llama-${{ steps.tag.outputs.name }}-bin-ubuntu-vulkan-${{ matrix.build }}.tar.gz --transform "s,./,llama-${{ steps.tag.outputs.name }}/," -C ./build/bin .
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v6
-        with:
-          path: llama-${{ steps.tag.outputs.name }}-bin-ubuntu-vulkan-${{ matrix.build }}.tar.gz
-          name: llama-bin-ubuntu-vulkan-${{ matrix.build }}.tar.gz
-
   ubuntu-22-hip-turboquant:
     runs-on: ubuntu-22.04
     container: rocm/dev-ubuntu-22.04:7.2.1
-    # HIP BUILD IS NON-BLOCKING: CPU/Vulkan artifacts ship even if HIP fails
-    # This prevents a single ROCm toolchain issue from blocking all releases
+    # HIP BUILD IS NON-BLOCKING: release proceeds even if ROCm build fails
+    # (GitHub Release will just have an empty tarball or skip artifact upload)
     continue-on-error: true
 
     steps:
@@ -333,9 +178,7 @@ jobs:
       ) &&
       (needs.ubuntu-22-hip-turboquant.result == 'success' || 
        needs.ubuntu-22-hip-turboquant.result == 'skipped' ||
-       needs.ubuntu-22-hip-turboquant.result == 'failure') &&
-      (needs.ubuntu-cpu.result == 'success' || needs.ubuntu-cpu.result == 'skipped') &&
-      (needs.ubuntu-vulkan.result == 'success' || needs.ubuntu-vulkan.result == 'skipped')
+       needs.ubuntu-22-hip-turboquant.result == 'failure')
 
     # Fine-grant permission
     # https://docs.github.com/en/actions/security-for-github-actions/security-guides/automatic-token-authentication#modifying-the-permissions-for-the-github_token
@@ -346,8 +189,6 @@ jobs:
 
     needs:
       - ubuntu-22-hip-turboquant
-      - ubuntu-cpu
-      - ubuntu-vulkan
 
     steps:
       - name: Clone
@@ -375,7 +216,7 @@ jobs:
         run: |
           mkdir -p release
           # CRITICAL: shopt -s nullglob prevents "literal *.tar.gz" error when artifact dir is empty
-          # (HIP build may fail with continue-on-error: true, leaving no artifacts)
+          # (HIP build is the only build — if it fails on continue-on-error: true, no artifacts exist)
           shopt -s nullglob
           for f in artifact/*.tar.gz; do
             [ -f "$f" ] && mv -v "$f" release/
@@ -411,13 +252,8 @@ jobs:
             echo ""
             echo "</details>"
             echo ""
-            echo "**Linux:**"
-            echo "- [Ubuntu x64 (CPU)](https://github.com/${{ github.repository }}/releases/download/${TAG_NAME}/llama-${TAG_NAME}-bin-ubuntu-x64.tar.gz)"
-            echo "- [Ubuntu arm64 (CPU)](https://github.com/${{ github.repository }}/releases/download/${TAG_NAME}/llama-${TAG_NAME}-bin-ubuntu-arm64.tar.gz)"
-            echo "- [Ubuntu s390x (CPU)](https://github.com/${{ github.repository }}/releases/download/${TAG_NAME}/llama-${TAG_NAME}-bin-ubuntu-s390x.tar.gz)"
-            echo "- [Ubuntu x64 (Vulkan)](https://github.com/${{ github.repository }}/releases/download/${TAG_NAME}/llama-${TAG_NAME}-bin-ubuntu-vulkan-x64.tar.gz)"
-            echo "- [Ubuntu arm64 (Vulkan)](https://github.com/${{ github.repository }}/releases/download/${TAG_NAME}/llama-${TAG_NAME}-bin-ubuntu-vulkan-arm64.tar.gz)"
-            echo "- [Ubuntu x64 (HIP TurboQuant RDNA2)](https://github.com/${{ github.repository }}/releases/download/${TAG_NAME}/llama-${TAG_NAME}-bin-ubuntu-hip-turboquant-x64.tar.gz)"
+          echo "**Linux (AMD RDNA2 — RX 6800 XT / gfx1030):**"
+          echo "- [Ubuntu x64 (HIP TurboQuant)](https://github.com/${{ github.repository }}/releases/download/${TAG_NAME}/llama-${TAG_NAME}-bin-ubuntu-hip-turboquant-x64.tar.gz)"
           } > release_body.md
 
       - name: Create release
