@@ -9,3 +9,7 @@ silos/
 
 # Editor swap files
 *.kate-swp
+
+# Python bytecode
+__pycache__/
+*.pyc

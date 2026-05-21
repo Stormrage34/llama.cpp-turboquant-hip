@@ -868,10 +868,42 @@ private:
                 return false;
             }
 
+            // Verify that the model actually carries MTP/NextN head metadata.
+            // A qwen35/qwen35moe model without nextn_predict_layers > 0 has no
+            // MTP head tensors — loading it with the _mtp architecture override
+            // would trigger GGML_ASSERT("requires nextn_predict_layers > 0").
+            {
+                // Build the metadata key: "<arch>.nextn_predict_layers"
+                const std::string nextn_key = std::string(trunk_arch) + ".nextn_predict_layers";
+                char nextn_buf[32] = {0};
+                const int ret = llama_model_meta_val_str(
+                    model, nextn_key.c_str(), nextn_buf, sizeof(nextn_buf));
+                if (ret < 0) {
+                    SRV_ERR("MTP requested but model '%s' does not have '%s' metadata — "
+                            "this model file does not include an MTP/NextN head.\n",
+                            params_base.model.path.c_str(), nextn_key.c_str());
+                    return false;
+                }
+                const int32_t nextn_layers = std::atoi(nextn_buf);
+                if (nextn_layers <= 0) {
+                    SRV_ERR("MTP requested but model '%s' has nextn_predict_layers=%d (<= 0) — "
+                            "this model file does not include an MTP/NextN head.\n",
+                            params_base.model.path.c_str(), nextn_layers);
+                    return false;
+                }
+                SRV_INF("model supports MTP: nextn_predict_layers=%d\n", nextn_layers);
+            }
+
             SRV_INF("loading MTP head from '%s' (override_arch=%s)\n",
                     params_base.model.path.c_str(), mtp_arch);
 
+            // Save and clear tensor overrides before MTP conversion to prevent
+            // n_cpu_moe_range conflict check from finding already-populated overrides
+            // from the main model's conversion (second call would error otherwise).
+            auto mtp_overrides_saved = params_base.tensor_buft_overrides;
+            params_base.tensor_buft_overrides.clear();
             auto mparams_mtp = common_model_params_to_llama(params_base);
+            params_base.tensor_buft_overrides = std::move(mtp_overrides_saved);
             mparams_mtp.override_arch = mtp_arch;
 
             // Extend MoE CPU offload to the MTP model's MoE layer(s).

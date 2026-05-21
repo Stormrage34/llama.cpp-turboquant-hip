@@ -1508,6 +1508,7 @@ struct ggml_cuda_mm_fusion_args_device {
     const void * gate = nullptr;
     const void * gate_bias = nullptr;
     ggml_glu_op glu_op;
+    int64_t swizzle_meta_offset = 0; // SoA meta section offset (RDNA2_CACHE_SWIZZLE)
 };
 
 // RDNA2 MOE Stream V1: SLC cache-bypass GTT loads + semaphore signaling

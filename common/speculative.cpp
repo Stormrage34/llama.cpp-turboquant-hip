@@ -337,7 +337,9 @@ struct common_speculative_state_draft : public common_speculative_state {
 
         const llama_tokens & prompt_cur = spec->vocab_cmpt ? prompt_tgt : prompt_cnv;
 
-        const int i_start = std::max<int>(0, (int) prompt_cur.size() - n_ctx);
+        GGML_ASSERT(prompt_cur.size() <= INT32_MAX && "prompt_cur.size() exceeds int32_t");
+        GGML_ASSERT(prompt_dft.size() <= INT32_MAX && "prompt_dft.size() exceeds int32_t");
+        const int i_start = std::max<int>(0, static_cast<int32_t>(prompt_cur.size()) - n_ctx);
 
         if (use_ckpt && i_start > 0) {
             LOG_WRN("%s: context shift is not supported with checkpoint-based contexts - skipping\n", __func__);
@@ -346,15 +348,15 @@ struct common_speculative_state_draft : public common_speculative_state {
 
         // reuse as much as possible from the old draft context
         // ideally, the draft context should be as big as the target context and we will always reuse the entire prompt
-        for (int i = 0; i < (int) prompt_dft.size(); ++i) {
+        for (int i = 0; i < static_cast<int32_t>(prompt_dft.size()); ++i) {
             int cur = 0;
-            while (i_start + cur < (int) prompt_cur.size() &&
-                   i       + cur < (int) prompt_dft.size() &&
+            while (i_start + cur < static_cast<int32_t>(prompt_cur.size()) &&
+                   i       + cur < static_cast<int32_t>(prompt_dft.size()) &&
                    prompt_cur[i_start + cur] == prompt_dft[i + cur]) {
                 cur++;
             }
 
-            if ((cur >= 256 || n_ctx >= (int) prompt_cur.size()) && cur > reuse_n) {
+            if ((cur >= 256 || n_ctx >= static_cast<int32_t>(prompt_cur.size())) && cur > reuse_n) {
                 reuse_i = i;
                 reuse_n = cur;
             }
@@ -367,7 +369,8 @@ struct common_speculative_state_draft : public common_speculative_state {
         LOG_DBG("%s: reuse_i = %d, reuse_n = %d, #prompt_dft = %zu, #prompt_cur = %zu\n",
                 __func__, reuse_i, reuse_n, prompt_dft.size(), prompt_cur.size());
         if (use_ckpt && ckpt.n_tokens > reuse_n) {
-            LOG_DBG("%s: checkpoint (n_tokens = %d) is outdated -> delete it\n", __func__, (int) ckpt.n_tokens);
+            GGML_ASSERT(ckpt.n_tokens <= INT32_MAX && "ckpt.n_tokens exceeds int32_t");
+            LOG_DBG("%s: checkpoint (n_tokens = %d) is outdated -> delete it\n", __func__, static_cast<int32_t>(ckpt.n_tokens));
 
             reuse_i = 0;
             reuse_n = 0;
@@ -384,11 +387,12 @@ struct common_speculative_state_draft : public common_speculative_state {
         } else {
             // this happens when a previous draft has been discarded (for example, due to being too small), but the
             // target model agreed with it. in this case, we simply pass back the previous results to save compute
-            if (reuse_i + reuse_n < (int64_t) prompt_dft.size() && prompt_dft[reuse_i + reuse_n] == id_last) {
-                for (int i = reuse_i + reuse_n + 1; i < (int) prompt_dft.size(); ++i) {
+            GGML_ASSERT(prompt_dft.size() <= INT64_MAX && "prompt_dft.size() exceeds int64_t");
+            if (reuse_i + reuse_n < static_cast<int64_t>(prompt_dft.size()) && prompt_dft[reuse_i + reuse_n] == id_last) {
+                for (int i = reuse_i + reuse_n + 1; i < static_cast<int32_t>(prompt_dft.size()); ++i) {
                     result.push_back(prompt_dft[i]);
 
-                    if (sparams.n_max <= (int) result.size()) {
+                    if (sparams.n_max <= static_cast<int32_t>(result.size())) {
                         break;
                     }
                 }
@@ -409,7 +413,7 @@ struct common_speculative_state_draft : public common_speculative_state {
                 prompt_dft.erase(prompt_dft.begin(), prompt_dft.begin() + reuse_i);
             }
 
-            if (reuse_n < (int) prompt_dft.size()) {
+            if (reuse_n < static_cast<int32_t>(prompt_dft.size())) {
                 if (use_ckpt) {
                     if (ckpt.n_tokens > 0) {
                         LOG_DBG("%s: restoring checkpoint, reuse_n=%d, prompt_dft.size=%zu\n", __func__, reuse_n, prompt_dft.size());
@@ -481,7 +485,7 @@ struct common_speculative_state_draft : public common_speculative_state {
 
             const auto * cur_p = common_sampler_get_candidates(smpl, true);
 
-            for (int k = 0; k < std::min(3, (int) cur_p->size); ++k) {
+            for (int k = 0; k < std::min(3, static_cast<int32_t>(cur_p->size)); ++k) {
                 LOG_DBG(" - draft candidate %3d, pos %3d: %6d (%8.3f) '%s'\n",
                         k, i, cur_p->data[k].id, cur_p->data[k].p, common_token_to_piece(ctx_dft, cur_p->data[k].id).c_str());
             }
@@ -498,7 +502,7 @@ struct common_speculative_state_draft : public common_speculative_state {
 
             result.push_back(id);
 
-            if (sparams.n_max <= (int) result.size()) {
+            if (sparams.n_max <= static_cast<int32_t>(result.size())) {
                 break;
             }
 
@@ -628,6 +632,7 @@ struct common_speculative_state_mtp : public common_speculative_state {
             common_params_sampling sparams;
             sparams.no_perf  = false;
             sparams.top_k    = 1;
+            sparams.n_probs  = 1;  // enable top-1 probability for confidence check
             sparams.samplers = { COMMON_SAMPLER_TYPE_TOP_K };
             smpl = common_sampler_init(model_mtp, sparams);
         }
@@ -676,7 +681,8 @@ struct common_speculative_state_mtp : public common_speculative_state {
         last_n_accepted = -1;
         last_n_drafted  = 0;
 
-        const int32_t N = (int32_t) prompt.size();
+        GGML_ASSERT(prompt.size() <= INT32_MAX && "prompt.size() exceeds int32_t");
+        const int32_t N = static_cast<int32_t>(prompt.size());
         if (N <= 0) {
             return;
         }
@@ -685,7 +691,7 @@ struct common_speculative_state_mtp : public common_speculative_state {
             LOG_WRN("%s: ctx_mtp pos_max=%d < N-1=%d — "
                     "streaming hook may not be registered or not all prefill rows "
                     "have logits=true. Drafts may degrade.\n",
-                    __func__, (int) pos_max, N - 1);
+                    __func__, static_cast<int32_t>(pos_max), N - 1);
         }
     }
 
@@ -700,7 +706,7 @@ struct common_speculative_state_mtp : public common_speculative_state {
         // accept with no-accepts (i.e. 0 accepts) returns early, but we still need to remove from the MTP kv-cache
         // TODO: check if bug in other spec states
         if (last_n_drafted > 0) {
-            const int32_t n_to_drop = (int32_t) last_n_drafted;
+            const int32_t n_to_drop = static_cast<int32_t>(last_n_drafted);
             if (n_to_drop > 0) {
                 const llama_pos pos_max = llama_memory_seq_pos_max(llama_get_memory(ctx_mtp), 0);
                 if (pos_max >= 0) {
@@ -727,7 +733,7 @@ struct common_speculative_state_mtp : public common_speculative_state {
                 if (last_n_accepted < 0) {
                     // First draft after begin(): trunk's most recent decode is
                     // the last prefill ubatch; its last row is h_{N-1}.
-                    src_row = (src && src->ne[1] > 0) ? (int32_t) src->ne[1] - 1 : 0;
+                    src_row = (src && src->ne[1] > 0) ? static_cast<int32_t>(src->ne[1]) - 1 : 0;
                 } else {
                     src_row = last_n_accepted;
                 }
@@ -736,7 +742,7 @@ struct common_speculative_state_mtp : public common_speculative_state {
             } else {
                 // for the AR path get the mtp_out from the mtp ctx
                 src = llama_context_get_t_mtp_out(ctx_mtp);
-                src_row = src ? (int32_t) src->ne[1] - 1 : 0;
+                src_row = src ? static_cast<int32_t>(src->ne[1]) - 1 : 0;
                 // Sync removed — ggml_backend_tensor_get() syncs internally, llama_decode() at line 728 also syncs
                 // llama_synchronize(ctx_mtp);  // redundant
             }
@@ -756,22 +762,36 @@ struct common_speculative_state_mtp : public common_speculative_state {
                 return;
             }
 
-            const llama_token best = common_sampler_sample(smpl, ctx_mtp, 0);
+            common_sampler_sample(smpl, ctx_mtp, 0);
+            const auto * cur_p_mtp = common_sampler_get_candidates(smpl, true);
+            if (!cur_p_mtp || cur_p_mtp->size == 0) {
+                LOG_DBG("%s: empty candidates at k=%d; stopping chain\n", __func__, k);
+                return;
+            }
+            const float p_min = params.draft.p_min;
+            if (p_min > 0.0f && cur_p_mtp->data[0].p < p_min) {
+                LOG_DBG("%s: low confidence draft p=%f < p_min=%f at k=%d; stopping chain\n",
+                        __func__, cur_p_mtp->data[0].p, p_min, k);
+                break;
+            }
+
+            const llama_token best = cur_p_mtp->data[0].id;
             common_sampler_accept(smpl, best, /*accept_grammar=*/ false);
             draft_tokens.push_back(best);
             cond_tok = best;
             ++pos;
         }
 
-        last_n_drafted = (uint16_t) draft_tokens.size();
+        GGML_ASSERT(draft_tokens.size() <= UINT16_MAX && "draft_tokens.size() exceeds uint16_t");
+        last_n_drafted = static_cast<uint16_t>(draft_tokens.size());
     }
 
     void accept(uint16_t n_accepted) override {
         const llama_pos pos_max = llama_memory_seq_pos_max(llama_get_memory(ctx_mtp), 0);
-        const int32_t n_drafted_last = (int32_t) last_n_drafted;
-        const int32_t n_to_drop = std::max(0, n_drafted_last - (int32_t) n_accepted);
+        const int32_t n_drafted_last = static_cast<int32_t>(last_n_drafted);
+        const int32_t n_to_drop = std::max<int32_t>(0, n_drafted_last - static_cast<int32_t>(n_accepted));
         if (pos_max < 0) {
-            last_n_accepted = (int32_t) n_accepted;
+            last_n_accepted = static_cast<int32_t>(n_accepted);
             return;
         }
         if (n_to_drop > 0) {
@@ -780,7 +800,7 @@ struct common_speculative_state_mtp : public common_speculative_state {
                                 /*p0=*/ drop_from, /*p1=*/ -1);
         }
         last_n_drafted = 0;
-        last_n_accepted = (int32_t) n_accepted;
+        last_n_accepted = static_cast<int32_t>(n_accepted);
     }
 
     int32_t n_max(const common_params_speculative & params) const override {
@@ -1365,8 +1385,8 @@ llama_tokens common_speculative_draft(
         {
             const int n_min = impl->n_min(params);
 
-            if (!result.empty() && (int) result.size() < n_min) {
-                LOG_DBG("%s: ignoring small draft: %d < %d\n", __func__, (int) result.size(), n_min);
+            if (!result.empty() && static_cast<int32_t>(result.size()) < n_min) {
+                LOG_DBG("%s: ignoring small draft: %d < %d\n", __func__, static_cast<int32_t>(result.size()), n_min);
                 result.clear();
             }
         }

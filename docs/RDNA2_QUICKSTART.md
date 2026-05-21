@@ -24,7 +24,7 @@ cmake -B build -S . -DGGML_HIP=ON -DGPU_TARGETS=gfx1030
 cmake --build build --config Release -j $(nproc)
 
 # Or use the build script (also builds llama-bench-rdna2)
-./scripts/build_rdna2_llama.sh optimized
+./scripts/build_rdna2.sh optimized
 ```
 
 ## Run Your First Benchmark

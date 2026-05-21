@@ -136,6 +136,9 @@ endif()
 
 if (GGML_HIP_ROCWMMA_FATTN)
     add_compile_definitions(GGML_HIP_ROCWMMA_FATTN)
+    if (GPU_TARGETS MATCHES "gfx103")
+        message(WARNING "GGML_HIP_ROCWMMA_FATTN=ON has no effect on gfx1030 (RDNA2) — no hardware matrix cores")
+    endif()
 endif()
 
 if (NOT GGML_HIP_MMQ_MFMA)
@@ -166,8 +169,28 @@ if (GGML_RDNA2_BFE_DISPATCHER)
     add_compile_definitions(RDNA2_BFE_DISPATCHER)
 endif()
 
-if (RDNA2_MOE_STREAM_V1)
-    add_compile_definitions(RDNA2_MOE_STREAM_V1)
+# REMOVED: RDNA2_MOE_STREAM_V1 (archived per CR-011 — code removed from common.cuh)
+
+if (RDNA2_VGPR_OPT_V1)
+    add_compile_definitions(RDNA2_VGPR_OPT_V1)
+endif()
+
+# RDNA2_EXPERT_SORT: Expert-aware warp scheduling for MoE MMVQ kernel.
+# Sorts channels by expert ID before kernel launch so consecutive warps access the
+# same expert's weights — improving Infinity Cache hit rates on RDNA2.
+option(RDNA2_EXPERT_SORT "rdna2: expert-aware warp scheduling for MoE MMVQ" OFF)
+if (RDNA2_EXPERT_SORT)
+    add_compile_definitions(RDNA2_EXPERT_SORT)
+endif()
+
+# RDNA2_CACHE_SWIZZLE: Cache-aware IQ4_XS tensor swizzling (CR-013).
+# Converts AoS → SoA layout so qs[128] aligns to 128-byte RDNA2 Infinity Cache lines.
+# When enabled, IQ4_XS tensors are swizzled at load time and a specialized vec_dot
+# kernel uses the SoA layout — eliminating 5.9% cache line straddle waste.
+# OFF by default — experimental, needs rocprofv3 L2/L3 cache miss validation.
+option(RDNA2_CACHE_SWIZZLE "rdna2: cache-aware IQ4_XS SoA swizzling (CR-013)" OFF)
+if (RDNA2_CACHE_SWIZZLE)
+    add_compile_definitions(RDNA2_CACHE_SWIZZLE)
 endif()
 
 # Idea D: gfx1030 LLVM compiler tuning flags (v0.4.0)
@@ -178,6 +201,10 @@ endif()
 # (Re-enabled 2026-05-16: falsely accused of all-newline bug. Real cause was `-n` flag.)
 set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -mllvm -amdgpu-early-inline-all=true")
 set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -mllvm -amdgpu-spill-sgpr-to-vgpr")
+set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -mllvm -amdgpu-function-calls=false")
+# set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -mllvm -amdgpu-enable-max-ilp-scheduling-strategy=1") # Not supported in this ROCm
+# set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -ffast-math") # Causes build breaks in HIP edge cases
+# set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} --offload-compression") # Not supported in this ROCm
 # set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -mllvm -amdgpu-enable-rewrite-out-of-range-value=1") # Not supported in ROCm 7.13
 
 if (CXX_IS_HIPCC)

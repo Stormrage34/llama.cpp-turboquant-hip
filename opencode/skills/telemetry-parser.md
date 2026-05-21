@@ -23,7 +23,7 @@ SELECT
     json_extract(result, '$.tg128_std_dev') as variance
 FROM benchmarks 
 WHERE model LIKE '%Qwen3_35BMTPIQ4%' 
-  AND config LIKE '%--ncmoe 16%';
+  AND config LIKE '%-ncmoe 16%';
 
 -- Compute WAVE_ISSUE_WAIT delta vs baseline
 SELECT 

@@ -7689,6 +7689,40 @@ void ggml_set_loss(struct ggml_tensor * tensor) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
+void ggml_swizzle_iq4_xs(struct ggml_tensor * tensor) {
+    GGML_ASSERT(tensor->type == GGML_TYPE_IQ4_XS);
+    GGML_ASSERT(tensor->data != NULL);
+    GGML_ASSERT(!(tensor->flags & GGML_TENSOR_FLAG_SWIZZLED));
+
+    const size_t nbytes = ggml_nbytes(tensor);
+    const int64_t n_blocks = nbytes / sizeof(block_iq4_xs);
+    GGML_ASSERT(n_blocks > 0);
+    GGML_ASSERT((size_t)n_blocks * sizeof(block_iq4_xs) == nbytes);
+
+    // Allocate temp buffer for SoA repack
+    uint8_t * tmp = (uint8_t *)malloc(nbytes);
+    GGML_ASSERT(tmp != NULL);
+
+    const block_iq4_xs * src = (const block_iq4_xs *)tensor->data;
+    uint8_t * qs_dst   = tmp;                                   // qs blocks:  N * 128 bytes
+    uint8_t * meta_dst = tmp + n_blocks * IQ4_XS_QS_SIZE;        // meta blocks: N * 8 bytes
+
+    for (int64_t i = 0; i < n_blocks; i++) {
+        // d(2B) + scales_h(2B) + scales_l(4B) = 8 bytes contiguous at start of struct
+        memcpy(qs_dst  + i * IQ4_XS_QS_SIZE,   src[i].qs,       IQ4_XS_QS_SIZE);
+        memcpy(meta_dst + i * IQ4_XS_META_SIZE, &src[i].d,      IQ4_XS_META_SIZE);
+    }
+
+    // Copy swizzled data back into tensor buffer (same total size)
+    memcpy(tensor->data, tmp, nbytes);
+    free(tmp);
+
+    // Mark tensor as swizzled
+    tensor->flags |= GGML_TENSOR_FLAG_SWIZZLED;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 void ggml_quantize_init(enum ggml_type type) {
     ggml_critical_section_start();
 

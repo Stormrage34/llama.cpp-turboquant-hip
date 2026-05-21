@@ -362,8 +362,9 @@ private:
     mutable int64_t t_p_eval_us = 0;
     mutable int64_t t_eval_us   = 0;
 
-    mutable int64_t t_compute_start_us = 0;
-    mutable int64_t n_queued_tokens    = 0;
+    mutable int64_t t_compute_start_us     = 0;
+    mutable int64_t n_queued_tokens        = 0;
+    mutable int64_t n_queued_single_calls  = 0; // number of single-token decode() calls queued (to correctly classify eval vs prompt_eval stats when multiple single-token decodes happen without sync)
 
     mutable int32_t n_p_eval = 0; // number of tokens in eval calls for the prompt (with batch size > 1)
     mutable int32_t n_eval   = 0; // number of eval calls

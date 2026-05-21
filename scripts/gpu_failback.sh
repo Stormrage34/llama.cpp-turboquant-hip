@@ -178,6 +178,25 @@ gpu_is_busy() {
     return 1
 }
 
+# GPU Ensure Free — Hard gate for GPU work
+# Checks for running llama-server/llama-cli/llama-bench processes.
+# If found, prints error and exits with code 1.
+# Use at start of GPU work (benchmarks, profiling, inference tests).
+gpu_ensure_free() {
+    local blocked=0
+    for proc in llama-server llama-cli llama-bench; do
+        if pgrep -x "$proc" >/dev/null 2>&1; then
+            echo "ERROR: GPU blocked by running $proc process." >&2
+            blocked=1
+        fi
+    done
+    if [[ $blocked -eq 1 ]]; then
+        echo "  → Kill process or use: source scripts/gpu_failback.sh && gpu_acquire" >&2
+        return 1
+    fi
+    return 0
+}
+
 gpu_failback_trap() {
     trap gpu_release EXIT
 }

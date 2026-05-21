@@ -520,8 +520,8 @@ struct common_params {
                                      //                                       (which is more convenient to use for plotting)
                                      //
     // MoE expert layer range offloading
-    int32_t n_cpu_moe_start = 0;  // first layer index for --n-cpu-moe-range (0 = disabled)
-    int32_t n_cpu_moe_end   = 0;  // last layer index for --n-cpu-moe-range (0 = disabled)
+    int32_t n_cpu_moe_start = -1; // first layer index for --n-cpu-moe-range (-1 = disabled)
+    int32_t n_cpu_moe_end   = -1; // last layer index for --n-cpu-moe-range (-1 = disabled)
 
     bool   hellaswag        = false; // compute HellaSwag score over random tasks from datafile supplied in prompt
     size_t hellaswag_tasks  = 400;   // number of tasks to use when computing the HellaSwag score

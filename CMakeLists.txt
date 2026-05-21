@@ -51,8 +51,8 @@ if(GGML_HIP AND NOT CMAKE_HIP_COMPILER)
         set(CMAKE_CXX_COMPILER "${ROCM_PATH}/bin/hipcc" CACHE STRING "CXX compiler for HIP" FORCE)
         set(CMAKE_C_COMPILER "${HIPCC_C_COMPILER}" CACHE STRING "C compiler for HIP" FORCE)
     # Fallback to hipconfig if available
-    elseif(COMPILER)
-        find_program(HIPCC_EXECUTABLE NAMES hipcc "${HIPCC}" "${COMPILER}" PATHS ENV HIP_PATH NO_CMAKE_FIND_ROOT_PATH)
+    elseif(NOT CMAKE_CXX_COMPILER)
+        find_program(HIPCC_EXECUTABLE NAMES hipcc "${HIPCC}" "${COMPILER}" PATHS ENV ROCM_PATH NO_CMAKE_FIND_ROOT_PATH)
         if(HIPCC_EXECUTABLE)
             set(CMAKE_CXX_COMPILER "${HIPCC_EXECUTABLE}" CACHE STRING "CXX compiler for HIP" FORCE)
             # Also set C compiler to the underlying clang
@@ -192,8 +192,12 @@ option(LLAMA_OPENSSL    "llama: use openssl to support HTTPS" ON)
 option(LLAMA_LLGUIDANCE "llama-common: include LLGuidance library for structured output in common utils" OFF)
 
 # RDNA2 experimental features
-option(RDNA2_MOE_STREAM_V1 "RDNA2: enable MoE async stream pipeline (V1)" OFF)
-
+# REMOVED: RDNA2_MOE_STREAM_V1 (archived per CR-011 — dead code, zero call sites)
+option(RDNA2_VGPR_OPT_V1 "RDNA2: reduce VGPR pressure in mmvq kernels (nounroll + launch_bounds)" ON)
+option(LLAMA_BUILD_SWIZZLE_DEV "llama: build experimental llama-swizzle-dev binary for Q4_K/Q5_K swizzle development (CR-020)" OFF)
+if(LLAMA_BUILD_SWIZZLE_DEV)
+    add_compile_definitions(RDNA2_SWIZZLE_ALL_QUANTS=1)
+endif()
 
 # Required for relocatable CMake package
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/build-info.cmake)

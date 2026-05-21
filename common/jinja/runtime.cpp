@@ -167,6 +167,10 @@ value binary_expression::execute_impl(context & ctx) {
         }
         throw std::runtime_error("Cannot perform operation " + op.value + " on undefined values");
     } else if (is_val<value_none>(left_val) || is_val<value_none>(right_val)) {
+        if (op.value == "in" || op.value == "not in") {
+            // `anything in null` → false, `anything not in null` → true
+            return mk_val<value_bool>(op.value == "not in");
+        }
         if (op.value == "+" || op.value == "~") {
             value res = mk_val<value_undefined>();
             if (workaround_concat_null_with_str(res)) {

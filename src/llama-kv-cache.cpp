@@ -1874,11 +1874,7 @@ void llama_kv_cache::set_input_kq_mask(ggml_tensor * dst, const llama_ubatch * u
 void llama_kv_cache::set_input_pos_bucket(ggml_tensor * dst, const llama_ubatch * ubatch) const {
     const int64_t n_tokens = ubatch->n_tokens;
 
-    GGML_ASSERT(n_stream == 1 && "TODO: support multiple streams");
-    const auto & cells = v_cells[0];
-
     GGML_ASSERT(ggml_backend_buffer_is_host(dst->buffer));
-    GGML_ASSERT(!ubatch->equal_seqs()); // TODO: use ubatch->n_seqs instead of failing
 
     int32_t * data = (int32_t *) dst->data;
 
@@ -1886,6 +1882,10 @@ void llama_kv_cache::set_input_pos_bucket(ggml_tensor * dst, const llama_ubatch 
 
     for (int h = 0; h < 1; ++h) {
         for (int i = 0; i < n_tokens; ++i) {
+            const llama_seq_id seq_id = ubatch->seq_id[i][0];
+            const uint32_t s = seq_to_stream[seq_id];
+            const auto & cells = v_cells[s];
+
             for (int j = 0; j < n_kv; ++j) {
                 // the position when the cells is empty is irrelevant - it will be masked out later in the attention
                 const llama_pos p0 = cells.is_empty(j) ? -1 : cells.pos_get(j);
@@ -2344,19 +2344,22 @@ bool llama_kv_cache::state_read_meta(llama_io_read_i & io, uint32_t strm, uint32
             return false;
         }
 
-        // TODO: we cannot yet restore llama_kv_cell_ext as the apply_ubatch() does not support it yet
-        //       see: https://github.com/ggml-org/llama.cpp/pull/16825#issuecomment-3460868350
         apply_ubatch(sinfo, ubatch);
 
         LLAMA_LOG_DEBUG("%s: cell_count = %d, dest_seq_id = %d\n", __func__, cell_count, dest_seq_id);
 
-        // DEBUG CHECK: verify that all cells were allocated and have correct seq_id and pos values
+        // DEBUG CHECK: verify that all cells were allocated and have correct seq_id, pos, and ext values
         GGML_ASSERT(sinfo.n_stream() == 1);
         GGML_ASSERT(sinfo.idxs[0].size() == cell_count);
         for (uint32_t i = 0; i < cell_count; ++i) {
             const uint32_t idx = sinfo.idxs[0][i];
             GGML_ASSERT(cells.pos_get(idx) == ubatch.pos[i]);
             GGML_ASSERT(cells.seq_has(idx, dest_seq_id));
+            if (ubatch.is_pos_2d()) {
+                const llama_kv_cell_ext ext = cells.ext_get(idx);
+                GGML_ASSERT(ext.x == ubatch.pos[i + ubatch.n_tokens*2]);
+                GGML_ASSERT(ext.y == ubatch.pos[i + ubatch.n_tokens]);
+            }
         }
     } else {
         // whole KV cache restore

@@ -75,6 +75,9 @@ struct llama_model_loader {
     uint64_t n_elements = 0;
     size_t   n_bytes    = 0;
 
+    uint32_t n_gpu_layers = 0;
+    uint32_t i_gpu_start = 0;
+
     bool use_mmap = false;
     bool use_direct_io = false;
     bool use_hugepages = false;

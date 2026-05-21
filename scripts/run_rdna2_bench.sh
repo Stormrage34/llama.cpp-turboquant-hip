@@ -144,13 +144,11 @@ declare -A RESULTS_VRAM
 for prompt_len in "${PROMPT_SIZES[@]}"; do
     echo -e "${CYAN}=== Context: ${prompt_len} tokens ===${NC}"
 
-    # Set environment variables
+    # RDNA2_MATMUL_OPT_V1 env var is deprecated (trait-gated). No runtime toggle needed.
     if [ "${MODE}" = "optimized" ]; then
-        export RDNA2_MATMUL_OPT_V1=1
-        echo "  Env: RDNA2_MATMUL_OPT_V1=1"
+        echo "  Mode: optimized (RDNA2 traits active)"
     else
-        unset RDNA2_MATMUL_OPT_V1
-        echo "  Env: baseline (no RDNA2 optimizations)"
+        echo "  Mode: baseline (VGPR_OPT_V1=OFF in cmake)"
     fi
 
     echo "  Running (${RUNS} iterations)..."

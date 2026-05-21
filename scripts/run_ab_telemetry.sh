@@ -17,7 +17,7 @@
 #   ./scripts/run_ab_telemetry.sh <model.gguf> <flag_name> [runs]
 #
 # Examples:
-#   ./scripts/run_ab_telemetry.sh model.gguf RDNA2_MATMUL_OPT_V1 5
+#   ./scripts/run_ab_telemetry.sh model.gguf RDNA2_ASYNC_ROUTING 5
 #
 # Output:
 #   benchmarks/ab_telemetry/<flag_name>/ — CSV + summary
@@ -32,8 +32,8 @@ NUM_RUNS="${3:-3}"
 if [ -z "$MODEL" ] || [ -z "$FLAG_NAME" ]; then
     echo "Usage: $0 <model.gguf> <flag_name> [runs]"
     echo ""
-    echo "Supported flags:"
-    echo "  RDNA2_MATMUL_OPT_V1  — LDS double-buffer matmul for MoE"
+    echo "Supported flags (runtime-enable via env var):"
+    echo "  RDNA2_ASYNC_ROUTING  — Async admin stream for MoE routing (experimental)"
     echo ""
     echo "The flag must be compiled into the binary (check CMakeLists.txt)."
     echo "This script toggles the RUNTIME env var only."
@@ -112,7 +112,8 @@ run_variant() {
         local run_outdir="${outdir}/run_${run}"
         mkdir -p "$run_outdir"
 
-        # Build env vars: always enable base RDNA2 flags, toggle target flag
+        # Build env vars: toggle target flag + any extra env
+        env_vars="${FLAG_NAME}=${env_flag}"
         if [ -n "$extra_env" ]; then
             env_vars="${env_vars} ${extra_env}"
         fi

@@ -1391,6 +1391,96 @@ void llama_model_loader::get_mapping_range(size_t * first, size_t * last, void *
     }
 }
 
+#ifdef RDNA2_CACHE_SWIZZLE
+// IQ4_XS block sizes (AoS: 136B = 2B d + 2B scales_h + 4B scales_l + 128B qs)
+#define IQ4_XS_BLOCK_SIZE      136
+#define IQ4_XS_QS_SIZE_HOST    128
+#define IQ4_XS_META_SIZE_HOST  8
+
+// Convert IQ4_XS from AoS layout to SoA (cache-aware swizzled) layout.
+// SoA: [qs_blk0(128B)]...[qs_blkN-1(128B)] [meta_blk0(8B)]...[meta_blkN-1(8B)]
+static void swizzle_iq4_xs_host(void * data, size_t nbytes) {
+    const size_t n_blocks = nbytes / IQ4_XS_BLOCK_SIZE;
+    if (n_blocks == 0) return;
+
+    // Allocate temp buffer for SoA layout
+    std::vector<uint8_t> tmp(nbytes);
+
+    // SoA layout: all qs blocks first, then all meta blocks
+    uint8_t * qs_dst   = tmp.data();                                    // qs portion: n_blocks * 128B
+    uint8_t * meta_dst = tmp.data() + n_blocks * IQ4_XS_QS_SIZE_HOST;   // meta portion: n_blocks * 8B
+
+    const uint8_t * src = (const uint8_t *)data;
+    for (size_t b = 0; b < n_blocks; b++) {
+        const uint8_t * blk = src + b * IQ4_XS_BLOCK_SIZE;
+        // Copy qs[128] to qs portion
+        memcpy(qs_dst + b * IQ4_XS_QS_SIZE_HOST, blk + 8, IQ4_XS_QS_SIZE_HOST);
+        // Copy d(2B) + scales_h(2B) + scales_l(4B) = 8B to meta portion
+        memcpy(meta_dst + b * IQ4_XS_META_SIZE_HOST, blk, IQ4_XS_META_SIZE_HOST);
+    }
+
+    // Copy back to original buffer
+    memcpy(data, tmp.data(), nbytes);
+}
+// Q4_K block sizes (AoS: 144B = dm(4B) + scales(12B) + qs(128B))
+#define Q4_K_BLOCK_SIZE      144
+#define Q4_K_QS_SIZE_HOST    128
+#define Q4_K_META_SIZE_HOST  16
+
+// Convert Q4_K from AoS layout to intra-block (cache-aware) layout.
+// Intra-block: [qs(128B)] + [dm(4B)] + [scales(12B)] — qs at offset 0 for cache line alignment
+// AoS layout (block_q4_K): dm(4B) + scales(12B) + qs(128B) — qs at offset 16
+// All kernel functions access fields by NAME (bq4_K->qs, bq4_K->dm, bq4_K->scales),
+// so field ordering in the struct doesn't matter. Only byte offset in the buffer matters.
+static void swizzle_q4_K_host(void * data, size_t nbytes) {
+    const size_t n_blocks = nbytes / Q4_K_BLOCK_SIZE;
+    if (n_blocks == 0) return;
+
+    // In-place per-block reorder: [dm(4)+scales(12)+qs(128)] → [qs(128)+dm(4)+scales(12)]
+    // AoS qs starts at offset 16 = sizeof(ggml_half)*2 + K_SCALE_SIZE = 4 + 12
+    constexpr size_t aos_qs_offset = 16; // dm(4B) + scales(12B)
+    constexpr size_t qs_size       = Q4_K_QS_SIZE_HOST; // 128
+    uint8_t tmp[Q4_K_BLOCK_SIZE];
+    for (size_t b = 0; b < n_blocks; b++) {
+        uint8_t * blk = (uint8_t *)data + b * Q4_K_BLOCK_SIZE;
+        // Save whole block to temp
+        memcpy(tmp, blk, Q4_K_BLOCK_SIZE);
+        // Write qs (offset 16 in AoS) to offset 0 in intra-block
+        memcpy(blk, tmp + aos_qs_offset, qs_size);
+        // Write dm+scales (offset 0 in AoS) to offset 128 in intra-block
+        memcpy(blk + qs_size, tmp, aos_qs_offset);
+    }
+}
+
+// Q5_K block sizes (AoS: 176B = dm(4B) + scales(12B) + qh(32B) + qs(128B))
+#define Q5_K_BLOCK_SIZE      176
+#define Q5_K_QS_SIZE_HOST    128
+#define Q5_K_META_SIZE_HOST  48
+
+// Convert Q5_K from AoS layout to SoA (cache-aware swizzled) layout.
+// SoA: [qs_blk0(128B)]...[qs_blkN-1(128B)] [meta_blk0(48B)]...[meta_blkN-1(48B)]
+static void swizzle_q5_K_host(void * data, size_t nbytes) {
+    const size_t n_blocks = nbytes / Q5_K_BLOCK_SIZE;
+    if (n_blocks == 0) return;
+
+    std::vector<uint8_t> tmp(nbytes);
+
+    uint8_t * qs_dst   = tmp.data();
+    uint8_t * meta_dst = tmp.data() + n_blocks * Q5_K_QS_SIZE_HOST;
+
+    const uint8_t * src = (const uint8_t *)data;
+    for (size_t b = 0; b < n_blocks; b++) {
+        const uint8_t * blk = src + b * Q5_K_BLOCK_SIZE;
+        // Copy qs[128] (offset 48: after dm + scales + qh)
+        memcpy(qs_dst + b * Q5_K_QS_SIZE_HOST, blk + 48, Q5_K_QS_SIZE_HOST);
+        // Copy dm(4B) + scales(12B) + qh(32B) = 48B (offset 0)
+        memcpy(meta_dst + b * Q5_K_META_SIZE_HOST, blk, Q5_K_META_SIZE_HOST);
+    }
+
+    memcpy(data, tmp.data(), nbytes);
+}
+#endif // RDNA2_CACHE_SWIZZLE
+
 void llama_model_loader::load_data_for(struct ggml_tensor * cur) const {
     const auto & w = require_weight(ggml_get_name(cur));
 
@@ -1409,9 +1499,40 @@ void llama_model_loader::load_data_for(struct ggml_tensor * cur) const {
         file->read_raw(cur->data, ggml_nbytes(cur));
     }
 
+    // Validate tensor data BEFORE swizzle (validation checks AoS layout)
     if (check_tensors && !ggml_validate_row_data(cur->type, cur->data, ggml_nbytes(cur))) {
         throw std::runtime_error(format("tensor '%s' has invalid data", ggml_get_name(cur)));
     }
+
+#ifdef RDNA2_CACHE_SWIZZLE
+    // Only swizzle GPU-resident tensors to avoid CPU layers reading SoA as AoS
+    if (cur->type == GGML_TYPE_IQ4_XS
+#if defined(RDNA2_SWIZZLE_ALL_QUANTS)
+        || cur->type == GGML_TYPE_Q4_K || cur->type == GGML_TYPE_Q5_K
+#endif
+    ) {
+        bool gpu_resident = false;
+        const char * cname = ggml_get_name(cur);
+        if (cname) {
+            if (strcmp(cname, "output.weight") == 0 || strcmp(cname, "token_embd.weight") == 0) {
+                gpu_resident = (n_gpu_layers > 0);
+            } else {
+                int layer = -1;
+                if (sscanf(cname, "blk.%d", &layer) == 1 && layer >= 0) {
+                    gpu_resident = ((uint32_t)layer >= i_gpu_start);
+                }
+            }
+        }
+        if (gpu_resident) {
+            switch (cur->type) {
+                case GGML_TYPE_IQ4_XS: swizzle_iq4_xs_host(cur->data, ggml_nbytes(cur)); break;
+                case GGML_TYPE_Q4_K:  swizzle_q4_K_host(cur->data, ggml_nbytes(cur));  break;
+                case GGML_TYPE_Q5_K:  swizzle_q5_K_host(cur->data, ggml_nbytes(cur));  break;
+                default: break;
+            }
+        }
+    }
+#endif
 }
 
 bool llama_model_loader::load_all_data(

@@ -91,27 +91,74 @@ jobs:
           version_major: ${{ env.OPENVINO_VERSION_MAJOR }}
           version_full: ${{ env.OPENVINO_VERSION_FULL }}
 
-  windows-2022-rocm-cache:
-    runs-on: windows-2022
-
-    env:
-      # Make sure this is in sync with build.yml
-      HIPSDK_INSTALLER_VERSION: "26.Q1"
+  ubuntu-22-hip-turboquant-cache:
+    runs-on: ubuntu-22.04
+    container: rocm/dev-ubuntu-22.04:7.2.1
 
     steps:
       - name: Clone
         id: checkout
         uses: actions/checkout@v6
 
-      - name: Setup Cache
-        uses: actions/cache@v5
-        id: cache-rocm
-        with:
-          path: C:\Program Files\AMD\ROCm
-          key: rocm-${{ env.HIPSDK_INSTALLER_VERSION }}-${{ runner.os }}
+      - name: Dependencies
+        id: depends
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential git cmake rocblas-dev hipblas-dev libssl-dev rocwmma-dev
 
-      - name: Setup ROCm
-        if: steps.cache-rocm.outputs.cache-hit != 'true'
-        uses: ./.github/actions/windows-setup-rocm
+      - name: Setup Cache
+        uses: ggml-org/ccache-action@v1.2.21
+        id: cache-hip
         with:
-          version: ${{ env.HIPSDK_INSTALLER_VERSION }}
+          key: ubuntu-22-hip-turboquant
+          evict-old-files: 1d
+
+      - name: Build with RPATH isolation and RDNA2 optimizations
+        id: cmake_build
+        run: |
+          cmake -B build -S . \
+            -DCMAKE_HIP_COMPILER="$(hipconfig -l)/clang" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_BUILD_RPATH_USE_ORIGIN=ON \
+            -DCMAKE_SHARED_LINKER_FLAGS="-Wl,--disable-new-dtags" \
+            -DCMAKE_EXE_LINKER_FLAGS="-Wl,--disable-new-dtags" \
+            -DGGML_HIP_ROCWMMA_FATTN=ON \
+            -DGPU_TARGETS="gfx1030" \
+            -DGGML_HIP=ON \
+            -DRDNA2_MOE_STREAM_V1=ON \
+            -DGGML_RDNA2_BFE_DISPATCHER=ON
+          cmake --build build --config Release -j $(nproc)
+
+  ubuntu-22-hip-quality-check-cache:
+    runs-on: ubuntu-22.04
+    container: rocm/dev-ubuntu-22.04:7.2.1
+
+    steps:
+      - name: Clone
+        id: checkout
+        uses: actions/checkout@v6
+
+      - name: Dependencies
+        id: depends
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential git cmake rocblas-dev hipblas-dev libssl-dev python3
+
+      - name: Setup Cache
+        uses: ggml-org/ccache-action@v1.2.21
+        id: cache-hip-qc
+        with:
+          key: ubuntu-22-hip-quality-check
+          evict-old-files: 1d
+
+      - name: Build with Werror
+        id: cmake_build
+        run: |
+          cmake -B build -S . \
+            -DCMAKE_HIP_COMPILER="$(hipconfig -l)/clang" \
+            -DGPU_TARGETS=gfx942 \
+            -DGGML_HIP=ON \
+            -DGGML_HIP_EXPORT_METRICS=Off \
+            -DCMAKE_HIP_FLAGS="-Werror -Wno-tautological-compare" \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release -j $(nproc)

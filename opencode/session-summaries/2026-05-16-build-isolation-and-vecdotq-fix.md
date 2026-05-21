@@ -9,7 +9,7 @@ quantized weight reads via `get_int_b1`/`get_int_b2`/`get_int_b4`. This corrupte
 address calculation: for indices 0-3 within any 16-byte chunk, **all reads returned the
 same 4 bytes** (from `base & ~0xF`), meaning every row of quantized weights was
 duplicated 4× instead of reading distinct rows. This produced the mixed-script garbage
-output (e.g. `evelปุевичFTWARE全屏查看шта技术在`).
+output (e.g. `mixed-script-garbage`).
 
 **Fix:** Reverted to upstream byte-by-byte/2-byte/4-byte accessors. The original code
 handles unaligned loads correctly via individual byte reads, which is safe on all GPU

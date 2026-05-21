@@ -51,7 +51,7 @@ _vram_gib() {
     # Try rocm-smi first (more reliable than sysfs)
     local vram_pct
     vram_pct=$(rocm-smi --showmemuse 2>/dev/null | grep "GPU Memory Allocated (VRAM%)" | awk '{print $NF}' | head -1)
-    if [[ -n "$vram_pct" && "$vram_pct" =~ ^[0-9]+$ ]]; then
+    if [[ -n "$vram_pct" && "$vram_pct" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
         # RX 6800 XT has 16384 MiB VRAM
         local vram_mib=$(( 16384 * vram_pct / 100 ))
         awk "BEGIN { printf \"%.1f\", $vram_mib / 1024 }"
@@ -85,6 +85,13 @@ _parse_bench_output() {
 }
 
 # ─── Pre-flight checks ─────────────────────────────────────────────────────────
+# GPU Gate: Ensure no conflicting GPU processes
+source "${SCRIPT_DIR}/gpu_failback.sh"
+if ! gpu_ensure_free; then
+    exit 1
+fi
+echo "GPU Gate: CLEAR"
+
 if [ ! -x "$BINARY" ]; then
     echo "❌ Binary not found: $BINARY"
     echo "   Build first: cmake --build build --target llama-bench -- -j\$(nproc)"
@@ -107,6 +114,35 @@ CAN_DROP_CACHE=false
 if _is_root; then
     CAN_DROP_CACHE=true
 fi
+
+# ─── Stale Binary Detection ─────────────────────────────────────────────────────
+# If a shared lib is newer than the binary that links it, a partial rebuild
+# was done (common cause of SIGSEGV on HIP backend init).
+check_stale_binaries() {
+    local stale_found=0
+    local bins=("llama-server" "llama-cli" "llama-bench")
+    local libs=("libggml-hip.so.0" "libggml-cpu.so.0" "libggml-base.so.0" "libllama.so.0" "libllama-common.so.0")
+    local bin_dir="$(dirname "$BINARY")"
+    for bin_name in "${bins[@]}"; do
+        local bin_path="${bin_dir}/${bin_name}"
+        [[ -f "$bin_path" ]] || continue
+        for lib_name in "${libs[@]}"; do
+            local lib_path="${bin_dir}/${lib_name}"
+            [[ -f "$lib_path" ]] || continue
+            if [[ "$lib_path" -nt "$bin_path" ]]; then
+                echo "⚠ STALE BINARY: ${bin_name} is older than ${lib_name}"
+                echo "  → Partial rebuild detected. Full rebuild required."
+                stale_found=1
+            fi
+        done
+    done
+    return $stale_found
+}
+check_stale_binaries && {
+    echo "  [stale binary check: clean]"
+} || {
+    echo "⚠ Stale binaries detected — SIGSEGV risk during inference."
+}
 
 # ─── Setup ─────────────────────────────────────────────────────────────────────
 gpu_failback_trap
@@ -168,10 +204,12 @@ for config_entry in "${CONFIGS[@]}"; do
     fi
     RUN_CMD+=("$BINARY" "${CMD_ARGS[@]}")
 
-    # Execute with timeout
+    # Execute with timeout (explicit exit code check avoids fragile set -e inside || {})
     set +e
-    OUTPUT=$(timeout "$TIMEOUT_SEC" "${RUN_CMD[@]}" 2>&1) || {
-        exit_code=$?
+    OUTPUT=$(timeout "$TIMEOUT_SEC" "${RUN_CMD[@]}" 2>&1)
+    exit_code=$?
+    set -euo pipefail
+    if [ "$exit_code" -ne 0 ]; then
         if [ "$exit_code" -eq 124 ]; then
             echo "TIMEOUT (>${TIMEOUT_SEC}s)"
         else
@@ -180,18 +218,16 @@ for config_entry in "${CONFIGS[@]}"; do
         echo "  ⚠ Skipping config $name"
         RESULTS+=("$name|FAILED|FAILED|0|0")
         gpu_release > /dev/null 2>&1 || true
-        set -e
         continue
-    }
-    set -euo pipefail
+    fi
     echo "done"
 
     # Measure VRAM after
     VRAM_AFTER=$(_vram_gib) || VRAM_AFTER="0"
     echo "  VRAM after:  ${VRAM_AFTER} GiB"
 
-    # Extract VRAM used (use max of before/after as the steady-state)
-    VRAM_USED=$(awk "BEGIN { v=$VRAM_AFTER; if (v < $VRAM_BEFORE) v=$VRAM_BEFORE; printf \"%.1f\", v }")
+    # Extract VRAM used (delta: after - before, clamped at 0)
+    VRAM_USED=$(awk "BEGIN { v=$VRAM_AFTER - $VRAM_BEFORE; if (v < 0) v=0; printf \"%.1f\", v }")
 
     # Parse results
     PP512=$(_parse_bench_output "$OUTPUT" "pp512")

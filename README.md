@@ -1,4 +1,4 @@
-# llama.cpp-turboquant-hip (Stormrage Edition) — v0.4.3-beta
+# llama.cpp-turboquant-hip (Stormrage Edition) — v0.5.0-stable
 
 ![llama](https://user-images.githubusercontent.com/1991296/230134379-7181e485-c521-4d23-a0d6-f7b3b61ba524.png)
 
@@ -32,7 +32,7 @@ Our goal: make AMD RDNA 2 (RX 6000 series) users happy by pushing the limits of 
 
 This is both a **usable daily-driver fork** and a **research project** exploring RDNA2 ISA-level optimization — from LDS double-buffered matmuls to `v_bfe_u32` dequant and async MoE stream pipelines.
 
-**Status**: v0.4.3-beta — benchmarked, documented, and actively developed. See [What's Next](#-whats-next--roadmap-v050) for the roadmap.
+**Status**: v0.4.4-beta — bug hunt release (17 fixes). See [What's Next](#-whats-next--roadmap-v050) for the roadmap.
 
 ---
 
@@ -205,6 +205,10 @@ All flags are **inert by default** — the fork runs identically to upstream whe
 | **Build Isolation** | RPATH-based `.so` resolution prevents cross-fork ABI mismatch | v0.4.0-stable |
 | **MTP Speculative Decoding** | Built-in multi-token prediction head (78.7% acceptance) | v0.4.2-stable |
 | **Benchmark Infrastructure** | Standardized `run_benchmark.sh` harness with server lifecycle | v0.4.3-beta |
+| **128-bit V128 Load** | `RDNA2_V128_LOAD` — replaces 4× `get_int_b4` with 1× int4 load in nvfp4 kernel; matches RDNA2 128B cache line | v0.4.4-beta (default ON) |
+| **Expert Load Macros** | `LOAD_EXPERT_F32`/`LOAD_EXPERT_F32X4` SLC=1 cache-bypass for MoE | v0.4.3-beta |
+| **Cache Swizzling (IQ4_XS)** | `RDNA2_CACHE_SWIZZLE` — AoS→SoA reorder so qs[128] aligns to 128B L3 cache lines; eliminates 5.9% straddle waste | v0.4.4-beta (experimental, OFF) |
+| **Infinity Cache Batch Loading** | `cp.async.cg.shared.global.L2::256B` hint batches 16×16B copies into single 256B cache-coherent transfer; full Infinity Cache bandwidth utilization | v0.4.4-beta (always ON when `CP_ASYNC_AVAILABLE`) |
 
 ---
 
@@ -231,12 +235,20 @@ cd build && ctest -L main -E "test-llama-archs" --verbose --timeout 900
 
 ## 🆕 Changelog
 
+### v0.4.4-beta (2026-05-20) — Bug Hunt Release (17 fixes)
+- **P0 (2):** Crash on unused graph inputs — null checks added (`src/llama-graph.cpp`). FA device mismatch with `--no-kv-offload` — explicit device comparison (`src/llama-context.cpp`).
+- **P1 (3):** BitNet wrong output tensor (`src/models/bitnet.cpp`). MPT q_norm test crash — corrected tensor shapes (`src/models/mpt.cpp`). Token type i32 vs u32 FIXME documented (`src/llama-model-saver.cpp`).
+- **P2 (12):** Stubbed training functions removed, redundant synchronize() removed, size_t→int overflow casts + bounds checks, zero-size tensor guards, stats misclassification race fixed, DeepSeek2 misleading FIXME clarified, GGML_ASSERT→graceful equal_seqs handling, KV cache multi-stream assert fixed, KV cache save/restore TODO removed, BF16 FP32 fallback restructured, chat template jinja runtime fixed, metadata flags switch→bitwise AND.
+- **Documentation**: CHANGELOG.md created, project-state Decision Log updated, AGENTS.md gotchas expanded.
+
 ### v0.4.3-beta (2026-05-18)
 - **Benchmark infrastructure**: Standardized `run_benchmark.sh` harness with server lifecycle management
 - **Comprehensive benchmark report**: Full cache comparison, context scaling, VRAM scaling, MTP acceptance analysis
-- **Triple-sync bug identified**: P0 issue found in `server-context.cpp` (speculative decoding synchronization)
-- **MTP optimization research**: Documented D2H transfer barriers and parallel decoding gaps
-- **Documentation**: README.md rewritten with comprehensive benchmark findings
+- **Triple-sync bug fixed**: P0 fix — removed redundant `llama_synchronize()` calls in speculative decoding (both syncs were immediately followed by `ggml_backend_tensor_get()` which syncs internally)
+- **load_gtt_slc wired**: `LOAD_EXPERT_F32`/`LOAD_EXPERT_F32X4` macros added in `common.cuh` for MoE expert weight loads (SLC=1 cache-bypass)
+- **128-bit V128_LOAD enabled by default**: Council-approved `RDNA2_V128_LOAD` gate in `vecdotq.cuh` — replaces 4× `get_int_b4` with 1× `int4` load in nvfp4 kernel. ON by default (+4 VGPRs, matches 128B L3 cache line).
+- **Cache comparison benchmark**: 5 cache configs × 4 prompts tested — **turbo3/turbo3 wins** (40.7 avg t/s, 2193 MiB VRAM)
+- **Documentation**: README.md rewritten with comprehensive benchmark findings, roadmap updated
 
 ### v0.4.2-stable (2026-05-17)
 - **CI/CD pipeline fixed**: Branch triggers `master`→`main`, RPATH isolation (`--disable-new-dtags`)
@@ -278,25 +290,39 @@ cd build && ctest -L main -E "test-llama-archs" --verbose --timeout 900
 
 ---
 
-## 🔮 What's Next — Roadmap v0.5.0
+## 🔮 What's Next — Roadmap v0.5.0 (Updated 2026-05-19)
 
-### P0: Critical Fixes (v0.4.3)
-- [ ] **Apply triple-sync removal in `speculative.cpp`**: Already identified in `server-context.cpp`, needs implementation in speculative decoding path
-- [ ] **Wire `load_gtt_slc()` into MoE weight fetch path**: Pillar 2 from Librarian research — currently dead code in MoE decode path
+**Chief Engineer PyTorch Benchmark Findings** (2026-05-19):
+- **GPU ceiling**: 35.7 FP16 TFLOPS, 469 GB/s memory bandwidth
+- **Current usage**: ~17 GB/s (**3.6%** of available bandwidth)
+- **Bottleneck**: V_DOT8 instruction stalls, kernel launch overhead, MoE sync stalls
+- **Implication**: Memory bandwidth optimizations have limited ROI until instruction stalls addressed
+
+### P0: MTP Configuration Tuning (v0.5.0) — **NEW**
+- [ ] **Increase `--spec-draft-n-max` to 3**: Test if 78.7% acceptance holds at deeper draft depth
+  - **Expected gain**: +20-30% (config change, zero risk, 5 min)
+
+### P1: Kernel Launch Overhead Reduction (v0.5.0) — **NEW**
+- [ ] **HIP Graph or kernel fusion**: Reduce launch overhead identified in PyTorch benchmark
+  - **Expected gain**: +10-15% (targets identified bottleneck)
+
+### P2: MoE Weight Prefetch (v0.5.0) — **WIRED**
+- [x] `LOAD_EXPERT_F32/F32X4` macros defined (`common.cuh:1558-1559`)
+- [ ] **Wire into vec_dot kernels**: Connect macros to actual MoE expert weight loads
+  - **Expected gain**: +5-10% (existing macros, just needs connection)
 
 ### P1: MTP Optimization (v0.4.4)
 - [ ] **Pinned memory for MTP D2H transfers**: Eliminate prompt processing overhead via `hipHostMalloc`
 - [ ] **Shared MTP draft context across server slots**: Reduce memory duplication in multi-user scenarios
 
 ### P2: ISA-Level Optimizations (v0.5.0)
-- [ ] **128-bit vector loads** (`BUFFER_LOAD_DWORD4`): Replace scalar loads in `vec_dot_q*_K_q8_1()`
-- [ ] **Software prefetch** (`s_buffer_load_dword`): Hide VRAM latency in weight fetch loop
-- [ ] **MoE decode weight preload** (Admin Stream V2): Extend `RDNA2_ASYNC_ROUTING` from prefill to decode path
+- [x] **128-bit vector loads** (`BUFFER_LOAD_DWORD4`): Implemented for nvfp4 kernel (OFF by default)
+- [ ] **MoE decode weight preload** (Admin Stream V2): Extend `RDNA2_ASYNC_ROUTING` to decode path
 
-### P3: Advanced Research (v0.6.0)
+### P3: Demoted / Advanced Research (v0.6.0 or later)
+- [ ] **Software prefetch** (Idea B): **DEMOTED** — Infinity Cache may limit ROI (only 3.6% bandwidth utilized)
+- [ ] **Cooperative warp shuffle** (Idea E): Deferred — IQ4_NL only, narrow impact
 - [ ] **Double-buffer MTP AR loop**: Overlap draft generation with verification
-- [ ] **Cooperative warp shuffle** (`DS_SWIZZLE` / `V_DPP`): IQ4_NL only, wave-level weight distribution
-- [ ] **SDWA register packing**: Goal: 32 VGPR sustained for 100% occupancy
 
 See `opencode/agents/DEEP_ISA_MISSION.md` for the full ISA-level roadmap with telemetry gates.
 
@@ -346,6 +372,6 @@ See `opencode/agents/DEEP_ISA_MISSION.md` for the full roadmap.
 
 ---
 
-**Last updated**: 2026-05-18  
+**Last updated**: 2026-05-20  
 **Maintainer**: @Stormrage34  
 **License**: MIT

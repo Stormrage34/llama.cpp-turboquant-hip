@@ -471,6 +471,13 @@ int main(int argc, char ** argv) {
         return true;
     };
 
+    // Auto-enable single-turn when -p is given without -i (interactive)
+    // Prevents the CLI from falling into interactive mode and flooding newlines
+    // (Qwen3-specific issue where empty input triggers continued generation)
+    if (!params.prompt.empty() && !params.interactive && !params.interactive_first) {
+        params.single_turn = true;
+    }
+
     while (true) {
         std::string buffer;
         console::set_display(DISPLAY_TYPE_USER_INPUT);

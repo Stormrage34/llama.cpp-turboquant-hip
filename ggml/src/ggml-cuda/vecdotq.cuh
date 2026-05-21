@@ -866,10 +866,14 @@ static __device__ __forceinline__ float vec_dot_q3_K_q8_1(
     return vec_dot_q3_K_q8_1_impl_mmvq(vl, vh, u, bq3_K->scales, scale_offset, d, d8);
 }
 
-static __device__ __forceinline__ float vec_dot_q4_K_q8_1(
+// Template wrapper for Q4_K vec_dot — parameterized on block type (AoS or intra-block).
+// All field accesses use bq4_K->qs, bq4_K->dm, bq4_K->scales by name,
+// so the body is identical for both block_q4_K and block_q4_K_intra.
+template <typename BlockType>
+static __device__ __forceinline__ float vec_dot_q4_K_q8_1_tmpl(
     const void * __restrict__ vbq, const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs) {
 
-    const block_q4_K * bq4_K = (const block_q4_K *) vbq + kbx;
+    const BlockType * bq4_K = (const BlockType *) vbq + kbx;
 
     int    v[2];
     int    u[2*QR4_K];
@@ -910,6 +914,12 @@ static __device__ __forceinline__ float vec_dot_q4_K_q8_1(
     }
 
     return vec_dot_q4_K_q8_1_impl_vmmq(v, u, sc, m, bq4_K->dm, d8);
+}
+
+// Standard AoS path — uses block_q4_K
+static __device__ __forceinline__ float vec_dot_q4_K_q8_1(
+    const void * __restrict__ vbq, const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs) {
+    return vec_dot_q4_K_q8_1_tmpl<block_q4_K>(vbq, bq8_1, kbx, iqs);
 }
 
 static __device__ __forceinline__ float vec_dot_q5_K_q8_1(
@@ -1332,3 +1342,115 @@ static __device__ __forceinline__ float vec_dot_iq4_xs_q8_1(
     const float d = __half2float(bq4->d) * __low2float(bq8_1[iqs/4].ds);
     return d * sumi;
 }
+
+// ─── RDNA2 L2-aware Swizzled (SoA) Vec_Dot ─────────────────────
+// gfx1030 cache topology: L1 (TCP) 64B, L2 (TCC) 128B
+// SoA layout (see llama-model-loader.cpp swizzle_iq4_xs_host):
+//   [qs_blk0(128B)]...[qs_blkN-1(128B)] [meta_blk0(8B)]...[meta_blkN-1(8B)]
+// d_swizzle_meta_offset is set from host before kernel launch
+#if defined(RDNA2_CACHE_SWIZZLE)
+
+#define RDNA2_L2_CACHELINE_BYTES 128
+#define ALIGN_TO_L2(size) (((size) + RDNA2_L2_CACHELINE_BYTES - 1) & ~(RDNA2_L2_CACHELINE_BYTES - 1))
+
+// Per-block sizes matching host-side swizzle transform
+#define IQ4_XS_QS_SIZE_HOST   128
+#define IQ4_XS_META_SIZE_HOST 8
+
+// SoA meta section offset, set per-kernel-launch from tensor dimensions.
+// Must NOT use __constant__ (breaks CUDA graph capture via hipMemcpyToSymbol).
+// Instead, set from the kernel function via d_swizzle_meta_offset = ne01 * (ne00/QK_K) * 128.
+static __device__ int64_t d_swizzle_meta_offset = 0;
+
+static __device__ __forceinline__ float vec_dot_iq4_xs_q8_1_swizzled(
+    const void * __restrict__ vbq, const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs) {
+
+    // SoA access: qs at kbx*128, meta at meta_offset + kbx*8
+    const uint8_t * qs_ptr   = (const uint8_t *)vbq + (size_t)kbx * IQ4_XS_QS_SIZE_HOST;
+    const uint8_t * meta_ptr = (const uint8_t *)vbq + d_swizzle_meta_offset + (size_t)kbx * IQ4_XS_META_SIZE_HOST;
+
+    // Read meta: d(2B) + scales_h(2B) + scales_l(4B) = 8B
+    const ggml_half d_half   = *(const ggml_half *)(meta_ptr + 0);
+    const uint16_t scales_h  = *(const uint16_t *)(meta_ptr + 2);
+    const uint8_t * scales_l = meta_ptr + 4;
+
+    int sumi = 0;
+#pragma unroll
+    for (int j = 0; j < 4; ++j) {
+        const int aux_q4 = get_int_b4(qs_ptr, iqs + j);
+        const int2 v = get_int_from_table_16(aux_q4, kvalues_iq4nl);
+
+        const int u0 = get_int_b4(bq8_1[iqs/4].qs, j + 0);
+        const int u1 = get_int_b4(bq8_1[iqs/4].qs, j + 4);
+
+        sumi = ggml_cuda_dp4a(v.x, u0, sumi);
+        sumi = ggml_cuda_dp4a(v.y, u1, sumi);
+    }
+
+    // Same scale decode as standard vec_dot_iq4_xs_q8_1
+    const int ls = ((scales_l[iqs/8] >> (iqs & 0x04)) & 0x0F) | (((scales_h >> (iqs/2)) & 0x03) << 4);
+    sumi *= ls - 32;
+
+    const float d = __half2float(d_half) * __low2float(bq8_1[iqs/4].ds);
+    return d * sumi;
+}
+
+// Intra-block vec_dot for Q4_K — uses block_q4_K_intra (qs at offset 0 for cache line alignment)
+static __device__ __forceinline__ float vec_dot_q4_K_q8_1_swizzled(
+    const void * __restrict__ vbq, const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs) {
+    return vec_dot_q4_K_q8_1_tmpl<block_q4_K_intra>(vbq, bq8_1, kbx, iqs);
+}
+
+// Q5_K SoA: qs(128B) + meta(dm+scales+qh=48B)
+#define Q5_K_QS_SIZE_HOST   128
+#define Q5_K_META_SIZE_HOST 48
+
+static __device__ __forceinline__ float vec_dot_q5_K_q8_1_swizzled(
+    const void * __restrict__ vbq, const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs) {
+
+    const uint8_t * qs_ptr   = (const uint8_t *)vbq + (size_t)kbx * Q5_K_QS_SIZE_HOST;
+    const uint8_t * meta_ptr = (const uint8_t *)vbq + d_swizzle_meta_offset + (size_t)kbx * Q5_K_META_SIZE_HOST;
+
+    const uint32_t dm         = *(const uint32_t *)(meta_ptr + 0);
+    const uint16_t * scales   = (const uint16_t *)(meta_ptr + 4);
+    const int * qh            = (const int *)(meta_ptr + 16);
+
+    int   vl[2];
+    int   vh[2];
+    int    u[2*QR5_K];
+    half d8[QR5_K];
+
+    const int bq8_offset = QR5_K * ((iqs/2) / (QI8_1/2));
+    const int * ql = (const int *)(qs_ptr + 16 * bq8_offset + 4 * ((iqs/2)%4));
+
+    vl[0] = ql[0];
+    vl[1] = ql[4];
+
+    vh[0] = qh[0] >> bq8_offset;
+    vh[1] = qh[4] >> bq8_offset;
+
+    uint16_t aux[2];
+    const int j = bq8_offset/2;
+    if (j < 2) {
+        aux[0] = scales[j+0] & 0x3f3f;
+        aux[1] = scales[j+2] & 0x3f3f;
+    } else {
+        aux[0] = ((scales[j+2] >> 0) & 0x0f0f) | ((scales[j-2] & 0xc0c0) >> 2);
+        aux[1] = ((scales[j+2] >> 4) & 0x0f0f) | ((scales[j-0] & 0xc0c0) >> 2);
+    }
+    const uint8_t * sc = (const uint8_t *)aux;
+    const uint8_t * m  = sc + 2;
+
+#pragma unroll
+    for (int i = 0; i < QR5_K; ++i) {
+        const block_q8_1 * bq8i = bq8_1 + bq8_offset + i;
+        d8[i] = ((const half *)&bq8i->ds)[0];
+        const int * q8 = (const int *)bq8i->qs + ((iqs/2)%4);
+        u[2*i+0] = q8[0];
+        u[2*i+1] = q8[4];
+    }
+
+    return vec_dot_q5_K_q8_1_impl_vmmq(vl, vh, u, sc, m, dm, d8);
+}
+
+#endif // RDNA2_CACHE_SWIZZLE

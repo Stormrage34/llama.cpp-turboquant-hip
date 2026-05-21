@@ -137,6 +137,13 @@ endif()
 target_link_libraries(${TARGET} PUBLIC  llama-common-base)
 target_link_libraries(${TARGET} PRIVATE cpp-httplib)
 
+# speculative.cpp uses HIP runtime functions when GGML_USE_HIP is defined.
+# It needs the HIP include path and platform define to compile with host compiler.
+if(GGML_HIP AND DEFINED ROCM_PATH)
+    target_include_directories(${TARGET} PRIVATE ${ROCM_PATH}/include)
+    target_compile_definitions(${TARGET} PRIVATE __HIP_PLATFORM_AMD__=1)
+endif()
+
 if (LLAMA_LLGUIDANCE)
     include(ExternalProject)
     set(LLGUIDANCE_SRC ${CMAKE_BINARY_DIR}/llguidance/source)

@@ -19,46 +19,8 @@ env:
   LLAMA_LOG_PREFIX: 1
   LLAMA_LOG_TIMESTAMPS: 1
 
-jobs:
-  windows-msys2:
-    runs-on: windows-2025
+# Windows not supported — see linux and macOS jobs above
 
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { sys: UCRT64,  env: ucrt-x86_64,  build: Release }
-          - { sys: CLANG64, env: clang-x86_64, build: Release }
-
-    steps:
-      - name: Clone
-        uses: actions/checkout@v6
-
-      #- name: ccache
-      #  uses: ggml-org/ccache-action@v1.2.16
-      #  with:
-      #    key: windows-msys2
-      #    variant: ccache
-      #    evict-old-files: 1d
-      #    save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
-
-      - name: Setup ${{ matrix.sys }}
-        uses: msys2/setup-msys2@cafece8e6baf9247cf9b1bf95097b0b983cc558d # v2
-        with:
-          update: true
-          msystem: ${{matrix.sys}}
-          install: >-
-            base-devel
-            git
-            mingw-w64-${{matrix.env}}-toolchain
-            mingw-w64-${{matrix.env}}-cmake
-            mingw-w64-${{matrix.env}}-openblas
-
-      - name: Build using CMake
-        shell: msys2 {0}
-        run: |
-            cmake -B build
-            cmake --build build --config ${{ matrix.build }} -j $(nproc)
 
       - name: Clean after building using CMake
         shell: msys2 {0}

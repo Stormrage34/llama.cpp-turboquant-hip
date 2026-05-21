@@ -53,6 +53,12 @@ target_compile_features   (llama PRIVATE cxx_std_17) # don't bump
 
 target_link_libraries(llama PUBLIC ggml)
 
+# RDNA2_CACHE_SWIZZLE: global define for swizzle transform + kernel loader alignment
+# (option defined in ggml/src/ggml-hip/CMakeLists.txt)
+if (RDNA2_CACHE_SWIZZLE)
+    add_compile_definitions(RDNA2_CACHE_SWIZZLE)
+endif()
+
 if (BUILD_SHARED_LIBS)
     set_target_properties(llama PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_compile_definitions(llama PRIVATE LLAMA_BUILD)

@@ -6,9 +6,24 @@
 
 | Flag | Purpose | Default | Compile-Time | Runtime | Compatible Models | Status |
 |------|---------|---------|-------------|---------|------------------|--------|
-| `RDNA2_MATMUL_OPT_V1` | LDS double-buffer matmul for MoE | ON | `add_compile_definitions(RDNA2_MATMUL_OPT_V1)` | `RDNA2_MATMUL_OPT_V1=1` | MoE models only | ✅ Stable |
+| `RDNA2_MATMUL_OPT_V1` | LDS double-buffer matmul for MoE (DEPRECATED) | ON | `add_compile_definitions(RDNA2_MATMUL_OPT_V1)` | `RDNA2_MATMUL_OPT_V1=1` | MoE models only | ⚠️ DEPRECATED — true gain was lds_bank_pad=2, now trait-gated |
 | `RDNA2_BFE_DISPATCHER` | `v_bfe_u32` for K-quant nibble unpack | OFF | `-DGGML_RDNA2_BFE_DISPATCHER=ON` | `RDNA2_BFE_DISPATCHER=1` | Q4_K_M, Q5_K_M | ⚠️ Experimental |
 | `RDNA2_EXP_DPP_SCALES` | DPP broadcast for scale loads | ~~OFF~~ | ~~Removed~~ | ~~Removed~~ | ~~IQ4_XS~~ | ❌ Reverted |
+| `RDNA2_V128_LOAD` | 128-bit int4 loads in vec_dot (nvfp4 kernel) | **ON** | `#define RDNA2_V128_LOAD` (vecdotq.cuh:44) | N/A (compile-time) | nvfp4 quantized models | ✅ Stable |
+| `RDNA2_VGPR_OPT_V1` | Split accumulator chains for dual-issue | ON | `add_compile_definitions(RDNA2_VGPR_OPT_V1)` | N/A (compile-time) | All models | ✅ Stable |
+| `RDNA2_EXPERT_SORT` | Expert-aware warp scheduling for MoE MMVQ | OFF | `-DRDNA2_EXPERT_SORT=ON` | N/A (compile-time) | MoE models only | 🔬 Research |
+| `RDNA2_CACHE_SWIZZLE` | IQ4_XS AoS→SoA swizzle for 128B cache line alignment | OFF | `-DRDNA2_CACHE_SWIZZLE=ON` | N/A (compile-time) | IQ4_XS models | 🔬 Research |
+
+### Infinity Cache Optimization Details
+
+**`L2::256B` cp.async hint** — Always compiled in when `CP_ASYNC_AVAILABLE` is defined (`cp-async.cuh:27-28`).
+The GCN assembly `cp.async.cg.shared.global.L2::256B [dst], [src], 16` tells the hardware to prefetch at **256-byte L2 cache line granularity**. When batch-loading KV cache data through cp.async, the 256B hint batches 16×16-byte copies into a single cache-coherent transfer, achieving full **RDNA2 Infinity Cache bandwidth utilization**.
+
+**`RDNA2_V128_LOAD`** — Replaces 4× `get_int_b4` calls with 1× `int4` load in nvfp4 vec_dot kernel (`vecdotq.cuh:365-378`). Matches RDNA2's **128-byte L3 cache line** size, eliminating partial cache line fetches. Enabled by default (+4 VGPRs).
+
+**`RDNA2_CACHE_SWIZZLE`** — Converts IQ4_XS tensor layout from Array-of-Structures (AoS) to Structure-of-Arrays (SoA) so each `qs[128]` block aligns exactly to one **128-byte Infinity Cache line** (`vecdotq.cuh:1383-1448`). Eliminates 5.9% cache line straddle waste. Uses specialized kernel `vec_dot_iq4_xs_q8_1_swizzled`.
+
+**`RDNA2_EXPERT_SORT`** — Pre-sorts MoE routing indices by expert ID before kernel launch. Consecutive warps access the same expert's weights, improving **Infinity Cache hit rates** on RDNA2 by reducing cache thrashing during expert switching.
 
 ## How to Enable
 

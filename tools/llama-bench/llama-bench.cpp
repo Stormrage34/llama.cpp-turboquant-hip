@@ -381,8 +381,8 @@ static const cmd_params cmd_params_defaults = {
     /* poll                 */ { 50 },
     /* n_gpu_layers         */ { 99 },
     /* n_cpu_moe            */ { 0 },
-    /* n_cpu_moe_start      */ 0,
-    /* n_cpu_moe_end        */ 0,
+    /* n_cpu_moe_start      */ -1,
+    /* n_cpu_moe_end        */ -1,
     /* split_mode           */ { LLAMA_SPLIT_MODE_LAYER },
     /* main_gpu             */ { 0 },
     /* no_kv_offload        */ { false },
@@ -530,6 +530,8 @@ static cmd_params parse_cmd_params(int argc, char ** argv) {
     params.delay                = cmd_params_defaults.delay;
     params.progress             = cmd_params_defaults.progress;
     params.no_warmup            = cmd_params_defaults.no_warmup;
+    params.n_cpu_moe_start      = cmd_params_defaults.n_cpu_moe_start;
+    params.n_cpu_moe_end        = cmd_params_defaults.n_cpu_moe_end;
 
     if (const char * env = getenv("HF_TOKEN")) {
         params.hf_token = env;
@@ -1163,8 +1165,9 @@ static cmd_params parse_cmd_params(int argc, char ** argv) {
     }
 
     // mutual exclusivity check for --n-cpu-moe-range and --n-cpu-moe
-    if ((params.n_cpu_moe_start > 0 || params.n_cpu_moe_end > 0) &&
-        !params.n_cpu_moe.empty() && params.n_cpu_moe != cmd_params_defaults.n_cpu_moe) {
+    if ((params.n_cpu_moe_start >= 0 || params.n_cpu_moe_end >= 0) &&
+        !params.n_cpu_moe.empty() &&
+        (params.n_cpu_moe != cmd_params_defaults.n_cpu_moe || params.n_cpu_moe.front() != 0)) {
         fprintf(stderr, "error: --n-cpu-moe-range is mutually exclusive with --n-cpu-moe\n");
         exit(1);
     }
@@ -1221,7 +1224,7 @@ struct cmd_params_instance {
         mparams.no_host       = no_host;
         mparams.cpu_lm_head   = cpu_lm_head;
 
-        if (n_cpu_moe_start > 0 || n_cpu_moe_end > 0) {
+        if (n_cpu_moe_start >= 0 || n_cpu_moe_end >= 0) {
             // range-based MoE CPU offloading
             static std::vector<llama_model_tensor_buft_override> merged_range;
             static std::vector<std::string> patterns_range;

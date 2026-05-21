@@ -101,8 +101,7 @@ if [[ ! -x "${TEST_BIN}" ]]; then
     ((fail_count++))
     [[ ${exit_code} -eq 0 ]] && exit_code=2
 else
-    # Run with all three RDNA2 flags enabled
-    export RDNA2_MATMUL_OPT_V1=1
+    # RDNA2_MATMUL_OPT_V1 env var is deprecated (trait-gated by mmq_get_lds_bank_pad<type>())
     export LD_LIBRARY_PATH="${BUILD_DIR}/bin:${LD_LIBRARY_PATH:-}"
 
     if "${TEST_BIN}"; then
@@ -112,10 +111,9 @@ else
         [[ ${exit_code} -eq 0 ]] && exit_code=2
     fi
 
-    # Also run without flags to verify baseline path works
+    # Also run baseline path to verify non-RDNA2 path works
     echo ""
     echo "--- Step 2b: Baseline path (no flags) ---"
-    unset RDNA2_MATMUL_OPT_V1
     if "${TEST_BIN}"; then
         pass "Baseline path passed"
     else

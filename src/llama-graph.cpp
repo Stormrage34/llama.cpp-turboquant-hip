@@ -74,13 +74,16 @@ static ggml_tensor * ggml_mul_mat_aux(
 }
 
 void llm_graph_input_embd::set_input(const llama_ubatch * ubatch) {
-    if (ubatch->token) {
+    // the tensor may be null if the model graph did not use this input
+    // (e.g. some models only use tokens or only use embd).
+    // skip setting the input in that case to avoid a null-pointer crash.
+    if (ubatch->token && tokens) {
         const int64_t n_tokens = ubatch->n_tokens;
 
         ggml_backend_tensor_set(tokens, ubatch->token, 0, n_tokens*ggml_element_size(tokens));
     }
 
-    if (ubatch->embd) {
+    if (ubatch->embd && embd) {
         GGML_ASSERT(n_embd == embd->ne[0]);
 
         const int64_t n_tokens = ubatch->n_tokens;
@@ -152,13 +155,28 @@ void llm_graph_input_pos_bucket::set_input(const llama_ubatch * ubatch) {
         const int64_t n_tokens = ubatch->n_tokens;
 
         GGML_ASSERT(ggml_backend_buffer_is_host(pos_bucket->buffer));
-        GGML_ASSERT(!ubatch->equal_seqs()); // TODO: use ubatch->n_seqs instead of failing
 
         int32_t * data = (int32_t *) pos_bucket->data;
 
-        for (int j = 0; j < n_tokens; ++j) {
-            for (int i = 0; i < n_tokens; ++i) {
-                data[j*n_tokens + i] = llama_relative_position_bucket(ubatch->pos[i], ubatch->pos[j], hparams.n_rel_attn_bkts, true);
+        if (ubatch->equal_seqs()) {
+            // all sequences share the same token positions, compute for n_seq_tokens and replicate
+            const int64_t n_seq_tokens = ubatch->n_seq_tokens;
+            const int64_t n_seqs       = ubatch->n_seqs;
+            for (int j = 0; j < n_seq_tokens; ++j) {
+                for (int i = 0; i < n_seq_tokens; ++i) {
+                    const int32_t val = llama_relative_position_bucket(ubatch->pos[i], ubatch->pos[j], hparams.n_rel_attn_bkts, true);
+                    for (int sj = 0; sj < n_seqs; ++sj) {
+                        for (int si = 0; si < n_seqs; ++si) {
+                            data[(sj*n_seq_tokens + j)*n_tokens + (si*n_seq_tokens + i)] = val;
+                        }
+                    }
+                }
+            }
+        } else {
+            for (int j = 0; j < n_tokens; ++j) {
+                for (int i = 0; i < n_tokens; ++i) {
+                    data[j*n_tokens + i] = llama_relative_position_bucket(ubatch->pos[i], ubatch->pos[j], hparams.n_rel_attn_bkts, true);
+                }
             }
         }
     }
@@ -549,24 +567,47 @@ void llm_graph_input_attn_cross::set_input(const llama_ubatch * ubatch) {
     const int64_t n_tokens = ubatch->n_tokens;
 
     GGML_ASSERT(ggml_backend_buffer_is_host(cross_kq_mask->buffer));
-    GGML_ASSERT(!ubatch->equal_seqs()); // TODO: use ubatch->n_seqs instead of failing
 
     float * data = (float *) cross_kq_mask->data;
 
-    for (int i = 0; i < n_tokens; ++i) {
-        GGML_ASSERT(!cross->seq_ids_enc.empty() && "llama_encode must be called first");
-        for (int j = 0; j < n_enc; ++j) {
-            float f = -INFINITY;
+    if (ubatch->equal_seqs()) {
+        // all sequences share the same seq_ids, compute for n_seq_tokens and replicate rows
+        const int64_t n_seq_tokens = ubatch->n_seq_tokens;
+        const int64_t n_seqs       = ubatch->n_seqs;
+        for (int it = 0; it < n_seq_tokens; ++it) {
+            GGML_ASSERT(!cross->seq_ids_enc.empty() && "llama_encode must be called first");
+            for (int j = 0; j < n_enc; ++j) {
+                float f = -INFINITY;
 
-            for (int s = 0; s < ubatch->n_seq_id[i]; ++s) {
-                const llama_seq_id seq_id = ubatch->seq_id[i][s];
+                for (int s = 0; s < ubatch->n_seq_id[it]; ++s) {
+                    const llama_seq_id seq_id = ubatch->seq_id[it][s];
 
-                if (cross->seq_ids_enc[j].find(seq_id) != cross->seq_ids_enc[j].end()) {
-                    f = 0.0f;
+                    if (cross->seq_ids_enc[j].find(seq_id) != cross->seq_ids_enc[j].end()) {
+                        f = 0.0f;
+                    }
+                }
+
+                for (int iq = 0; iq < n_seqs; ++iq) {
+                    data[(iq*n_seq_tokens + it)*n_enc + j] = f;
                 }
             }
+        }
+    } else {
+        for (int i = 0; i < n_tokens; ++i) {
+            GGML_ASSERT(!cross->seq_ids_enc.empty() && "llama_encode must be called first");
+            for (int j = 0; j < n_enc; ++j) {
+                float f = -INFINITY;
 
-            data[i*n_enc + j] = f;
+                for (int s = 0; s < ubatch->n_seq_id[i]; ++s) {
+                    const llama_seq_id seq_id = ubatch->seq_id[i][s];
+
+                    if (cross->seq_ids_enc[j].find(seq_id) != cross->seq_ids_enc[j].end()) {
+                        f = 0.0f;
+                    }
+                }
+
+                data[i*n_enc + j] = f;
+            }
         }
     }
 }
@@ -792,7 +833,11 @@ bool llm_graph_input_sampling::can_reuse(const llm_graph_params & params) {
 llm_graph_result::llm_graph_result(int64_t max_nodes) : max_nodes(max_nodes) {
     reset();
 
+#ifdef _GNU_SOURCE
+    const char * LLAMA_GRAPH_RESULT_DEBUG = secure_getenv("LLAMA_GRAPH_RESULT_DEBUG");
+#else
     const char * LLAMA_GRAPH_RESULT_DEBUG = getenv("LLAMA_GRAPH_RESULT_DEBUG");
+#endif
     debug = LLAMA_GRAPH_RESULT_DEBUG ? atoi(LLAMA_GRAPH_RESULT_DEBUG) : 0;
 }
 

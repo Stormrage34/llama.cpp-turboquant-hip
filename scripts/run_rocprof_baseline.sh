@@ -53,8 +53,8 @@ BENCH_ARGS=(
 
 # Run 1: RDNA2 optimized (BFE dequant + async)
 if [ -n "$ROCPROF" ]; then
-        "$ROCPROF" --stats --hip-trace --kernel-trace \
-            -i "${SCRIPT_DIR}/scripts/counters_inf_cache.txt" \
+        "$ROCPROF" \
+            -i "${SCRIPT_DIR}/counters_inf_cache.json" \
             --output-dir "${OUTDIR}/rdna2_opt" \
             "$BENCH" "${BENCH_ARGS[@]}" 2>&1 | tee "${OUTDIR}/rdna2_opt/bench.log"
 else
@@ -64,8 +64,8 @@ fi
 # Run 2: RDNA2 baseline (no opt, standard dequant)
 echo "=== Run 2: RDNA2 baseline (no RDNA2 flags) ==="
 if [ -n "$ROCPROF" ]; then
-    "$ROCPROF" --stats --hip-trace --kernel-trace \
-        -i "${SCRIPT_DIR}/scripts/counters_inf_cache.txt" \
+    "$ROCPROF" \
+        -i "${SCRIPT_DIR}/counters_inf_cache.json" \
         --output-dir "${OUTDIR}/baseline" \
         "$BENCH" "${BENCH_ARGS[@]}" 2>&1 | tee "${OUTDIR}/baseline/bench.log"
 else

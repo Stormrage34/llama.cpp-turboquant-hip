@@ -642,11 +642,12 @@ extern "C" {
 
     // this tensor...
     enum ggml_tensor_flag {
-        GGML_TENSOR_FLAG_INPUT   =  1, // ...is an input for the GGML compute graph
-        GGML_TENSOR_FLAG_OUTPUT  =  2, // ...is an output for the GGML compute graph
-        GGML_TENSOR_FLAG_PARAM   =  4, // ...contains trainable parameters
-        GGML_TENSOR_FLAG_LOSS    =  8, // ...defines loss for numerical optimization (multiple loss tensors add up)
-        GGML_TENSOR_FLAG_COMPUTE = 16, // ...must be computed
+        GGML_TENSOR_FLAG_INPUT     =  1, // ...is an input for the GGML compute graph
+        GGML_TENSOR_FLAG_OUTPUT    =  2, // ...is an output for the GGML compute graph
+        GGML_TENSOR_FLAG_PARAM     =  4, // ...contains trainable parameters
+        GGML_TENSOR_FLAG_LOSS      =  8, // ...defines loss for numerical optimization (multiple loss tensors add up)
+        GGML_TENSOR_FLAG_COMPUTE   = 16, // ...must be computed
+        GGML_TENSOR_FLAG_SWIZZLED  = 32, // ...data layout was swizzled (SoA reorder for cache alignment)
     };
 
     enum ggml_tri_type {
@@ -868,6 +869,10 @@ extern "C" {
     GGML_API struct ggml_tensor * ggml_format_name(      struct ggml_tensor * tensor, const char * fmt, ...);
 
     // Tensor flags
+    // IQ4_XS cache-aware swizzling (RDNA2 Infinity Cache optimization)
+    // Converts AoS → SoA layout so qs[128] aligns to 128-byte cache line boundaries
+    GGML_API void ggml_swizzle_iq4_xs(struct ggml_tensor * tensor);
+
     GGML_API void ggml_set_input(struct ggml_tensor * tensor);
     GGML_API void ggml_set_output(struct ggml_tensor * tensor);
     GGML_API void ggml_set_param(struct ggml_tensor * tensor);

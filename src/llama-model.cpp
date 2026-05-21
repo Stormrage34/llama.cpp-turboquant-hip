@@ -1549,6 +1549,8 @@ bool llama_model_base::load_tensors(llama_model_loader & ml) {
     }
 
     // load tensor data
+    ml.n_gpu_layers = this->n_gpu_layers();
+    ml.i_gpu_start = std::max((int)hparams.n_layer + 1 - (int)ml.n_gpu_layers, 0);
     for (auto & [ctx, buf_map] : ctx_buf_maps) {
         if (!ml.load_all_data(ctx, buf_map, use_mlock ? &pimpl->mlock_mmaps : NULL, params.progress_callback, params.progress_callback_user_data)) {
             return false;

@@ -14,8 +14,8 @@
 
 ### Requires context reduction or partial offload
 - Models 5–12 GiB: reduce `-c` context to fit (fit params auto-adjusts)
-- 35B MoE IQ4 (19 GiB): use `--ncmoe 30` + `-c 4096`
-- 35B Q4_K_M (22 GiB): use `--ncmoe 40` + `-c 2048`
+- 35B MoE IQ4 (19 GiB): use `-ncmoe 30` + `-c 4096`
+- 35B Q4_K_M (22 GiB): use `-ncmoe 40` + `-c 2048`
 
 ### Does not fit (exceeds 15.5 GiB)
 - 35B Q5_K_M (24+ GiB): GTT spill → instability
@@ -33,5 +33,5 @@
 
 ## Key Constraints
 - **MTP speculative decode**: requires ~256+ MiB free VRAM. Guarded by proactive fence (500 MiB threshold, 10-iter cooldown)
-- **MoE expert offload** (`--ncmoe N`): reserve compute buffer per active expert. N=30 for 35B MoE IQ4 is the sweet spot
+- **MoE expert offload** (`-ncmoe N`): reserve compute buffer per active expert. N=30 for 35B MoE IQ4 is the sweet spot
 - **TurboQuant calibration**: uses ~50 MiB of device constants + calibration buffers

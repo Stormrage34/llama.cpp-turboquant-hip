@@ -2088,7 +2088,11 @@ static __device__ __forceinline__ int unpack_scales_q45_K(const int * scales, co
            ((scales[ksc/2]              >> (2 * (ksc % 2)))       & 0x30303030);  // upper 2 bits
 }
 
-template <int mmq_y, bool need_check> static __device__ __forceinline__ void load_tiles_q4_K(
+// Template wrapper for Q4_K load_tiles — parameterized on block type (AoS or intra-block).
+// All field accesses use bxi->qs, bxi->dm, bxi->scales by name, so the body is identical
+// for both block_q4_K and block_q4_K_intra.
+template <int mmq_y, bool need_check, typename BlockType>
+static __device__ __forceinline__ void load_tiles_q4_K_tmpl(
     const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
     constexpr int nwarps = mmq_get_nwarps_device();
     constexpr int warp_size = ggml_cuda_get_physical_warp_size();
@@ -2115,7 +2119,7 @@ template <int mmq_y, bool need_check> static __device__ __forceinline__ void loa
             i = min(i, i_max);
         }
 
-        const block_q4_K * bxi = (const block_q4_K *) x + kbx0 + i*stride;
+        const BlockType * bxi = (const BlockType *) x + kbx0 + i*stride;
         const int qs0 = get_int_b4(bxi->qs, txi);
 
 #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
@@ -2144,7 +2148,7 @@ template <int mmq_y, bool need_check> static __device__ __forceinline__ void loa
                 i = min(i, i_max);
             }
 
-            const block_q4_K * bxi = (const block_q4_K *) x + kbx0 + i*stride;
+            const BlockType * bxi = (const BlockType *) x + kbx0 + i*stride;
 
             const int * scales = (const int *) bxi->scales;
             const int ksc = threadIdx.x % 2;
@@ -2172,7 +2176,7 @@ template <int mmq_y, bool need_check> static __device__ __forceinline__ void loa
             i = min(i, i_max);
         }
 
-        const block_q4_K * bxi = (const block_q4_K *) x + kbx0 + i*stride;
+        const BlockType * bxi = (const BlockType *) x + kbx0 + i*stride;
 
         x_dm[i] = bxi->dm;
     }
@@ -2185,7 +2189,7 @@ template <int mmq_y, bool need_check> static __device__ __forceinline__ void loa
             i = min(i, i_max);
         }
 
-        const block_q4_K * bxi = (const block_q4_K *) x + kbx0 + i*stride + (threadIdx.x % (MMQ_TILE_NE_K/8)) / (QI4_K/8);
+        const BlockType * bxi = (const BlockType *) x + kbx0 + i*stride + (threadIdx.x % (MMQ_TILE_NE_K/8)) / (QI4_K/8);
 
         const int * scales = (const int *) bxi->scales;
 
@@ -2196,6 +2200,22 @@ template <int mmq_y, bool need_check> static __device__ __forceinline__ void loa
     }
 #endif // defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
 }
+
+// Standard AoS path
+template <int mmq_y, bool need_check>
+static __device__ __forceinline__ void load_tiles_q4_K(
+    const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
+    load_tiles_q4_K_tmpl<mmq_y, need_check, block_q4_K>(x, x_tile, kbx0, i_max, stride);
+}
+
+// Intra-block swizzled path
+#if defined(RDNA2_CACHE_SWIZZLE)
+template <int mmq_y, bool need_check>
+static __device__ __forceinline__ void load_tiles_q4_K_swizzled(
+    const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
+    load_tiles_q4_K_tmpl<mmq_y, need_check, block_q4_K_intra>(x, x_tile, kbx0, i_max, stride);
+}
+#endif // RDNA2_CACHE_SWIZZLE
 
 template <int mmq_x, int mmq_y>
 static __device__ __forceinline__ void vec_dot_q4_K_q8_1_dp4a(
@@ -2353,6 +2373,130 @@ template <int mmq_y, bool need_check> static __device__ __forceinline__ void loa
     }
 #endif // defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
 }
+
+#if defined(RDNA2_CACHE_SWIZZLE)
+template <int mmq_y, bool need_check> static __device__ __forceinline__ void load_tiles_q5_K_swizzled(
+    const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
+    constexpr int nwarps = mmq_get_nwarps_device();
+    constexpr int warp_size = ggml_cuda_get_physical_warp_size();
+
+#if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
+    int   * x_qs = (int   *)  x_tile;
+    half2 * x_dm = (half2 *) (x_qs + MMQ_TILE_NE_K*2);
+#else
+    constexpr tile_x_sizes txs = mmq_get_dp4a_tile_x_sizes(GGML_TYPE_Q5_K, mmq_y);
+    int   * x_qs = (int   *)  x_tile;
+    half2 * x_dm = (half2 *) (x_qs + txs.qs);
+    int   * x_sc = (int   *) (x_dm + txs.dm);
+#endif // defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE)
+
+    constexpr int threads_per_row = MMQ_ITER_K / (4 * QR5_K);
+    constexpr int nrows = warp_size / threads_per_row;
+    const int txi = warp_size > threads_per_row ? threadIdx.x % threads_per_row : threadIdx.x;
+
+#pragma unroll
+    for (int i0 = 0; i0 < mmq_y; i0 += nrows*nwarps) {
+        int i = i0 + (nrows == 1 ? threadIdx.y : threadIdx.y*nrows + threadIdx.x/threads_per_row);
+
+        if (need_check) {
+            i = min(i, i_max);
+        }
+
+        // SoA QS access: x + block_idx * Q5_K_QS_SIZE_HOST
+        const uint8_t * qs_ptr = (const uint8_t *)x + (size_t)(kbx0 + i*stride) * Q5_K_QS_SIZE_HOST;
+        // SoA meta access: for qh at meta offset 16
+        const uint8_t * meta_ptr = (const uint8_t *)x + d_swizzle_meta_offset + (size_t)(kbx0 + i*stride) * Q5_K_META_SIZE_HOST;
+
+        const int ky = QR5_K*txi;
+
+        const int ql = get_int_b4(qs_ptr, txi);
+        const int ql0 = (ql >> 0) & 0x0F0F0F0F;
+        const int ql1 = (ql >> 4) & 0x0F0F0F0F;
+
+        // qh is at meta_ptr + 16 for Q5_K (dm(4) + scales(12) + qh(32))
+        const int qh = get_int_b4(meta_ptr + 16, txi % (QI5_K/4));
+        const int qh0 = ((qh >> (2 * (txi / (QI5_K/4)) + 0)) << 4) & 0x10101010;
+        const int qh1 = ((qh >> (2 * (txi / (QI5_K/4)) + 1)) << 4) & 0x10101010;
+
+        const int kq0 = ky - ky % (QI5_K/2) + txi % (QI5_K/4) + 0;
+        const int kq1 = ky - ky % (QI5_K/2) + txi % (QI5_K/4) + QI5_K/4;
+
+#if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
+        x_qs[i*MMQ_MMA_TILE_X_K_Q8_1 + kq0] = ql0 | qh0;
+        x_qs[i*MMQ_MMA_TILE_X_K_Q8_1 + kq1] = ql1 | qh1;
+#else
+        x_qs[i*(2*MMQ_TILE_NE_K + 1) + kq0] = ql0 | qh0;
+        x_qs[i*(2*MMQ_TILE_NE_K + 1) + kq1] = ql1 | qh1;
+#endif // defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
+    }
+
+#if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
+    constexpr int rows_per_warp = warp_size / 2;
+#pragma unroll
+    for (int i0 = 0; i0 < mmq_y; i0 += nwarps*rows_per_warp) {
+#if defined(AMD_MFMA_AVAILABLE)
+        int i = i0 + threadIdx.y*rows_per_warp + threadIdx.x/2;
+        if (i < mmq_y) {
+#else
+        int i = (i0 + threadIdx.y*rows_per_warp + threadIdx.x/2) % mmq_y;
+        {
+#endif
+            if (need_check) {
+                i = min(i, i_max);
+            }
+
+            // SoA meta access: dm(4B) at offset 0, scales(12B) at offset 4
+            const uint8_t * meta_ptr = (const uint8_t *)x + d_swizzle_meta_offset + (size_t)(kbx0 + i*stride) * Q5_K_META_SIZE_HOST;
+            const int * scales = (const int *)(meta_ptr + 4);
+            const int ksc = threadIdx.x % 2;
+
+            const int sc32 = unpack_scales_q45_K(scales, ksc + 0);
+            const int  m32 = unpack_scales_q45_K(scales, ksc + 2);
+
+            const uint8_t * sc8 = (const uint8_t *) &sc32;
+            const uint8_t *  m8 = (const uint8_t *)  &m32;
+
+            const half2 dm = *(const half2 *)meta_ptr * make_half2(1.0f, -1.0f);
+
+#pragma unroll
+            for (int l = 0; l < int(sizeof(int)); ++l) {
+                x_dm[i*MMQ_MMA_TILE_X_K_Q8_1 + sizeof(int)*ksc + l] = dm*make_half2(sc8[l], m8[l]);
+            }
+        }
+    }
+#else
+#pragma unroll
+    for (int i0 = 0; i0 < mmq_y; i0 += nwarps*warp_size) {
+        int i = (i0 + threadIdx.y*warp_size + threadIdx.x) % mmq_y;
+
+        if (need_check) {
+            i = min(i, i_max);
+        }
+
+        const uint8_t * meta_ptr = (const uint8_t *)x + d_swizzle_meta_offset + (size_t)(kbx0 + i*stride) * Q5_K_META_SIZE_HOST;
+        x_dm[i] = *(const half2 *)meta_ptr;
+    }
+
+    constexpr int rows_per_warp = warp_size / 4;
+#pragma unroll
+    for (int i0 = 0; i0 < mmq_y; i0 += nwarps*rows_per_warp) {
+        int i = (i0 + threadIdx.y*rows_per_warp + threadIdx.x/(MMQ_TILE_NE_K/8)) % mmq_y;
+
+        if (need_check) {
+            i = min(i, i_max);
+        }
+
+        const uint8_t * meta_ptr = (const uint8_t *)x + d_swizzle_meta_offset + (size_t)(kbx0 + i*stride) * Q5_K_META_SIZE_HOST;
+        const int * scales = (const int *)(meta_ptr + 4);
+
+        const int ksc = threadIdx.x % (MMQ_TILE_NE_K/8);
+        const int scales8 = unpack_scales_q45_K(scales, ksc);
+
+        x_sc[i*(MMQ_TILE_NE_K/8) + i/8 + ksc] = scales8;
+    }
+#endif // defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
+}
+#endif // RDNA2_CACHE_SWIZZLE
 
 template <int mmq_x, int mmq_y>
 static __device__ __forceinline__ void vec_dot_q5_K_q8_1_dp4a(
@@ -3181,6 +3325,77 @@ template <int mmq_y, bool need_check> static __device__ __forceinline__ void loa
     }
 }
 
+#if defined(RDNA2_CACHE_SWIZZLE)
+template <int mmq_y, bool need_check> static __device__ __forceinline__ void load_tiles_iq4_xs_swizzled(
+    const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
+    constexpr int nwarps = mmq_get_nwarps_device();
+    constexpr int warp_size = ggml_cuda_get_physical_warp_size();
+
+#if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
+    int   * x_qs = (int   *)  x_tile;
+    float * x_df = (float *) (x_qs + MMQ_TILE_NE_K*2);
+#else
+    constexpr tile_x_sizes txs = mmq_get_dp4a_tile_x_sizes(GGML_TYPE_IQ4_XS, mmq_y);
+    int   * x_qs = (int   *)  x_tile;
+    float * x_df = (float *) (x_qs + txs.qs);
+#endif // defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
+
+    constexpr int threads_per_row = MMQ_ITER_K / (4 * QR4_XS);
+    constexpr int nrows = warp_size / threads_per_row;
+    const int kqsx = threadIdx.x % threads_per_row;
+
+#pragma unroll
+    for (int i0 = 0; i0 < mmq_y; i0 += nrows*nwarps) {
+        int i = i0 + (nrows == 1 ? threadIdx.y : threadIdx.y*nrows + threadIdx.x/threads_per_row);
+
+        if (need_check) {
+            i = min(i, i_max);
+        }
+
+        // SoA QS access: x + block_idx * IQ4_XS_QS_SIZE_HOST
+        const uint8_t * qs_ptr = (const uint8_t *)x + (size_t)(kbx0 + i*stride) * IQ4_XS_QS_SIZE_HOST;
+
+        const int aux_q4 = get_int_b4(qs_ptr, kqsx);
+        const int2 v = get_int_from_table_16(aux_q4, kvalues_iq4nl);
+        const int k0 = 8 * (kqsx / 4) + kqsx % 4;
+
+#if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
+        x_qs[i*MMQ_MMA_TILE_X_K_Q8_0 + k0 + 0] = v.x;
+        x_qs[i*MMQ_MMA_TILE_X_K_Q8_0 + k0 + 4] = v.y;
+#else
+        x_qs[i*(2*MMQ_TILE_NE_K + 1) + k0 + 0] = v.x;
+        x_qs[i*(2*MMQ_TILE_NE_K + 1) + k0 + 4] = v.y;
+#endif // defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
+    }
+
+    constexpr int rows_per_warp = warp_size / 8;
+#pragma unroll
+    for (int i0 = 0; i0 < mmq_y; i0 += nwarps * rows_per_warp) {
+        int i = i0 + threadIdx.y * rows_per_warp + threadIdx.x / (MMQ_TILE_NE_K/4);
+
+        if (need_check) {
+            i = min(i, i_max);
+        }
+
+        // SoA meta access: d(2B) at offset 0, scales_h(2B) at offset 2, scales_l(4B) at offset 4
+        const uint8_t * meta_ptr = (const uint8_t *)x + d_swizzle_meta_offset + (size_t)(kbx0 + i*stride) * IQ4_XS_META_SIZE_HOST;
+
+        const float d = __half2float(*(const ggml_half *)meta_ptr);
+        const uint16_t scales_h = *(const uint16_t *)(meta_ptr + 2);
+        const uint8_t * scales_l = meta_ptr + 4;
+
+        const int ls = ((scales_l[(threadIdx.x % 8)/2] >> (4*(threadIdx.x % 2))) & 0x0F)
+            | (((scales_h >> (2*(threadIdx.x % 8))) & 0x03) << 4);
+
+#if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
+        x_df[i*MMQ_MMA_TILE_X_K_Q8_0   + threadIdx.x % 8] = d * (ls - 32);
+#else
+        x_df[i*(MMQ_TILE_NE_K/4) + i/4 + threadIdx.x % 8] = d * (ls - 32);
+#endif // defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
+    }
+}
+#endif // RDNA2_CACHE_SWIZZLE
+
 template<int mmq_x, int mmq_y, bool need_check>
 static __device__ __forceinline__ void mmq_write_back_dp4a(
         const float * __restrict__ sum, const int32_t * __restrict__ ids_dst, float * __restrict__ dst,
@@ -3356,7 +3571,11 @@ struct mmq_type_traits<mmq_x, mmq_y, need_check, GGML_TYPE_Q3_K> {
 template <int mmq_x, int mmq_y, bool need_check>
 struct mmq_type_traits<mmq_x, mmq_y, need_check, GGML_TYPE_Q4_K> {
     static constexpr int              vdr          = VDR_Q4_K_Q8_1_MMQ;
+#if defined(RDNA2_CACHE_SWIZZLE)
+    static constexpr load_tiles_mmq_t load_tiles   = load_tiles_q4_K_swizzled<mmq_y, need_check>;
+#else
     static constexpr load_tiles_mmq_t load_tiles   = load_tiles_q4_K<mmq_y, need_check>;
+#endif
     static constexpr vec_dot_mmq_t    vec_dot_mma  = vec_dot_q8_1_q8_1_mma<mmq_x, mmq_y>;
     static constexpr vec_dot_mmq_t    vec_dot_dp4a = vec_dot_q4_K_q8_1_dp4a<mmq_x, mmq_y>;
 };
@@ -3364,7 +3583,11 @@ struct mmq_type_traits<mmq_x, mmq_y, need_check, GGML_TYPE_Q4_K> {
 template <int mmq_x, int mmq_y, bool need_check>
 struct mmq_type_traits<mmq_x, mmq_y, need_check, GGML_TYPE_Q5_K> {
     static constexpr int              vdr          = VDR_Q5_K_Q8_1_MMQ;
+#if defined(RDNA2_CACHE_SWIZZLE)
+    static constexpr load_tiles_mmq_t load_tiles   = load_tiles_q5_K_swizzled<mmq_y, need_check>;
+#else
     static constexpr load_tiles_mmq_t load_tiles   = load_tiles_q5_K<mmq_y, need_check>;
+#endif
     static constexpr vec_dot_mmq_t    vec_dot_mma  = vec_dot_q8_1_q8_1_mma<mmq_x, mmq_y>;
     static constexpr vec_dot_mmq_t    vec_dot_dp4a = vec_dot_q5_K_q8_1_dp4a<mmq_x, mmq_y>;
 };
@@ -3436,7 +3659,11 @@ struct mmq_type_traits<mmq_x, mmq_y, need_check, GGML_TYPE_IQ4_NL> {
 template <int mmq_x, int mmq_y, bool need_check>
 struct mmq_type_traits<mmq_x, mmq_y, need_check, GGML_TYPE_IQ4_XS> {
     static constexpr int              vdr          = VDR_IQ4_XS_Q8_1_MMQ;
+#if defined(RDNA2_CACHE_SWIZZLE)
+    static constexpr load_tiles_mmq_t load_tiles   = load_tiles_iq4_xs_swizzled<mmq_y, need_check>;
+#else
     static constexpr load_tiles_mmq_t load_tiles   = load_tiles_iq4_xs<mmq_y, need_check>;
+#endif
     static constexpr vec_dot_mmq_t    vec_dot_mma  = vec_dot_q8_0_q8_1_mma<mmq_x, mmq_y, MMQ_Q8_1_DS_LAYOUT_D4>;
     static constexpr vec_dot_mmq_t    vec_dot_dp4a = vec_dot_q8_0_q8_1_dp4a<mmq_x, mmq_y>;
 };
@@ -3458,6 +3685,29 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
     extern __shared__ int data_mul_mat_q[];
     int * tile_y = data_mul_mat_q + mmq_x;
     int * tile_x = tile_y + GGML_PAD(mmq_x*MMQ_TILE_Y_K, nwarps*warp_size);
+
+#if defined(RDNA2_CACHE_SWIZZLE)
+    // Layout Assertion (Architecture Matrix Gate): If tensor type uses SoA layout but
+    // d_swizzle_meta_offset is 0, the tensor was NOT swizzled at load time.
+    // Swizzled loader would read AoS data as SoA → garbage. Trap immediately.
+    //
+    // Architecture Matrix Reference:
+    //   | Memory Layout | MMQ Path       | Status       |
+    //   |---------------|----------------|--------------|
+    //   | Standard (AoS)| load_tiles_*   | Baseline ✅  |
+    //   | Swizzled (SoA)| load_tiles_*_swizzled | Target ✅ |
+    //   | Swizzled (SoA)| load_tiles_*   | GARBAGE ❌   |
+    if constexpr (type == GGML_TYPE_IQ4_XS || type == GGML_TYPE_Q4_K || type == GGML_TYPE_Q5_K) {
+        if (d_swizzle_meta_offset <= 0) {
+            printf("CRITICAL: Layout mismatch at MMQ path. "
+                   "d_swizzle_meta_offset=%lld <= 0 for SoA type %d. "
+                   "Tensor not swizzled but SoA loader selected. "
+                   "Aborting to prevent garbage tokens.\n",
+                   (long long)d_swizzle_meta_offset, (int)type);
+            __trap();
+        }
+    }
+#endif
 
 #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
     constexpr vec_dot_mmq_t    vec_dot    = mmq_type_traits<mmq_x, mmq_y, need_check, type>::vec_dot_mma;
@@ -3647,6 +3897,18 @@ static __global__ void mul_mat_q(
         NO_DEVICE_CODE;
         return;
     }
+
+#if defined(RDNA2_CACHE_SWIZZLE)
+    // Set SoA meta section offset for swizzled types (mirrors mmvq.cu:679)
+    // QS is always 128B/block for all SoA layouts
+    if constexpr (type == GGML_TYPE_IQ4_XS || type == GGML_TYPE_Q4_K || type == GGML_TYPE_Q5_K) {
+        if (threadIdx.x == 0 && threadIdx.y == 0) {
+            const int nchannels_x_v = fastdiv(nchannels_y.z, channel_ratio);
+            d_swizzle_meta_offset = (int64_t)nrows_x * blocks_per_ne00.z * (nchannels_x_v > 0 ? nchannels_x_v : 1) * 128;
+        }
+        __syncthreads();
+    }
+#endif
 
     constexpr int nwarps = mmq_get_nwarps_device();
     constexpr int warp_size = ggml_cuda_get_physical_warp_size();

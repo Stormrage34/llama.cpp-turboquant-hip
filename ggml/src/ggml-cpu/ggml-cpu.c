@@ -47,6 +47,10 @@
 #undef GGML_USE_LLAMAFILE
 #endif
 
+#if defined(__AVX2__)
+#include <xmmintrin.h>
+#endif
+
 #ifdef GGML_USE_LLAMAFILE
 #include "llamafile/sgemm.h"
 #endif
@@ -1543,6 +1547,13 @@ static void ggml_compute_forward_mul_mat_id_one_chunk(
                 float * dst_col = (float *) ((char *) dst->data + (i1*nb1 + i2*nb2));
 
                 for (int64_t ir0 = iir0; ir0 < iir0 + blck_0 && ir0 < ir0_end; ++ir0) {
+#if defined(__AVX2__)
+                    // Prefetch next row's weight data to L2 while current vec_dot executes
+                    // This hides DRAM latency for memory-bandwidth-bound MoE expert computation
+                    if (ir0 + 1 < iir0 + blck_0 && ir0 + 1 < ir0_end) {
+                        _mm_prefetch(src0_cur + (ir0 + 1)*nb01, _MM_HINT_T1);
+                    }
+#endif
                     vec_dot(ne00, &tmp[ir0 - iir0], 0, src0_cur + ir0*nb01, 0, src1_col, 0, 1);
                 }
 
@@ -1550,6 +1561,15 @@ static void ggml_compute_forward_mul_mat_id_one_chunk(
             }
         }
     }
+
+#if defined(__AVX2__)
+    // Prefetch next expert's weight data to L3 cache
+    // The CPU MoE path spends ~87% of time waiting for DRAM; prefetching the next
+    // expert's weights overlaps memory latency with the current chunk's computation
+    if (cur_a + 1 < ne02) {
+        _mm_prefetch(src0_cur + nb02, _MM_HINT_T2);
+    }
+#endif
 }
 
 static void * incr_ptr_aligned(void ** p, size_t size, size_t align) {

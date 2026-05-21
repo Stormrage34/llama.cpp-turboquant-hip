@@ -1204,6 +1204,7 @@ const func_builtins & value_none_t::get_builtins() const {
         {"string", tostring},
         {"safe", tostring},
         {"items", empty_value_fn<value_array>},
+        {"length", empty_value_fn<value_int>},
         {"map", empty_value_fn<value_array>},
         {"reject", empty_value_fn<value_array>},
         {"rejectattr", empty_value_fn<value_array>},

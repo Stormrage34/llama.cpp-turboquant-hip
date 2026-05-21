@@ -157,19 +157,23 @@ void llama_model_saver::add_kv_from_model() {
             tokens[id] = token_data.text;
             scores[id] = token_data.score;
 
-            // FIXME should this be treated as flags?
-            switch(token_data.attr) {
-                case LLAMA_TOKEN_ATTR_UNKNOWN:      token_types[id] = LLAMA_TOKEN_TYPE_UNKNOWN;      break;
-                case LLAMA_TOKEN_ATTR_UNUSED:       token_types[id] = LLAMA_TOKEN_TYPE_UNUSED;       break;
-                case LLAMA_TOKEN_ATTR_NORMAL:       token_types[id] = LLAMA_TOKEN_TYPE_NORMAL;       break;
-                case LLAMA_TOKEN_ATTR_CONTROL:      token_types[id] = LLAMA_TOKEN_TYPE_CONTROL;      break;
-                case LLAMA_TOKEN_ATTR_USER_DEFINED: token_types[id] = LLAMA_TOKEN_TYPE_USER_DEFINED; break;
-                case LLAMA_TOKEN_ATTR_BYTE:         token_types[id] = LLAMA_TOKEN_TYPE_BYTE;         break;
-                // case LLAMA_TOKEN_ATTR_NORMALIZED:   ???
-                // case LLAMA_TOKEN_ATTR_LSTRIP:       ???
-                // case LLAMA_TOKEN_ATTR_RSTRIP:       ???
-                case LLAMA_TOKEN_ATTR_UNDEFINED:
-                default:                            token_types[id] = LLAMA_TOKEN_TYPE_UNDEFINED;    break;
+            // attr is a bitmask of llama_token_attr flags (1 << N)
+            // convert to simple llama_token_type enum for GGUF storage
+            // sub-flags (NORMALIZED, LSTRIP, RSTRIP, SINGLE_WORD) are modifiers on NORMAL
+            if (token_data.attr & LLAMA_TOKEN_ATTR_CONTROL) {
+                token_types[id] = LLAMA_TOKEN_TYPE_CONTROL;
+            } else if (token_data.attr & LLAMA_TOKEN_ATTR_BYTE) {
+                token_types[id] = LLAMA_TOKEN_TYPE_BYTE;
+            } else if (token_data.attr & LLAMA_TOKEN_ATTR_USER_DEFINED) {
+                token_types[id] = LLAMA_TOKEN_TYPE_USER_DEFINED;
+            } else if (token_data.attr & LLAMA_TOKEN_ATTR_UNUSED) {
+                token_types[id] = LLAMA_TOKEN_TYPE_UNUSED;
+            } else if (token_data.attr & LLAMA_TOKEN_ATTR_NORMAL) {
+                token_types[id] = LLAMA_TOKEN_TYPE_NORMAL;
+            } else if (token_data.attr & LLAMA_TOKEN_ATTR_UNKNOWN) {
+                token_types[id] = LLAMA_TOKEN_TYPE_UNKNOWN;
+            } else {
+                token_types[id] = LLAMA_TOKEN_TYPE_UNDEFINED;
             }
         }
     }
@@ -320,7 +324,10 @@ void llama_model_saver::add_kv_from_model() {
     add_kv(LLM_KV_TOKENIZER_TOKEN_TYPE_COUNT,        vocab.n_token_types());
     add_kv(LLM_KV_TOKENIZER_SCORES,                  scores);
     add_kv(LLM_KV_TOKENIZER_MERGES,                  vocab.get_bpe_merges());
-    // FIXME llama_token is type i32 but when reading in a GGUF file u32 is expected, not an issue for writing though
+    // NOTE: llama_token is int32_t but GGUF stores token IDs as uint32_t.
+    // The explicit uint32_t() cast matches the GGUF storage type; the reader
+    // side (llama-vocab.cpp) reads as uint32_t then assigns to int32_t& safely
+    // since token IDs are well below INT32_MAX in practice.
     add_kv(LLM_KV_TOKENIZER_BOS_ID,                  uint32_t(vocab.token_bos()));
     add_kv(LLM_KV_TOKENIZER_EOS_ID,                  uint32_t(vocab.token_eos()));
     add_kv(LLM_KV_TOKENIZER_EOT_ID,                  uint32_t(vocab.token_eot()));

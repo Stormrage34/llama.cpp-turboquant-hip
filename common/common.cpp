@@ -1169,6 +1169,13 @@ common_init_result::common_init_result(common_params & params) :
 
     pimpl->model.reset(model);
 
+    // validate --n-cpu-moe-range against model layers
+    if (params.n_cpu_moe_end >= llama_model_n_layer(model)) {
+        fprintf(stderr, "error: --n-cpu-moe-range end %d exceeds model layers %d\n",
+                params.n_cpu_moe_end, llama_model_n_layer(model));
+        _exit(1);
+    }
+
     const llama_vocab * vocab = llama_model_get_vocab(model);
 
     // load and optionally apply lora adapters
@@ -1508,7 +1515,7 @@ struct llama_model_params common_model_params_to_llama(common_params & params) {
     }
 
     // when n_cpu_moe_range is set, generate per-layer MoE CPU overrides for the given range
-    if (params.n_cpu_moe_start > 0 || params.n_cpu_moe_end > 0) {
+    if (params.n_cpu_moe_start >= 0 || params.n_cpu_moe_end >= 0) {
         // check for conflict with existing overrides from --n-cpu-moe, --cpu-moe, or --override-tensor
         // tensor_buft_overrides may already be padded with {nullptr, nullptr} entries by arg.cpp,
         // so check if ANY entry has a non-null pattern

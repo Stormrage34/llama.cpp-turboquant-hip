@@ -540,6 +540,77 @@ typedef struct {
 } block_iq4_xs;
 static_assert(sizeof(block_iq4_xs) == sizeof(ggml_half) + sizeof(uint16_t) + QK_K/64 + QK_K/2, "wrong iq4_xs block size/padding");
 
+// SoA swizzled layout for IQ4_XS (cache-aware, RDNA2 Infinity Cache optimization)
+// qs portion: 128 bytes (one clean 128B cache line per block)
+#define IQ4_XS_QS_SIZE  (QK_K/2)   // 128 bytes — one cache line
+#define IQ4_XS_META_SIZE (sizeof(ggml_half) + sizeof(uint16_t) + QK_K/64) // 8 bytes
+
+typedef struct {
+    uint8_t  qs[IQ4_XS_QS_SIZE];
+} block_iq4_xs_qs;
+
+typedef struct {
+    ggml_half d;
+    uint16_t scales_h;
+    uint8_t  scales_l[QK_K/64];
+} block_iq4_xs_meta;
+
+static_assert(sizeof(block_iq4_xs_qs)  == IQ4_XS_QS_SIZE,  "wrong iq4_xs_qs block size");
+static_assert(sizeof(block_iq4_xs_meta) == IQ4_XS_META_SIZE, "wrong iq4_xs_meta block size");
+
+// SoA swizzled layout for Q4_K (cache-aware, RDNA2 Infinity Cache optimization)
+// qs portion: 128 bytes (one clean 128B cache line per block)
+#define Q4_K_QS_SIZE  (QK_K/2)    // 128 bytes
+#define Q4_K_META_SIZE (2*sizeof(ggml_half) + K_SCALE_SIZE) // 16 bytes
+
+typedef struct {
+    uint8_t  qs[Q4_K_QS_SIZE];
+} block_q4_K_qs;
+
+typedef struct {
+    ggml_half d;
+    ggml_half dmin;
+    uint8_t  scales[K_SCALE_SIZE];
+} block_q4_K_meta;
+
+static_assert(sizeof(block_q4_K_qs)  == Q4_K_QS_SIZE,  "wrong q4_K_qs block size");
+static_assert(sizeof(block_q4_K_meta) == Q4_K_META_SIZE, "wrong q4_K_meta block size");
+
+// Intra-block swizzled layout for Q4_K (cache-aware, RDNA2 Infinity Cache optimization)
+// qs portion at offset 0 guarantees 128B cache line alignment for the hot path
+typedef struct {
+    uint8_t  qs[QK_K/2];    // 128 bytes — starts at cache line boundary
+    GGML_EXTENSION union {
+        struct {
+            ggml_half d;    // 2 bytes — super-block scale
+            ggml_half dmin; // 2 bytes — super-block min
+        } GGML_COMMON_AGGR_S;
+        ggml_half2 dm;
+    } GGML_COMMON_AGGR_U;
+    uint8_t  scales[K_SCALE_SIZE]; // 12 bytes — scales, quantized with 6 bits
+} block_q4_K_intra;
+static_assert(sizeof(block_q4_K_intra) == QK_K/2 + 2*sizeof(ggml_half) + K_SCALE_SIZE, "wrong q4_K_intra block size/padding");
+static_assert(sizeof(block_q4_K_intra) == sizeof(block_q4_K), "q4_K intra must match AoS size");
+
+// SoA swizzled layout for Q5_K (cache-aware, RDNA2 Infinity Cache optimization)
+// qs portion: 128 bytes (one clean 128B cache line per block)
+#define Q5_K_QS_SIZE  (QK_K/2)    // 128 bytes
+#define Q5_K_META_SIZE (2*sizeof(ggml_half) + K_SCALE_SIZE + QK_K/8) // 48 bytes
+
+typedef struct {
+    uint8_t  qs[Q5_K_QS_SIZE];
+} block_q5_K_qs;
+
+typedef struct {
+    ggml_half d;
+    ggml_half dmin;
+    uint8_t  scales[K_SCALE_SIZE];
+    uint8_t  qh[QK_K/8];
+} block_q5_K_meta;
+
+static_assert(sizeof(block_q5_K_qs)  == Q5_K_QS_SIZE,  "wrong q5_K_qs block size");
+static_assert(sizeof(block_q5_K_meta) == Q5_K_META_SIZE, "wrong q5_K_meta block size");
+
 #endif // GGML_COMMON_DECL
 #endif // GGML_COMMON_DECL
 

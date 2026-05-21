@@ -454,12 +454,15 @@ void llama_context::sched_reserve() {
             // TODO: instead of the tensor names, use a map to keep track of which (FA) tensors belong to which layer
             GGML_ASSERT(strncmp(n->name, LLAMA_TENSOR_NAME_FATTN "-", prefix_len) == 0);
             const int il = std::stoi(n->name + prefix_len);
-            ggml_backend_dev_t device_kv = model.dev_layer(il);
+            // Compare FA tensor device against the KV cache device.
+            // When --no-kv-offload is used, KV cache is on CPU regardless of layer compute device.
+            const ggml_backend_dev_t device_kv = cparams.offload_kqv
+                ? model.dev_layer(il)
+                : ggml_backend_get_device(backend_cpu);
             if (device_fa != device_kv) {
                 LLAMA_LOG_WARN("%s: layer %d is assigned to device %s but the Flash Attention tensor "
                         "is assigned to device %s (usually due to missing support)\n",
                         __func__, il, ggml_backend_dev_name(device_kv), ggml_backend_dev_name(device_fa));
-                // FIXME: fa_device_mismatch logic is wrong for --no-kv-offload, but this is broken anyways
                 fa_device_mismatch = true;
                 break;
             }
@@ -646,17 +649,19 @@ void llama_context::synchronize() {
 
     ggml_backend_sched_synchronize(sched.get());
 
-    // FIXME: if multiple single tokens are evaluated without a synchronization,
-    // the stats will be added to the prompt evaluation stats
-    // this should only happen when using batch size 1 to evaluate a batch
-
     // add the evaluation to the stats
-    if (n_queued_tokens == 1) {
+    // n_queued_single_calls tracks single-token decode() calls separately to
+    // correctly classify eval vs prompt_eval stats when multiple single-token
+    // decodes happen without an intervening synchronize() (e.g. batch-size-1
+    // processing of a batch, or speculative MTP decoding).
+    if (n_queued_single_calls > 0 && n_queued_tokens == n_queued_single_calls) {
+        // all queued tokens are from single-token decode() calls → eval
         if (!cparams.no_perf) {
             t_eval_us += ggml_time_us() - t_compute_start_us;
         }
-        n_eval++;
-    } else if (n_queued_tokens > 1) {
+        n_eval += n_queued_single_calls;
+    } else if (n_queued_tokens > 0) {
+        // batch decode (or mixed) → prompt eval
         if (!cparams.no_perf) {
             t_p_eval_us += ggml_time_us() - t_compute_start_us;
         }
@@ -670,6 +675,7 @@ void llama_context::synchronize() {
     }
 
     n_queued_tokens = 0;
+    n_queued_single_calls = 0;
     t_compute_start_us = 0;
 }
 
@@ -1232,7 +1238,9 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
     {
         //const auto t_start_us = ggml_time_us();
 
-        // FIXME this call causes a crash if any model inputs were not used in the graph and were therefore not allocated
+        // nb: individual set_input() methods guard against null / unallocated
+        // tensors, so this is safe even if some model inputs were not used
+        // in the graph (see llm_graph_input_embd::set_input null guards).
         res->set_inputs(&ubatch);
 
         //LLAMA_LOG_INFO("graph set inputs time: %.3f ms\n", (ggml_time_us() - t_start_us)/1000.0);
@@ -1626,6 +1634,9 @@ int llama_context::decode(const llama_batch & batch_inp) {
         t_compute_start_us = ggml_time_us();
     }
     n_queued_tokens += n_tokens_all;
+    if (n_tokens_all == 1) {
+        n_queued_single_calls++;
+    }
 
     // TODO: this clear of the buffer can easily be forgotten - need something better
     embd_seq.clear();
@@ -2757,12 +2768,6 @@ static void llama_set_param(struct ggml_tensor * tensor, llama_opt_param_filter 
     if (!param_filter(tensor, userdata)) {
         return;
     }
-    if (strcmp(tensor->name, "token_embd.weight") == 0) {
-        return; // FIXME
-    }
-    if (strcmp(tensor->name, "rope_freqs.weight") == 0) {
-        return; // FIXME
-    }
     ggml_set_param(tensor);
 }
 
@@ -2784,7 +2789,7 @@ void llama_context::opt_init(struct llama_model * model, struct llama_opt_params
     llama_opt_param_filter param_filter = lopt_params.param_filter;
     void * param_filter_ud              = lopt_params.param_filter_ud;
 
-  //llama_set_param(model->tok_embd,        param_filter, param_filter_ud); // FIXME
+    llama_set_param(model->tok_embd,        param_filter, param_filter_ud);
     llama_set_param(model->type_embd,       param_filter, param_filter_ud);
     llama_set_param(model->pos_embd,        param_filter, param_filter_ud);
     llama_set_param(model->tok_norm,        param_filter, param_filter_ud);
@@ -3259,8 +3264,7 @@ void llama_context::collect_mtp_data(
         mtp.pending_pos = -1;
     }
 
-    synchronize();
-
+    // redundant: ggml_backend_tensor_get() syncs internally
     const size_t row_bytes = (size_t) n_embd * sizeof(float);
     const int    n_out     = (pending_continues ? 1 : 0) + (n_rows - 1);
 

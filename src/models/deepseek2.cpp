@@ -38,7 +38,7 @@ void llama_model_deepseek2::load_arch_hparams(llama_model_loader & ml) {
 
     // (optional) temperature tuning - used by mistral-large
     ml.get_key(LLM_KV_ATTENTION_TEMPERATURE_SCALE,  hparams.f_attn_temp_scale,       false);
-    ml.get_key(LLM_KV_ATTENTION_TEMPERATURE_LENGTH, hparams.n_attn_temp_floor_scale, false); // FIXME why not use temperature_length?
+    ml.get_key(LLM_KV_ATTENTION_TEMPERATURE_LENGTH, hparams.n_attn_temp_floor_scale, false); // maps to n_attn_temp_floor_scale (floor divisor for attn temp scaling)
 
     hparams.f_attn_temp_offset = 0.0f;
 
