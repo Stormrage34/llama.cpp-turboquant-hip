@@ -1627,11 +1627,18 @@ private:
             }
         }
 
-        if (llama_vocab_is_eog(vocab, result.tok)) {
+        if (llama_vocab_is_eog(vocab, result.tok) && !slot.task->params.sampling.ignore_eos) {
             slot.stop           = STOP_TYPE_EOS;
             slot.has_next_token = false;
 
             SLT_DBG(slot, "%s", "stopped by EOS\n");
+        } else if (llama_vocab_is_eog(vocab, result.tok) && slot.task->params.sampling.ignore_eos) {
+            // --ignore-eos active: EOG tokens have -INF logit bias (theoretically suppresses them)
+            // but the HIP backend doesn't apply -INF correctly on gfx1030.
+            // Workaround: let it continue past EOG — the model generates past EOS naturally.
+            // The EOG token output may produce whitespace artifacts; the budget/n_predict limit
+            // will eventually stop generation when target token count is reached.
+            SLT_DBG(slot, "%s", "ignored EOS (--ignore-eos active)\n");
         }
 
         SLT_DBG(slot, "n_decoded = %d, n_remaining = %d, next token: %5d '%s'\n", slot.n_decoded, slot.n_remaining, result.tok, token_str.c_str());
