@@ -12,39 +12,6 @@
 ```bash
 ./scripts/build_rdna2.sh [stable|baseline|--clean --benchmark|--no-interactive|--fast]
 ```
-- Builds `llama-cli`, `llama-server`, `llama-bench`
-- **`--fast`**: incremental rebuild (skip clean). Auto-detects stale binaries — warns if a shared lib is newer than its dependent binary.
-- **`--benchmark`**: also builds `llama-bench-rdna2` (standalone hipcc, for rocprofv3 profiling)
-- **`--no-interactive`**: auto-selects ROCm path; use in scripts
-- **Modes**: `all` (LDS double-buffered matmul + cache swizzle, default), `stable` (no experimental features), `baseline` (no RDNA2 opts)
-
-### 🔴 Stale binary rule
-If you rebuild libraries (e.g., `libggml-hip`), ALL binaries linking them MUST also be rebuilt. Partial rebuilds cause SIGSEGV on startup. The `--fast` flag's stale-binary check catches this. If you see "GPU init OK then crash immediately", stale binaries are the #1 suspect.
-
-### RPATH isolation flags (P0 for dev machines with multiple llama forks)
-```
--DCMAKE_BUILD_RPATH_USE_ORIGIN=ON
--DCMAKE_SHARED_LINKER_FLAGS="-Wl,--disable-new-dtags -Wl,-rpath,${ROCM_PATH}/lib"
--DCMAKE_EXE_LINKER_FLAGS="-Wl,--disable-new-dtags -Wl,-rpath,${ROCM_PATH}/lib"
-```
-Without `--disable-new-dtags`, ld.so checks `LD_LIBRARY_PATH` before RPATH, pulling in incompatible libraries from other llama.cpp builds.
-
-### RDNA2 CMake options
-| Option | Default | Effect |
-|--------|---------|--------|
-| `RDNA2_MOE_STREAM_V1` | ON (in build script) | MoE async pipeline (SLC cache-bypass GTT + semaphore signaling) |
-| `GGML_RDNA2_BFE_DISPATCHER` | OFF | BFE `v_bfe_u32` for Q4_K dequant on gfx1030 (cold path only) |
-| `GGML_HIP_ROCWMMA_FATTN` | OFF | ROCm WMMA fused attention |
-| `RDNA2_CACHE_SWIZZLE` | OFF (experimental) | IQ4_XS AoS→SoA swizzling for 128B cache line alignment |
-
-## 🧪 Testing Pipeline
-Order matters when doing a full verification:
-
-### 1. Compile & smoke
-```bash
-build/bin/llama-cli --help           # GPU init check (HIP backend loads here)
-./scripts/validate_hygiene.sh         # compile + VRAM leak check
-```
 
 ### 2. Kernel dispatch verification
 ```bash
