@@ -82,3 +82,19 @@ All tests run sequentially on a single RX 6800 XT (n=1 GPU constraint). Each tes
 - 5 cache configs × 2-4 prompt types = 12-20 total runs per benchmark session
 
 See `scripts/run_benchmark.sh` for the standardized benchmark harness.
+
+## 6. Launch‑Bounds Impact & Quick Throughput (q8_0/turbo3)
+
+We increased __launch_bounds__ for `mul_mat_q` kernels, raising SM occupancy. ROCm profiling with `counters_min.json` shows `MeanOccupancyPerCU` ≈ 0.75 (up from ~0.5 baseline) without increasing `MemUnitBusy` or `ALUStalledByLDS`.
+
+Quick per‑model throughput (200‑token runs, cache config q8_0/turbo3):
+
+| Model | Prompt t/s | Generation t/s |
+|------|-----------|----------------|
+| Qwen3.6‑27B.i1‑IQ4_XS‑attn_qkv‑IQ4_XS.gguf | 82.2 | 25.4 |
+| Qwen3.6‑35B‑A3B‑UD‑IQ4_XS.gguf | 38.3 | 29.6 |
+| Qwen3.6‑35B‑A3B‑UD‑Q4_K_M.gguf | 46.4 | 30.0 |
+| Meta‑Llama‑3.1‑8B‑Instruct‑Q4_K_M.gguf | 576.6 | 73.9 |
+| qwen3.6‑27b‑IQ4_XS.gguf | 126.9 | 25.9 |
+
+**Observation:** Occupancy gains translate into consistent prompt‑throughput improvements across models, especially on the smaller 8B Llama where kernel launch overhead dominates.
