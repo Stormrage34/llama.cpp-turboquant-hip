@@ -3504,7 +3504,7 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
     // Requires 2x tile_x buffer space (prefetch buffer)
     // Phase 3: +1 LDS padding to break 32-bank symmetry (kills variance from bank conflicts)
     // FIX: tile_x may be larger than MMQ_TILE_Y_K — derive actual size from quant-specific traits.
-    constexpr int lds_bank_pad = 2;
+    constexpr int lds_bank_pad = 32; static_assert(lds_bank_pad % 32 == 0, "lds_bank_pad must be multiple of 32");
     int * tile_x_next = tile_x + tile_x_size_ints + lds_bank_pad;
 
     // tile_y LDS bank conflict mitigation: add padding when stride % 32 == 0
