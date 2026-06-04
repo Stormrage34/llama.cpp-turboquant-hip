@@ -13,6 +13,7 @@ using namespace ggml_cuda_mma;
 #define MMQ_ITER_K             256
 #define MMQ_ITER_K_FP4         512
 #define MMQ_NWARPS               8
+static_assert(MMQ_NWARPS == 8, "MMQ_NWARPS must match upstream (8)");
 
 typedef void (*load_tiles_mmq_t)(const char * __restrict__ x, int * x_tile, const int kbx0, const int i_max, const int stride);
 typedef void (*vec_dot_mmq_t)(const int * __restrict__ x, const int * __restrict__ y, float * __restrict__ sum, const int k00);
@@ -177,6 +178,7 @@ static constexpr __device__ int get_mmq_y_device() {
 // The final tile size in K direction is padded to avoid shared memory bank conflicts,
 // in terms of 32 bit elements that means K % 2 == 1 for dp4a or K % 8 == 4 for mma.
 #define MMQ_TILE_NE_K 32
+static_assert(MMQ_TILE_NE_K == 32, "MMQ_TILE_NE_K must match upstream (32)");
 
 #define MMQ_DP4A_TXS_Q4_0    tile_x_sizes{mmq_y*MMQ_TILE_NE_K   + mmq_y, mmq_y*MMQ_TILE_NE_K/QI4_0   + mmq_y/QI4_0,     0}
 #define MMQ_DP4A_TXS_Q4_1    tile_x_sizes{mmq_y*MMQ_TILE_NE_K   + mmq_y, mmq_y*MMQ_TILE_NE_K/QI4_1   + mmq_y/QI4_1,     0}
@@ -3378,7 +3380,9 @@ template <int mmq_y, bool need_check> static __device__ __forceinline__ void loa
         }
 
         // SoA meta access: d(2B) at offset 0, scales_h(2B) at offset 2, scales_l(4B) at offset 4
-        const uint8_t * meta_ptr = (const uint8_t *)x + d_swizzle_meta_offset + (size_t)(kbx0 + i*stride) * IQ4_XS_META_SIZE_HOST;
+        // Calculate the absolute block index to ensure correct SoA meta-location
+        const size_t abs_block_idx = (size_t)kbx0 + (size_t)i * stride;
+        const uint8_t * meta_ptr = (const uint8_t *)x + d_swizzle_meta_offset + abs_block_idx * IQ4_XS_META_SIZE_HOST;
 
         const float d = __half2float(*(const ggml_half *)meta_ptr);
         const uint16_t scales_h = *(const uint16_t *)(meta_ptr + 2);
@@ -3697,7 +3701,7 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
     //   | Standard (AoS)| load_tiles_*   | Baseline ✅  |
     //   | Swizzled (SoA)| load_tiles_*_swizzled | Target ✅ |
     //   | Swizzled (SoA)| load_tiles_*   | GARBAGE ❌   |
-    if constexpr (type == GGML_TYPE_IQ4_XS || type == GGML_TYPE_Q4_K || type == GGML_TYPE_Q5_K) {
+    if constexpr (type == GGML_TYPE_IQ4_XS || type == GGML_TYPE_Q5_K) {
         if (d_swizzle_meta_offset <= 0) {
             printf("CRITICAL: Layout mismatch at MMQ path. "
                    "d_swizzle_meta_offset=%lld <= 0 for SoA type %d. "
@@ -3754,7 +3758,8 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
     // Requires 2x tile_x buffer space (prefetch buffer)
     // Phase 3: +1 LDS padding to break 32-bank symmetry (kills variance from bank conflicts)
     // FIX: tile_x may be larger than MMQ_TILE_Y_K — derive actual size from quant-specific traits.
-    constexpr int lds_bank_pad = 32; static_assert(lds_bank_pad % 32 == 0, "lds_bank_pad must be multiple of 32");
+    // Fork-specific: double-buffered LDS uses a bank padding of 32 ints to break 32-bank symmetry. Upstream does not include this padding.
+constexpr int lds_bank_pad = 32; static_assert(lds_bank_pad % 32 == 0, "lds_bank_pad must be multiple of 32");
     int * tile_x_next = tile_x + tile_x_size_ints + lds_bank_pad;
 
     // tile_y LDS bank conflict mitigation: add padding when stride % 32 == 0
@@ -3763,7 +3768,19 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
     int * tile_y_padded = tile_y + tile_y_pad;
 
     // Prefetch first tile_x
+#if defined(RDNA2_CACHE_SWIZZLE)
+    if constexpr (type == GGML_TYPE_IQ4_XS) {
+        load_tiles_iq4_xs_swizzled<mmq_y, need_check>(x, tile_x, offset_x + kb0_start, tile_x_max_i, stride_row_x);
+    } else if constexpr (type == GGML_TYPE_Q4_K) {
+        load_tiles_q4_K_swizzled<mmq_y, need_check>(x, tile_x, offset_x + kb0_start, tile_x_max_i, stride_row_x);
+    } else if constexpr (type == GGML_TYPE_Q5_K) {
+        load_tiles_q5_K_swizzled<mmq_y, need_check>(x, tile_x, offset_x + kb0_start, tile_x_max_i, stride_row_x);
+    } else {
+        load_tiles(x, tile_x, offset_x + kb0_start, tile_x_max_i, stride_row_x);
+    }
+#else
     load_tiles(x, tile_x, offset_x + kb0_start, tile_x_max_i, stride_row_x);
+#endif
     __syncthreads();
 
     for (int kb0 = kb0_start; kb0 < kb0_stop; kb0 += blocks_per_iter) {
@@ -3782,7 +3799,19 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
 
         // Prefetch next tile_x while loading tile_y (overlap memory ops)
         if (kb0_next < kb0_stop) {
+#if defined(RDNA2_CACHE_SWIZZLE)
+            if constexpr (type == GGML_TYPE_IQ4_XS) {
+                load_tiles_iq4_xs_swizzled<mmq_y, need_check>(x, tile_x_next, offset_x + kb0_next, tile_x_max_i, stride_row_x);
+            } else if constexpr (type == GGML_TYPE_Q4_K) {
+                load_tiles_q4_K_swizzled<mmq_y, need_check>(x, tile_x_next, offset_x + kb0_next, tile_x_max_i, stride_row_x);
+            } else if constexpr (type == GGML_TYPE_Q5_K) {
+                load_tiles_q5_K_swizzled<mmq_y, need_check>(x, tile_x_next, offset_x + kb0_next, tile_x_max_i, stride_row_x);
+            } else {
+                load_tiles(x, tile_x_next, offset_x + kb0_next, tile_x_max_i, stride_row_x);
+            }
+#else
             load_tiles(x, tile_x_next, offset_x + kb0_next, tile_x_max_i, stride_row_x);
+#endif
         }
 
         __syncthreads();
@@ -3825,7 +3854,19 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
     } else {
     // Standard matmul path (baseline, no LDS double-buffering)
     for (int kb0 = kb0_start; kb0 < kb0_stop; kb0 += blocks_per_iter) {
+#if defined(RDNA2_CACHE_SWIZZLE)
+        if constexpr (type == GGML_TYPE_IQ4_XS) {
+            load_tiles_iq4_xs_swizzled<mmq_y, need_check>(x, tile_x, offset_x + kb0, tile_x_max_i, stride_row_x);
+        } else if constexpr (type == GGML_TYPE_Q4_K) {
+            load_tiles_q4_K_swizzled<mmq_y, need_check>(x, tile_x, offset_x + kb0, tile_x_max_i, stride_row_x);
+        } else if constexpr (type == GGML_TYPE_Q5_K) {
+            load_tiles_q5_K_swizzled<mmq_y, need_check>(x, tile_x, offset_x + kb0, tile_x_max_i, stride_row_x);
+        } else {
+            load_tiles(x, tile_x, offset_x + kb0, tile_x_max_i, stride_row_x);
+        }
+#else
         load_tiles(x, tile_x, offset_x + kb0, tile_x_max_i, stride_row_x);
+#endif
         {
             const int * by0 = y + ncols_y * (kb0 * qk / ne_block) * sz;
 #pragma unroll
@@ -3901,7 +3942,8 @@ static __global__ void mul_mat_q(
 #if defined(RDNA2_CACHE_SWIZZLE)
     // Set SoA meta section offset for swizzled types (mirrors mmvq.cu:679)
     // QS is always 128B/block for all SoA layouts
-    if constexpr (type == GGML_TYPE_IQ4_XS || type == GGML_TYPE_Q4_K || type == GGML_TYPE_Q5_K) {
+    // Q4_K uses intra-block swizzle (no SoA meta section, d_swizzle_meta_offset not read)
+    if constexpr (type == GGML_TYPE_IQ4_XS || type == GGML_TYPE_Q5_K) {
         if (threadIdx.x == 0 && threadIdx.y == 0) {
             const int nchannels_x_v = fastdiv(nchannels_y.z, channel_ratio);
             d_swizzle_meta_offset = (int64_t)nrows_x * blocks_per_ne00.z * (nchannels_x_v > 0 ? nchannels_x_v : 1) * 128;

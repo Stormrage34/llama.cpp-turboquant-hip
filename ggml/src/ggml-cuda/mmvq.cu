@@ -496,7 +496,7 @@ static __global__ void mul_mat_vec_q(
     const int kbx_offset = sample_x*stride_sample_x + channel_x*stride_channel_x + row0*stride_row_x;
 
 #if defined(RDNA2_CACHE_SWIZZLE)
-    // Set SoA meta section offset from tensor dimensions (avoids hipMemcpyToSymbol which breaks CUDA graphs)
+    // Set SoA meta section offset from fusion metadata (avoids hipMemcpyToSymbol which breaks CUDA graphs)
     if constexpr (type == GGML_TYPE_IQ4_XS || type == GGML_TYPE_Q5_K) {
         if (threadIdx.x == 0 && threadIdx.y == 0) {
             d_swizzle_meta_offset = fusion.swizzle_meta_offset;
@@ -672,11 +672,10 @@ static __global__ void mul_mat_vec_q_moe(
     float tmp[c_rows_per_block] = {0.0f};
 
 #if defined(RDNA2_CACHE_SWIZZLE)
-    // Set SoA meta section offset from tensor dimensions (nrows_x available directly)
+    // Set SoA meta section offset from fusion metadata (avoids hipMemcpyToSymbol which breaks CUDA graphs)
     if constexpr (type == GGML_TYPE_IQ4_XS || type == GGML_TYPE_Q5_K) {
-        const int blocks_per_row = ncols_x / QK_K;
         if (threadIdx.x == 0) {
-            d_swizzle_meta_offset = (int64_t)nrows_x * blocks_per_row * nchannels_x * 128;
+            d_swizzle_meta_offset = (int64_t)nrows_x * blocks_per_row_x * nchannels_x * 128;
             if (d_swizzle_meta_offset <= 0) { __trap(); }
         }
         __syncthreads();
