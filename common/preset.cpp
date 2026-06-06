@@ -386,6 +386,9 @@ common_presets common_preset_context::load_from_models_dir(const std::string & m
 
     std::vector<local_model> models;
     auto scan_subdir = [&models](const std::string & subdir_path, const std::string & name) {
+        // Validate directory is actually accessible before scanning
+        if (!std::filesystem::exists(subdir_path)) return;
+
         auto files = fs_list(subdir_path, false);
         common_file_info model_file;
         common_file_info first_shard_file;
