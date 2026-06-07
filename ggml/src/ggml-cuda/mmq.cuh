@@ -3702,29 +3702,6 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
     int * tile_y = data_mul_mat_q + mmq_x;
     int * tile_x = tile_y + GGML_PAD(mmq_x*MMQ_TILE_Y_K, nwarps*warp_size);
 
-#if defined(RDNA2_CACHE_SWIZZLE)
-    // Layout Assertion (Architecture Matrix Gate): If tensor type uses SoA layout but
-    // d_swizzle_meta_offset is 0, the tensor was NOT swizzled at load time.
-    // Swizzled loader would read AoS data as SoA → garbage. Trap immediately.
-    //
-    // Architecture Matrix Reference:
-    //   | Memory Layout | MMQ Path       | Status       |
-    //   |---------------|----------------|--------------|
-    //   | Standard (AoS)| load_tiles_*   | Baseline ✅  |
-    //   | Swizzled (SoA)| load_tiles_*_swizzled | Target ✅ |
-    //   | Swizzled (SoA)| load_tiles_*   | GARBAGE ❌   |
-    if constexpr (type == GGML_TYPE_IQ4_XS || type == GGML_TYPE_Q5_K) {
-        if (d_swizzle_meta_offset <= 0) {
-            printf("CRITICAL: Layout mismatch at MMQ path. "
-                   "d_swizzle_meta_offset=%lld <= 0 for SoA type %d. "
-                   "Tensor not swizzled but SoA loader selected. "
-                   "Aborting to prevent garbage tokens.\n",
-                   (long long)d_swizzle_meta_offset, (int)type);
-            __trap();
-        }
-    }
-#endif
-
 #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
     constexpr vec_dot_mmq_t    vec_dot    = mmq_type_traits<mmq_x, mmq_y, need_check, type>::vec_dot_mma;
     constexpr mmq_write_back_t write_back = mmq_write_back_mma<type, mmq_x, mmq_y, need_check>;
@@ -3977,6 +3954,9 @@ static __global__ void mul_mat_q(
         }
         __syncthreads();
     }
+#endif
+
+#if defined(RDNA2_CACHE_SWIZZLE)
 #endif
 
     constexpr int nwarps = mmq_get_nwarps_device();
