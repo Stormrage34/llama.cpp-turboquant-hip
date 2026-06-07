@@ -1361,6 +1361,9 @@ static __device__ __forceinline__ float vec_dot_iq4_xs_q8_1(
 // Must NOT use __constant__ (breaks CUDA graph capture via hipMemcpyToSymbol).
 // Instead, set from the kernel function via d_swizzle_meta_offset = ne01 * (ne00/QK_K) * 128.
 static __device__ int64_t d_swizzle_meta_offset = 0;
+// Q4_K intra-block swizzle flag: 1 = swizzled (block_q4_K_intra), 0 = AoS (block_q4_K).
+// Set from host via hipMemcpyToSymbol before MMQ/MMVQ kernel launches.
+static __device__ int32_t d_q4k_swizzled = 0;
 
 static __device__ __forceinline__ float vec_dot_iq4_xs_q8_1_swizzled(
     const void * __restrict__ vbq, const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs) {
@@ -1396,9 +1399,15 @@ static __device__ __forceinline__ float vec_dot_iq4_xs_q8_1_swizzled(
 }
 
 // Intra-block vec_dot for Q4_K — uses block_q4_K_intra (qs at offset 0 for cache line alignment)
+// Runtime dispatch: d_swizzle_meta_offset > 0  => use intra-block layout (swizzled)
+//                   d_swizzle_meta_offset == 0 => use standard AoS layout (unswizzled)
 static __device__ __forceinline__ float vec_dot_q4_K_q8_1_swizzled(
     const void * __restrict__ vbq, const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs) {
-    return vec_dot_q4_K_q8_1_tmpl<block_q4_K_intra>(vbq, bq8_1, kbx, iqs);
+    if (d_swizzle_meta_offset > 0) {
+        return vec_dot_q4_K_q8_1_tmpl<block_q4_K_intra>(vbq, bq8_1, kbx, iqs);
+    } else {
+        return vec_dot_q4_K_q8_1_tmpl<block_q4_K>(vbq, bq8_1, kbx, iqs);
+    }
 }
 
 // Q5_K SoA: qs(128B) + meta(dm+scales+qh=48B)

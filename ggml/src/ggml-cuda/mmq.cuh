@@ -13,7 +13,11 @@ using namespace ggml_cuda_mma;
 #define MMQ_ITER_K             256
 #define MMQ_ITER_K_FP4         512
 #define MMQ_NWARPS               8
+#if defined(MMQ_VERIFY_UPSTREAM) && MMQ_VERIFY_UPSTREAM
 static_assert(MMQ_NWARPS == 8, "MMQ_NWARPS must match upstream (8)");
+#else
+#warning "MMQ_VERIFY_UPSTREAM not set — MMQ_NWARPS=8 not verified against upstream"
+#endif
 
 typedef void (*load_tiles_mmq_t)(const char * __restrict__ x, int * x_tile, const int kbx0, const int i_max, const int stride);
 typedef void (*vec_dot_mmq_t)(const int * __restrict__ x, const int * __restrict__ y, float * __restrict__ sum, const int k00);
@@ -178,7 +182,11 @@ static constexpr __device__ int get_mmq_y_device() {
 // The final tile size in K direction is padded to avoid shared memory bank conflicts,
 // in terms of 32 bit elements that means K % 2 == 1 for dp4a or K % 8 == 4 for mma.
 #define MMQ_TILE_NE_K 32
+#if defined(MMQ_VERIFY_UPSTREAM) && MMQ_VERIFY_UPSTREAM
 static_assert(MMQ_TILE_NE_K == 32, "MMQ_TILE_NE_K must match upstream (32)");
+#else
+#warning "MMQ_VERIFY_UPSTREAM not set — MMQ_TILE_NE_K=32 not verified against upstream"
+#endif
 
 #define MMQ_DP4A_TXS_Q4_0    tile_x_sizes{mmq_y*MMQ_TILE_NE_K   + mmq_y, mmq_y*MMQ_TILE_NE_K/QI4_0   + mmq_y/QI4_0,     0}
 #define MMQ_DP4A_TXS_Q4_1    tile_x_sizes{mmq_y*MMQ_TILE_NE_K   + mmq_y, mmq_y*MMQ_TILE_NE_K/QI4_1   + mmq_y/QI4_1,     0}
@@ -2210,12 +2218,16 @@ static __device__ __forceinline__ void load_tiles_q4_K(
     load_tiles_q4_K_tmpl<mmq_y, need_check, block_q4_K>(x, x_tile, kbx0, i_max, stride);
 }
 
-// Intra-block swizzled path
+// Intra-block swizzled path (also handles unswizzled AoS via runtime dispatch)
 #if defined(RDNA2_CACHE_SWIZZLE)
 template <int mmq_y, bool need_check>
 static __device__ __forceinline__ void load_tiles_q4_K_swizzled(
     const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
-    load_tiles_q4_K_tmpl<mmq_y, need_check, block_q4_K_intra>(x, x_tile, kbx0, i_max, stride);
+    if (d_swizzle_meta_offset > 0) {
+        load_tiles_q4_K_tmpl<mmq_y, need_check, block_q4_K_intra>(x, x_tile, kbx0, i_max, stride);
+    } else {
+        load_tiles_q4_K_tmpl<mmq_y, need_check, block_q4_K>(x, x_tile, kbx0, i_max, stride);
+    }
 }
 #endif // RDNA2_CACHE_SWIZZLE
 
@@ -3942,11 +3954,26 @@ static __global__ void mul_mat_q(
 #if defined(RDNA2_CACHE_SWIZZLE)
     // Set SoA meta section offset for swizzled types (mirrors mmvq.cu:679)
     // QS is always 128B/block for all SoA layouts
-    // Q4_K uses intra-block swizzle (no SoA meta section, d_swizzle_meta_offset not read)
+    // Q4_K uses intra-block swizzle (boolean flag: >0 = block_q4_K_intra, 0 = block_q4_K)
+    // FIX (ERR-HIP-IQ4XS-VIEW-DRIFT-026): Unconditionally purge stale device state from
+    // previous kernel launches before evaluating type-specific swizzling. Prevents cross-launch
+    // leakage when a non-swizzled tensor (e.g., Turbo K/V views) runs after an IQ4_XS launch.
+    if (threadIdx.x == 0 && threadIdx.y == 0) {
+        d_swizzle_meta_offset = 0;
+    }
+    __syncthreads();
+
     if constexpr (type == GGML_TYPE_IQ4_XS || type == GGML_TYPE_Q5_K) {
         if (threadIdx.x == 0 && threadIdx.y == 0) {
             const int nchannels_x_v = fastdiv(nchannels_y.z, channel_ratio);
             d_swizzle_meta_offset = (int64_t)nrows_x * blocks_per_ne00.z * (nchannels_x_v > 0 ? nchannels_x_v : 1) * 128;
+        }
+        __syncthreads();
+    }
+    if constexpr (type == GGML_TYPE_Q4_K) {
+        // Q4_K intra-block: read from host-set flag (d_q4k_swizzled)
+        if (threadIdx.x == 0 && threadIdx.y == 0) {
+            d_swizzle_meta_offset = d_q4k_swizzled;
         }
         __syncthreads();
     }
@@ -4326,6 +4353,7 @@ struct mmq_args {
     int64_t nchannels_x; int64_t nchannels_y; int64_t stride_channel_x; int64_t stride_channel_y; int64_t stride_channel_dst;
     int64_t nsamples_x; int64_t nsamples_y; int64_t stride_sample_x; int64_t stride_sample_y; int64_t stride_sample_dst;
     bool use_stream_k; int64_t ncols_max;
+    bool q4k_swizzled; // true if Q4_K data is in intra-block layout (only meaningful on swizzle builds)
 };
 
 template<ggml_type type>
@@ -4363,6 +4391,15 @@ static void launch_mul_mat_q(ggml_backend_cuda_context & ctx, const mmq_args & a
 
     CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, mmq_x, false>), nbytes_shared);
     CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, mmq_x,  true>), nbytes_shared);
+
+#if defined(RDNA2_CACHE_SWIZZLE)
+    // Propagate Q4_K swizzle flag to the kernel via a per-module device variable.
+    // Must happen before kernel launch since the kernel resets d_swizzle_meta_offset.
+    if constexpr (type == GGML_TYPE_Q4_K) {
+        int32_t val = args.q4k_swizzled ? 1 : 0;
+        CUDA_CHECK(cudaMemcpyToSymbol(d_q4k_swizzled, &val, sizeof(val)));
+    }
+#endif
 
     const int nty  = (args.nrows_x   + mmq_y - 1) / mmq_y;
     const int ntx  = (args.ncols_max + mmq_x - 1) / mmq_x;
