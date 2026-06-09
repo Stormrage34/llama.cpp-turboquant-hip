@@ -500,7 +500,6 @@ static __global__ void mul_mat_vec_q(
     if constexpr (type == GGML_TYPE_IQ4_XS || type == GGML_TYPE_Q5_K) {
         if (threadIdx.x == 0 && threadIdx.y == 0) {
             d_swizzle_meta_offset = fusion.swizzle_meta_offset;
-            if (d_swizzle_meta_offset <= 0) { __trap(); }
         }
         __syncthreads();
     }
@@ -684,7 +683,6 @@ static __global__ void mul_mat_vec_q_moe(
     if constexpr (type == GGML_TYPE_IQ4_XS || type == GGML_TYPE_Q5_K) {
         if (threadIdx.x == 0) {
             d_swizzle_meta_offset = (int64_t)nrows_x * blocks_per_row_x * nchannels_x * 128;
-            if (d_swizzle_meta_offset <= 0) { __trap(); }
         }
         __syncthreads();
     }
@@ -1226,7 +1224,7 @@ void ggml_cuda_mul_mat_vec_q(
 
             // Adjust offset relative to the view's local base address pointer
             fusion_local.swizzle_meta_offset = parent_meta_offset + (R * meta_stride_bytes) - view_data_offset;
-        } else {
+        } else if (src0->flags & GGML_TENSOR_FLAG_SWIZZLED) {
             // Standard non-view execution pathway (initialization / model weights)
             const int64_t nblocks = ggml_nbytes(src0) / ggml_type_size(src0->type);
             fusion_local.swizzle_meta_offset = nblocks * 128; // qs is always 128B/block
@@ -1305,7 +1303,7 @@ void ggml_cuda_op_mul_mat_vec_q(
 
             // Adjust offset relative to the view's local base address pointer
             fusion_local.swizzle_meta_offset = parent_meta_offset + (R * meta_stride_bytes) - view_data_offset;
-        } else {
+        } else if (src0->flags & GGML_TENSOR_FLAG_SWIZZLED) {
             // Standard non-view execution pathway (initialization / model weights)
             const int64_t nblocks = ggml_nbytes(src0) / ggml_type_size(src0->type);
             fusion_local.swizzle_meta_offset = nblocks * 128; // qs is always 128B/block

@@ -2391,6 +2391,9 @@ template <int mmq_y, bool need_check> static __device__ __forceinline__ void loa
 #if defined(RDNA2_CACHE_SWIZZLE)
 template <int mmq_y, bool need_check> static __device__ __forceinline__ void load_tiles_q5_K_swizzled(
     const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
+    if (d_swizzle_meta_offset <= 0) {
+        return load_tiles_q5_K<mmq_y, need_check>(x, x_tile, kbx0, i_max, stride);
+    }
     constexpr int nwarps = mmq_get_nwarps_device();
     constexpr int warp_size = ggml_cuda_get_physical_warp_size();
 
@@ -3342,6 +3345,9 @@ template <int mmq_y, bool need_check> static __device__ __forceinline__ void loa
 #if defined(RDNA2_CACHE_SWIZZLE)
 template <int mmq_y, bool need_check> static __device__ __forceinline__ void load_tiles_iq4_xs_swizzled(
     const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
+    if (d_swizzle_meta_offset <= 0) {
+        return load_tiles_iq4_xs<mmq_y, need_check>(x, x_tile, kbx0, i_max, stride);
+    }
     constexpr int nwarps = mmq_get_nwarps_device();
     constexpr int warp_size = ggml_cuda_get_physical_warp_size();
 
@@ -3396,8 +3402,9 @@ template <int mmq_y, bool need_check> static __device__ __forceinline__ void loa
         const size_t abs_block_idx = (size_t)kbx0 + (size_t)i * stride;
         const uint8_t * meta_ptr = (const uint8_t *)x + d_swizzle_meta_offset + abs_block_idx * IQ4_XS_META_SIZE_HOST;
 
-        const float d = __half2float(*(const ggml_half *)meta_ptr);
-        const uint16_t scales_h = *(const uint16_t *)(meta_ptr + 2);
+        const uint32_t meta0 = *(const uint32_t *)meta_ptr;
+        const float d = __half2float(__ushort_as_half((uint16_t)(meta0 & 0xFFFF)));
+        const uint16_t scales_h = (uint16_t)(meta0 >> 16);
         const uint8_t * scales_l = meta_ptr + 4;
 
         const int ls = ((scales_l[(threadIdx.x % 8)/2] >> (4*(threadIdx.x % 2))) & 0x0F)
@@ -3929,26 +3936,17 @@ static __global__ void mul_mat_q(
     }
 
 #if defined(RDNA2_CACHE_SWIZZLE)
-    // Set SoA meta section offset for swizzled types (mirrors mmvq.cu:679)
-    // QS is always 128B/block for all SoA layouts
-    // Q4_K uses intra-block swizzle (boolean flag: >0 = block_q4_K_intra, 0 = block_q4_K)
-    // FIX (ERR-HIP-IQ4XS-VIEW-DRIFT-026): Unconditionally purge stale device state from
-    // previous kernel launches before evaluating type-specific swizzling. Prevents cross-launch
-    // leakage when a non-swizzled tensor (e.g., Turbo K/V views) runs after an IQ4_XS launch.
-    if (threadIdx.x == 0 && threadIdx.y == 0) {
-        d_swizzle_meta_offset = 0;
-    }
-    __syncthreads();
-
+    // Set SoA meta section offset per-kernel (one write, not two).
+    // IQ4_XS/Q5_K: forward-computed from the SoA layout dimensions.
+    // Q4_K: intra-block flag from host-set d_q4k_swizzled.
+    // Non-swizzled types: no write needed (their load_tiles don't read it).
     if constexpr (type == GGML_TYPE_IQ4_XS || type == GGML_TYPE_Q5_K) {
         if (threadIdx.x == 0 && threadIdx.y == 0) {
             const int nchannels_x_v = fastdiv(nchannels_y.z, channel_ratio);
             d_swizzle_meta_offset = (int64_t)nrows_x * blocks_per_ne00.z * (nchannels_x_v > 0 ? nchannels_x_v : 1) * 128;
         }
         __syncthreads();
-    }
-    if constexpr (type == GGML_TYPE_Q4_K) {
-        // Q4_K intra-block: read from host-set flag (d_q4k_swizzled)
+    } else if constexpr (type == GGML_TYPE_Q4_K) {
         if (threadIdx.x == 0 && threadIdx.y == 0) {
             d_swizzle_meta_offset = d_q4k_swizzled;
         }
@@ -4374,7 +4372,6 @@ static void launch_mul_mat_q(ggml_backend_cuda_context & ctx, const mmq_args & a
 
 #if defined(RDNA2_CACHE_SWIZZLE)
     // Propagate Q4_K swizzle flag to the kernel via a per-module device variable.
-    // Must happen before kernel launch since the kernel resets d_swizzle_meta_offset.
     if constexpr (type == GGML_TYPE_Q4_K) {
         int32_t val = args.q4k_swizzled ? 1 : 0;
         CUDA_CHECK(cudaMemcpyToSymbol(d_q4k_swizzled, &val, sizeof(val)));

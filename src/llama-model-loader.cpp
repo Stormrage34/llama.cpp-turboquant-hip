@@ -1484,8 +1484,14 @@ static void swizzle_q5_K_host(void * data, size_t nbytes) {
 #ifdef RDNA2_CACHE_SWIZZLE
 // Returns true if the tensor type should be swizzled.
 static bool needs_swizzle(ggml_type type) {
+    // IQ4_XS uses CR-014 SoA swizzle — only safe when the GPU kernel is also compiled
+    // with RDNA2_CACHE_SWIZZLE. Without it, the kernel reads AoS and corrupts output.
     if (type == GGML_TYPE_IQ4_XS) {
+#if defined(RDNA2_CACHE_SWIZZLE)
         return true;
+#else
+        return false;
+#endif
     }
     // Q4_K always uses swizzled loader (intra-block swizzle).
     // Q5_K must be swizzled: MMVQ only routes to swizzled variant when RDNA2_SWIZZLE_ALL_QUANTS is defined,
@@ -1562,13 +1568,15 @@ void llama_model_loader::load_data_for(struct ggml_tensor * cur) const {
             }
         }
         if (gpu_resident && cur->buffer && !ggml_backend_buffer_is_host(cur->buffer)) {
-            switch (cur->type) {
-                case GGML_TYPE_IQ4_XS: swizzle_iq4_xs_host(cur->data, ggml_nbytes(cur)); break;
-                case GGML_TYPE_Q4_K:  swizzle_q4_K_host(cur->data, ggml_nbytes(cur));  break;
-                case GGML_TYPE_Q5_K:  swizzle_q5_K_host(cur->data, ggml_nbytes(cur));  break;
-                default: break;
+            if (!(cur->flags & GGML_TENSOR_FLAG_SWIZZLED)) {
+                switch (cur->type) {
+                    case GGML_TYPE_IQ4_XS: swizzle_iq4_xs_host(cur->data, ggml_nbytes(cur)); break;
+                    case GGML_TYPE_Q4_K:  swizzle_q4_K_host(cur->data, ggml_nbytes(cur));  break;
+                    case GGML_TYPE_Q5_K:  swizzle_q5_K_host(cur->data, ggml_nbytes(cur));  break;
+                    default: break;
+                }
+                cur->flags |= GGML_TENSOR_FLAG_SWIZZLED;
             }
-            cur->flags |= GGML_TENSOR_FLAG_SWIZZLED;
         }
     }
 #endif
@@ -1740,6 +1748,26 @@ bool llama_model_loader::load_all_data(
                 (cur->buffer && !ggml_backend_buffer_is_host(cur->buffer)) ||
                 (buf_mmap   && !ggml_backend_buffer_is_host(buf_mmap));
             if (needs_swizzle(cur->type) && is_tensor_gpu_resident(ggml_get_name(cur), n_gpu_layers, i_gpu_start) && target_is_gpu) {
+                LLAMA_LOG_INFO("swizzle: %s (%zu bytes)\n", ggml_get_name(cur), n_size);
+                // Debug: verify SoA layout on first ffn_gate weight
+                if (strstr(ggml_get_name(cur), "ffn_gate.weight")) {
+                    const size_t nblk = n_size / 136;
+                    std::vector<uint8_t> swiz(n_size);
+                    memcpy(swiz.data(), data, n_size);
+                    apply_swizzle(cur->type, swiz.data(), n_size);
+                    // Verify qs: AoS blk0 qs (bytes 8-135) should be at SoA offset 0..127
+                    bool qs_ok = memcmp((const uint8_t*)data + 8, swiz.data(), 128) == 0;
+                    // Verify meta: AoS blk0 meta (bytes 0-7) should be at SoA meta start
+                    bool meta_ok = memcmp((const uint8_t*)data, swiz.data() + nblk * 128, 8) == 0;
+                    fprintf(stderr, "[CPU] meta[0] bytes: %02x %02x %02x %02x %02x %02x %02x %02x\n",
+                        swiz[nblk*128+0], swiz[nblk*128+1], swiz[nblk*128+2], swiz[nblk*128+3],
+                        swiz[nblk*128+4], swiz[nblk*128+5], swiz[nblk*128+6], swiz[nblk*128+7]);
+                    fprintf(stderr, "[CPU] qs[0] first 16: ");
+                    for (int k=0;k<16;k++) fprintf(stderr, "%02x ", swiz[k]);
+                    fprintf(stderr, "\n");
+                    fprintf(stderr, "[CPU] d_swizzle_meta_offset=%zu nblk=%zu\n", nblk * 128, nblk);
+                    fprintf(stderr, "[SoA] qs_match=%d meta_match=%d nblk=%zu\n", qs_ok, meta_ok, nblk);
+                }
                 swizzled.resize(n_size);
                 memcpy(swizzled.data(), data, n_size);
                 apply_swizzle(cur->type, swizzled.data(), n_size);
@@ -1761,6 +1789,25 @@ bool llama_model_loader::load_all_data(
                 mmap_used.second = std::max(mmap_used.second, weight->offs + n_size);
             } else {
                 ggml_backend_tensor_set(cur, data, 0, n_size);
+                // Verify GPU data: read back meta section and qs section separately
+                if (strstr(ggml_get_name(cur), "ffn_gate.weight") && (cur->flags & GGML_TENSOR_FLAG_SWIZZLED)) {
+                    const size_t nblk2 = n_size / 136;
+                    uint8_t qs_ref[128], meta_ref[8], qs_gpu[128], meta_gpu[8];
+                    memcpy(qs_ref, data, 128);
+                    memcpy(meta_ref, (const uint8_t*)data + nblk2 * 128, 8);
+                    ggml_backend_tensor_get(cur, qs_gpu, 0, 128);
+                    ggml_backend_tensor_get(cur, meta_gpu, nblk2 * 128, 8);
+                    bool gpu_qs_ok = memcmp(qs_gpu, qs_ref, 128) == 0;
+                    bool gpu_meta_ok = memcmp(meta_gpu, meta_ref, 8) == 0;
+                    fprintf(stderr, "[GPU_RDBK] qs_match=%d meta_match=%d", gpu_qs_ok, gpu_meta_ok);
+                    if (!gpu_meta_ok) {
+                        fprintf(stderr, " [META FAIL] host: ");
+                        for (int k=0;k<8;k++) fprintf(stderr, "%02x ", meta_ref[k]);
+                        fprintf(stderr, "gpu: ");
+                        for (int k=0;k<8;k++) fprintf(stderr, "%02x ", meta_gpu[k]);
+                    }
+                    fprintf(stderr, "\n");
+                }
             }
         } else {
             const auto & file = files.at(weight->idx);
@@ -1843,8 +1890,8 @@ bool llama_model_loader::load_all_data(
                     file->seek(weight->offs, SEEK_SET);
                     file->read_raw(read_buf.data(), n_size);
 #ifdef RDNA2_CACHE_SWIZZLE
-                    // Buffer is GPU (non-host) — swizzle is safe
-                    if (needs_swizzle(cur->type) && is_tensor_gpu_resident(ggml_get_name(cur), n_gpu_layers, i_gpu_start)) {
+                    if (needs_swizzle(cur->type) && is_tensor_gpu_resident(ggml_get_name(cur), n_gpu_layers, i_gpu_start)
+                        && !(cur->flags & GGML_TENSOR_FLAG_SWIZZLED)) {
                         apply_swizzle(cur->type, read_buf.data(), n_size);
                         cur->flags |= GGML_TENSOR_FLAG_SWIZZLED;
                     }
