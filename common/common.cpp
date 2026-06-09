@@ -1031,8 +1031,16 @@ std::vector<common_file_info> fs_list(const std::string & path, bool include_dir
                 info.is_dir = true;
                 files.push_back(std::move(info));
             }
-        } catch (const std::filesystem::filesystem_error &) {
-            // skip entries we cannot inspect
+        } catch (const std::filesystem::filesystem_error & e) {
+            if (entry.path().empty()) return files;
+
+            common_file_info skip_entry;
+            skip_entry.path   = entry.path().string();
+            skip_entry.name   = entry.path().filename().string();
+            skip_entry.is_dir = false;
+            skip_entry.size   = static_cast<size_t>(-1);  // sentinel for inaccessible
+            files.push_back(std::move(skip_entry));
+
             continue;
         }
     }

@@ -496,11 +496,18 @@ static __global__ void mul_mat_vec_q(
     const int kbx_offset = sample_x*stride_sample_x + channel_x*stride_channel_x + row0*stride_row_x;
 
 #if defined(RDNA2_CACHE_SWIZZLE)
-    // Set SoA meta section offset from tensor dimensions (avoids hipMemcpyToSymbol which breaks CUDA graphs)
+    // Set SoA meta section offset from fusion metadata (avoids hipMemcpyToSymbol which breaks CUDA graphs)
     if constexpr (type == GGML_TYPE_IQ4_XS || type == GGML_TYPE_Q5_K) {
         if (threadIdx.x == 0 && threadIdx.y == 0) {
             d_swizzle_meta_offset = fusion.swizzle_meta_offset;
-            if (d_swizzle_meta_offset <= 0) { __trap(); }
+        }
+        __syncthreads();
+    }
+    // Q4_K intra-block: d_swizzle_meta_offset > 0 means swizzled (intra-block layout),
+    // 0 means unswizzled (AoS). Set by host via fusion struct.
+    if constexpr (type == GGML_TYPE_Q4_K) {
+        if (threadIdx.x == 0 && threadIdx.y == 0) {
+            d_swizzle_meta_offset = fusion.swizzle_meta_offset;
         }
         __syncthreads();
     }
@@ -672,12 +679,10 @@ static __global__ void mul_mat_vec_q_moe(
     float tmp[c_rows_per_block] = {0.0f};
 
 #if defined(RDNA2_CACHE_SWIZZLE)
-    // Set SoA meta section offset from tensor dimensions (nrows_x available directly)
+    // Set SoA meta section offset from fusion metadata (avoids hipMemcpyToSymbol which breaks CUDA graphs)
     if constexpr (type == GGML_TYPE_IQ4_XS || type == GGML_TYPE_Q5_K) {
-        const int blocks_per_row = ncols_x / QK_K;
         if (threadIdx.x == 0) {
-            d_swizzle_meta_offset = (int64_t)nrows_x * blocks_per_row * nchannels_x * 128;
-            if (d_swizzle_meta_offset <= 0) { __trap(); }
+            d_swizzle_meta_offset = (int64_t)nrows_x * blocks_per_row_x * nchannels_x * 128;
         }
         __syncthreads();
     }
@@ -1106,6 +1111,13 @@ void ggml_cuda_mul_mat_vec_q(
 
     ggml_cuda_mm_fusion_args_device fusion_local{};
 
+#if defined(RDNA2_CACHE_SWIZZLE)
+    // Q4_K intra-block swizzle: check tensor flag (set at load time)
+    if (src0->type == GGML_TYPE_Q4_K && (src0->flags & GGML_TENSOR_FLAG_SWIZZLED)) {
+        fusion_local.swizzle_meta_offset = 1;
+    }
+#endif
+
     if (fusion) {
         GGML_ASSERT( !ids || dst->ne[2] == 1);
         GGML_ASSERT(  ids || dst->ne[1] == 1);
@@ -1173,13 +1185,50 @@ void ggml_cuda_mul_mat_vec_q(
 
 #if defined(RDNA2_CACHE_SWIZZLE)
     // Set SoA meta section offset for swizzled types (via fusion struct, compatible with CUDA graphs)
+    // FIX (ERR-HIP-IQ4XS-VIEW-DRIFT-026): Always reset to zero first, then compute view-aware
+    // parent coordinate mapping. Prevents stale offset from previous kernel launch leaking into
+    // subsequent launches of different tensor types.
+    fusion_local.swizzle_meta_offset = 0;
+
     if (src0->type == GGML_TYPE_IQ4_XS
 #if defined(RDNA2_SWIZZLE_ALL_QUANTS)
         || src0->type == GGML_TYPE_Q5_K
 #endif
+        || src0->type == GGML_TYPE_Q4_K
     ) {
-        const int64_t nblocks = ggml_nbytes(src0) / ggml_type_size(src0->type);
-        fusion_local.swizzle_meta_offset = nblocks * 128; // qs is always 128B/block
+        if (src0->type == GGML_TYPE_Q4_K) {
+            // Q4_K intra-block swizzle: check tensor flag (set at load time)
+            if (src0->flags & GGML_TENSOR_FLAG_SWIZZLED) {
+                fusion_local.swizzle_meta_offset = 1;
+            }
+        } else if (src0->view_src != nullptr) {
+            // Compute metadata offset relative to the absolute root parent allocation boundaries.
+            // The root parent holds the full SoA buffer; any view (even chained views) is a sub-region.
+            const ggml_tensor * p = src0;
+            while (p->view_src != nullptr) {
+                p = (ggml_tensor *)p->view_src;
+            }
+
+            const int64_t parent_nblocks = ggml_nbytes(p) / ggml_type_size(p->type);
+            size_t parent_meta_offset    = parent_nblocks * 128;
+
+            // Physical address displacement of the view slice within the parent buffer
+            size_t view_data_offset      = (uint8_t*)src0->data - (uint8_t*)p->data;
+
+            // Logical row shift context: how many blocks of src0 type fit before the view
+            size_t R = view_data_offset / ggml_row_size(src0->type, src0->ne[0]);
+
+            // Metadata stride per block matches parent tensor geometry
+            int64_t parent_blocks_per_row = (p->ne[0] + QK_K - 1) / QK_K;
+            size_t meta_stride_bytes      = parent_blocks_per_row * IQ4_XS_META_SIZE_HOST;
+
+            // Adjust offset relative to the view's local base address pointer
+            fusion_local.swizzle_meta_offset = parent_meta_offset + (R * meta_stride_bytes) - view_data_offset;
+        } else if (src0->flags & GGML_TENSOR_FLAG_SWIZZLED) {
+            // Standard non-view execution pathway (initialization / model weights)
+            const int64_t nblocks = ggml_nbytes(src0) / ggml_type_size(src0->type);
+            fusion_local.swizzle_meta_offset = nblocks * 128; // qs is always 128B/block
+        }
     }
 #endif
     mul_mat_vec_q_switch_type(
@@ -1215,13 +1264,50 @@ void ggml_cuda_op_mul_mat_vec_q(
     ggml_cuda_mm_fusion_args_device fusion_local{};
 #if defined(RDNA2_CACHE_SWIZZLE)
     // Set SoA meta section offset for swizzled types (via fusion struct, compatible with CUDA graphs)
+    // FIX (ERR-HIP-IQ4XS-VIEW-DRIFT-026): Always reset to zero first, then compute view-aware
+    // parent coordinate mapping. Prevents stale offset from previous kernel launch leaking into
+    // subsequent launches of different tensor types.
+    fusion_local.swizzle_meta_offset = 0;
+
     if (src0->type == GGML_TYPE_IQ4_XS
 #if defined(RDNA2_SWIZZLE_ALL_QUANTS)
         || src0->type == GGML_TYPE_Q5_K
 #endif
+        || src0->type == GGML_TYPE_Q4_K
     ) {
-        const int64_t nblocks = ggml_nbytes(src0) / ggml_type_size(src0->type);
-        fusion_local.swizzle_meta_offset = nblocks * 128; // qs is always 128B/block
+        if (src0->type == GGML_TYPE_Q4_K) {
+            // Q4_K intra-block swizzle: check tensor flag (set at load time)
+            if (src0->flags & GGML_TENSOR_FLAG_SWIZZLED) {
+                fusion_local.swizzle_meta_offset = 1;
+            }
+        } else if (src0->view_src != nullptr) {
+            // Compute metadata offset relative to the absolute root parent allocation boundaries.
+            // The root parent holds the full SoA buffer; any view (even chained views) is a sub-region.
+            const ggml_tensor * p = src0;
+            while (p->view_src != nullptr) {
+                p = (ggml_tensor *)p->view_src;
+            }
+
+            const int64_t parent_nblocks = ggml_nbytes(p) / ggml_type_size(p->type);
+            size_t parent_meta_offset    = parent_nblocks * 128;
+
+            // Physical address displacement of the view slice within the parent buffer
+            size_t view_data_offset      = (uint8_t*)src0->data - (uint8_t*)p->data;
+
+            // Logical row shift context: how many blocks of src0 type fit before the view
+            size_t R = view_data_offset / ggml_row_size(src0->type, src0->ne[0]);
+
+            // Metadata stride per block matches parent tensor geometry
+            int64_t parent_blocks_per_row = (p->ne[0] + QK_K - 1) / QK_K;
+            size_t meta_stride_bytes      = parent_blocks_per_row * IQ4_XS_META_SIZE_HOST;
+
+            // Adjust offset relative to the view's local base address pointer
+            fusion_local.swizzle_meta_offset = parent_meta_offset + (R * meta_stride_bytes) - view_data_offset;
+        } else if (src0->flags & GGML_TENSOR_FLAG_SWIZZLED) {
+            // Standard non-view execution pathway (initialization / model weights)
+            const int64_t nblocks = ggml_nbytes(src0) / ggml_type_size(src0->type);
+            fusion_local.swizzle_meta_offset = nblocks * 128; // qs is always 128B/block
+        }
     }
 #endif
     mul_mat_vec_q_switch_type(

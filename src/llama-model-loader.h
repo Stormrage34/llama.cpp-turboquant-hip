@@ -52,10 +52,26 @@ struct llama_model_loader {
     // custom comparator to sort weights more nicely by layer
     struct weight_name_comparer {
         bool operator()(const std::string & a, const std::string & b) const {
-            int a_layer = -1;
-            int b_layer = -1;
-            sscanf(a.c_str(), "blk.%d.", &a_layer);
-            sscanf(b.c_str(), "blk.%d.", &b_layer);
+            // Fast integer extraction of the layer number from strings of the form "blk.<num>."
+            // Avoids the heavyweight sscanf() in hot sorting paths.
+            auto get_layer = [](const std::string & s) {
+                // find the substring after "blk." and before the next '.'
+                size_t pos = s.find("blk.");
+                if (pos == std::string::npos) return -1;
+                pos += 4; // length of "blk."
+                size_t end = s.find('.', pos);
+                if (end == std::string::npos) end = s.size();
+                int layer = -1;
+                // manual conversion of digits to int (no locale, no overflow checks needed for small numbers)
+                for (size_t i = pos; i < end; ++i) {
+                    char c = s[i];
+                    if (c < '0' || c > '9') break;
+                    layer = layer * 10 + (c - '0');
+                }
+                return layer;
+            };
+            int a_layer = get_layer(a);
+            int b_layer = get_layer(b);
             if (a_layer != b_layer) {
                 return a_layer < b_layer;
             }

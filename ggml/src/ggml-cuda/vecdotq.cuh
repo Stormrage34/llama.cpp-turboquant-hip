@@ -1317,6 +1317,8 @@ static __device__ __forceinline__ float vec_dot_iq4_nl_q8_1(
 
 #define VDR_IQ4_XS_Q8_1_MMVQ 4
 #define VDR_IQ4_XS_Q8_1_MMQ  4
+static_assert(VDR_IQ4_XS_Q8_1_MMVQ == 4 && VDR_IQ4_XS_Q8_1_MMQ == 4,
+              "IQ4_XS VDR constants must stay at 4 for correct meta indexing");
 
 static __device__ __forceinline__ float vec_dot_iq4_xs_q8_1(
     const void * __restrict__ vbq, const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs) {
@@ -1336,7 +1338,9 @@ static __device__ __forceinline__ float vec_dot_iq4_xs_q8_1(
         sumi = ggml_cuda_dp4a(v.y, u1, sumi);
     }
 
-    const int ls = ((bq4->scales_l[iqs/8] >> (iqs & 0x04)) & 0x0F) | (((bq4->scales_h >> (iqs/2)) & 0x03) << 4);
+    int scale_idx = (iqs >> 3) & 0x3; // iqs/8 modulo 4 to stay within 4‑byte meta
+const int ls = ((bq4->scales_l[scale_idx] >> (iqs & 0x04)) & 0x0F) |
+               (((bq4->scales_h >> (iqs/2)) & 0x03) << 4);
     sumi *= ls - 32;
 
     const float d = __half2float(bq4->d) * __low2float(bq8_1[iqs/4].ds);
@@ -1360,7 +1364,10 @@ static __device__ __forceinline__ float vec_dot_iq4_xs_q8_1(
 // SoA meta section offset, set per-kernel-launch from tensor dimensions.
 // Must NOT use __constant__ (breaks CUDA graph capture via hipMemcpyToSymbol).
 // Instead, set from the kernel function via d_swizzle_meta_offset = ne01 * (ne00/QK_K) * 128.
-static __device__ int64_t d_swizzle_meta_offset = 0;
+static __device__ volatile int64_t d_swizzle_meta_offset = 0;
+// Q4_K intra-block swizzle flag: 1 = swizzled (block_q4_K_intra), 0 = AoS (block_q4_K).
+// Set from host via hipMemcpyToSymbol before MMQ/MMVQ kernel launches.
+static __device__ int32_t d_q4k_swizzled = 0;
 
 static __device__ __forceinline__ float vec_dot_iq4_xs_q8_1_swizzled(
     const void * __restrict__ vbq, const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs) {
@@ -1369,13 +1376,25 @@ static __device__ __forceinline__ float vec_dot_iq4_xs_q8_1_swizzled(
     const uint8_t * qs_ptr   = (const uint8_t *)vbq + (size_t)kbx * IQ4_XS_QS_SIZE_HOST;
     const uint8_t * meta_ptr = (const uint8_t *)vbq + d_swizzle_meta_offset + (size_t)kbx * IQ4_XS_META_SIZE_HOST;
 
-    // Read meta: d(2B) + scales_h(2B) + scales_l(4B) = 8B
-    const ggml_half d_half   = *(const ggml_half *)(meta_ptr + 0);
-    const uint16_t scales_h  = *(const uint16_t *)(meta_ptr + 2);
-    const uint8_t * scales_l = meta_ptr + 4;
+    if (blockIdx.x == 17 && blockIdx.y == 0 && threadIdx.x == 0 && kbx == 0) {
+        printf("[SWZ] ENTERED kbx=%d iqs=%d meta_offset=%lld\n", kbx, iqs, (long long)d_swizzle_meta_offset);
+    }
+    if (kbx == 0 && iqs == 0 && threadIdx.x == 0 && threadIdx.y == 0 && blockIdx.z == 0) {
+        // printf("[VECDOT_ALL] blockIdx.x=%d meta_offset=%lld\n", blockIdx.x, (long long)d_swizzle_meta_offset); // Debug print removed
+    }
+
+    // Read SoA meta: may need to span current and next block for scales_l
+    // Determine which meta block contains the scales for this iqs group (iqs/8 in 0..7)
+    int group = iqs >> 3;                     // 0..7
+    int meta_block = kbx + (group >> 2);      // +0 for groups 0‑3, +1 for groups 4‑7
+    const uint8_t * meta_ptr2 = (const uint8_t *)vbq + d_swizzle_meta_offset + (size_t)meta_block * IQ4_XS_META_SIZE_HOST;
+    const ggml_half d_half   = *(const ggml_half *)(meta_ptr2 + 0);
+    const uint16_t scales_h  = *(const uint16_t *)(meta_ptr2 + 2);
+    const uint8_t * scales_l = meta_ptr2 + 4;
+    int scale_idx = group & 0x3;               // index within the 4‑byte scales_l of the selected block
 
     int sumi = 0;
-#pragma unroll
+    #pragma unroll
     for (int j = 0; j < 4; ++j) {
         const int aux_q4 = get_int_b4(qs_ptr, iqs + j);
         const int2 v = get_int_from_table_16(aux_q4, kvalues_iq4nl);
@@ -1387,8 +1406,9 @@ static __device__ __forceinline__ float vec_dot_iq4_xs_q8_1_swizzled(
         sumi = ggml_cuda_dp4a(v.y, u1, sumi);
     }
 
-    // Same scale decode as standard vec_dot_iq4_xs_q8_1
-    const int ls = ((scales_l[iqs/8] >> (iqs & 0x04)) & 0x0F) | (((scales_h >> (iqs/2)) & 0x03) << 4);
+    // Scale decode using bounded index and possible next‑block meta
+    const int ls = ((scales_l[scale_idx] >> (iqs & 0x04)) & 0x0F) |
+                   (((scales_h >> (iqs/2)) & 0x03) << 4);
     sumi *= ls - 32;
 
     const float d = __half2float(d_half) * __low2float(bq8_1[iqs/4].ds);
@@ -1396,9 +1416,15 @@ static __device__ __forceinline__ float vec_dot_iq4_xs_q8_1_swizzled(
 }
 
 // Intra-block vec_dot for Q4_K — uses block_q4_K_intra (qs at offset 0 for cache line alignment)
+// Runtime dispatch: d_swizzle_meta_offset > 0  => use intra-block layout (swizzled)
+//                   d_swizzle_meta_offset == 0 => use standard AoS layout (unswizzled)
 static __device__ __forceinline__ float vec_dot_q4_K_q8_1_swizzled(
     const void * __restrict__ vbq, const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs) {
-    return vec_dot_q4_K_q8_1_tmpl<block_q4_K_intra>(vbq, bq8_1, kbx, iqs);
+    if (d_swizzle_meta_offset > 0) {
+        return vec_dot_q4_K_q8_1_tmpl<block_q4_K_intra>(vbq, bq8_1, kbx, iqs);
+    } else {
+        return vec_dot_q4_K_q8_1_tmpl<block_q4_K>(vbq, bq8_1, kbx, iqs);
+    }
 }
 
 // Q5_K SoA: qs(128B) + meta(dm+scales+qh=48B)

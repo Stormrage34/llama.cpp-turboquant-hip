@@ -154,7 +154,11 @@ struct server_tool_read_file : server_tool {
         bool append_loc   = json_value(params, "append_loc", false);
 
         std::error_code ec;
-        uintmax_t file_size = fs::file_size(path, ec);
+        auto resolved = fs::canonical(path, ec);
+        if (ec) {
+            return {{"error", "cannot resolve path: " + ec.message()}};
+        }
+        uintmax_t file_size = fs::file_size(resolved, ec);
         if (ec) {
             return {{"error", "cannot stat file: " + ec.message()}};
         }
@@ -201,6 +205,7 @@ struct server_tool_read_file : server_tool {
 //
 
 static constexpr size_t SERVER_TOOL_FILE_SEARCH_MAX_RESULTS = 100;
+static constexpr int    SERVER_TOOL_FILE_SEARCH_MAX_DEPTH     = 16; // depth limit — prevents infinite recursion on mount cycles
 
 struct server_tool_file_glob_search : server_tool {
     server_tool_file_glob_search() {
@@ -235,13 +240,28 @@ struct server_tool_file_glob_search : server_tool {
 
         std::ostringstream output_text;
         size_t count = 0;
+        int max_depth = SERVER_TOOL_FILE_SEARCH_MAX_DEPTH;
+
+        std::error_code canon_ec;
+        auto canonical_base = fs::canonical(base, canon_ec);
+        if (canon_ec) {
+            return {{"error", "cannot resolve base path: " + canon_ec.message()}};
+        }
 
         std::error_code ec;
-        for (const auto & entry : fs::recursive_directory_iterator(base,
-                fs::directory_options::skip_permission_denied, ec)) {
+        for (auto it = fs::recursive_directory_iterator(canonical_base,
+                fs::directory_options::skip_permission_denied, ec);
+             it != fs::recursive_directory_iterator(); it.increment(ec)) {
+            const auto & entry = *it;
             if (!entry.is_regular_file()) continue;
 
-            std::string rel = fs::relative(entry.path(), base, ec).string();
+            // Enforce max depth to prevent infinite recursion on mount cycles
+            if (it.depth() >= max_depth) {
+                it.disable_recursion_pending();
+                continue;
+            }
+
+            std::string rel = fs::relative(entry.path(), canonical_base, ec).string();
             if (ec) continue;
             std::replace(rel.begin(), rel.end(), '\\', '/');
 
@@ -333,10 +353,18 @@ struct server_tool_grep_search : server_tool {
         if (fs::is_regular_file(path, ec)) {
             search_file(path);
         } else if (fs::is_directory(path, ec)) {
-            for (const auto & entry : fs::recursive_directory_iterator(path,
-                    fs::directory_options::skip_permission_denied, ec)) {
+            for (auto it = fs::recursive_directory_iterator(path,
+                    fs::directory_options::skip_permission_denied, ec);
+                 it != fs::recursive_directory_iterator() && total < SERVER_TOOL_GREP_SEARCH_MAX_RESULTS;
+                 it.increment(ec)) {
+                const auto & entry = *it;
                 if (!entry.is_regular_file()) continue;
-                if (total >= SERVER_TOOL_GREP_SEARCH_MAX_RESULTS) break;
+
+                // Depth limit to prevent infinite recursion from mount cycles
+                if (it.depth() >= SERVER_TOOL_FILE_SEARCH_MAX_DEPTH) {
+                    it.disable_recursion_pending();
+                    continue;
+                }
 
                 std::string rel = fs::relative(entry.path(), path, ec).string();
                 if (ec) continue;
