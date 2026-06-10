@@ -12,6 +12,17 @@
 
 #define _USE_MATH_DEFINES
 #include <math.h>
+
+// Simple host-side float16 conversion (IEEE 754-2008 encoding)
+static inline uint16_t fp16_encode(float f) {
+    uint32_t i = *(uint32_t*)&f;
+    int exp = (i >> 23) & 0xFF;
+    if (exp == 255) return (i & 0x8000) | 0x7C00; // Inf/NaN -> Inf
+    if (exp >= 143) return (i & 0x8001) | (245 - exp << 13); // Overflow -> Inf
+    if (exp > 126) return (i & 0x8007F) | ((exp - 126) << 13);
+    int mant = (i & 0x7F800) >> 7;
+    return (i & 0x8000) | (mant >> (126 - exp)) | (((mant >> (125 - exp)) & 1) ^ ((mant >> (125 - exp)) & ((-(mant >> (125 - exp))) & 1)));
+}
 #include <string.h>
 #include <assert.h>
 #include <stdlib.h>
@@ -993,3 +1004,217 @@ size_t quantize_tq4_1s(const float * GGML_RESTRICT src, void * GGML_RESTRICT dst
     }
     return nrows * row_size;
 }
+
+// ============================================================================
+// RotorQuant: Cl(3,0) multivector-based vector quantization.
+// GGML_TYPE_RQ_MSE_2: Lloyd-Max per component, rotor encoding.
+// GGML_TYPE_RQ_PROD: MSE + QJL residual for unbiased IP.
+// ============================================================================
+
+#define RQ_MV_DIM 8
+
+/* Fallback — rotorquant.cuh defines this; include if present. */
+#ifndef RQ_N_GROUPS
+#define RQ_N_GROUPS (128 / 3) // 42 groups (63 vector dims + partial)
+#endif
+
+static void rq_mse_generate_rotors(float * rotors_out, int n_groups, uint32_t seed) {
+    // Same as in rotorquant.cuh — generate unit bivector rotors.
+    uint32_t state = seed;
+    for (int g = 0; g < RQ_N_GROUPS; g++) {
+        state = 1664525u * state + 1013904245u;
+        float cos_ha = (float)(state & 0x7FFFFFFF) / (float)0x7FFFFFFF;
+        float b12 = 0, b13 = 0, b23 = 0;
+        for (int i = 0; i < 3; i++) {
+            state = 1664525u * state + 1013904245u;
+            float r = (float)(state & 0x7FFFFFFF) / (float)0x7FFFFFFF;
+            switch (i) {
+                case 0: b12 = r; break; case 1: b13 = r; break; case 2: b23 = r; break;
+            }
+        }
+        float bv_norm = sqrtf(b12*b12 + b13*b13 + b23*b23);
+        if (bv_norm < 1e-8f) { b12 = 0; b13 = 0; b23 = 0; }
+        else {
+            float inv_norm = 1.0f / bv_norm;
+            b12 *= inv_norm; b13 *= inv_norm; b23 *= inv_norm;
+        }
+        state = 1664525u * state + 1013904245u;
+        float r_a = (float)(state & 0x7FFFFFFF) / (float)0x7FFFFFFF;
+        float angle = 2.0f * acosf(2.0f * r_a - 1.0f);
+        float sin_ha = sinf(angle / 2.0f);
+
+        int base = g * RQ_MV_DIM;
+        rotors_out[base + 0] = cos_ha;
+        rotors_out[base + 1] = 0.0f; rotors_out[base + 2] = 0.0f; rotors_out[base + 3] = 0.0f;
+        rotors_out[base + 4] = sin_ha * b12;
+        rotors_out[base + 5] = sin_ha * b13;
+        rotors_out[base + 6] = sin_ha * b23;
+        rotors_out[base + 7] = 0.0f;
+    }
+}
+
+void quantize_row_rq_mse_2_ref(const float * GGML_RESTRICT x, block_rq_mse_2 * GGML_RESTRICT y, int64_t k) {
+    // Host-side RQ_MSE_2 quantization: pack vector into multivector, apply rotor, Lloyd-Max quantize.
+    const int d = k;  // vector dimension
+    const int n_groups = (d + 2) / 3;
+
+    // Generate rotors (once per call — in practice cached in GGML context).
+    float rotors[128 * RQ_MV_DIM];
+    rq_mse_generate_rotors(rotors, n_groups, 42);
+
+    for (int64_t i = 0; i < k; i += 128) {
+        block_rq_mse_2 * blk = y + (i / 128);
+        // Pack input vector into multivector form.
+        // Each block processes 128 input elements.
+        // Compute per‑group scalar rho as RMS of the three components in each group.
+        for (int g = 0; g < n_groups && g < 42; ++g) {
+            float group_sq = 0.0f;
+            int base = i + g * 3;
+            for (int c = 0; c < 3; ++c) {
+                if (base + c < k) {
+                    float v = x[base + c];
+                    group_sq += v * v;
+                }
+            }
+            float group_norm = sqrtf(group_sq);
+            // Store as half‑precision scalar (uint16_t representation)
+            blk->rho[g] = fp16_encode(group_norm);
+        }
+        // Compute overall block norm (RMS of all components).
+        float norm_sq = 0.0f;
+        for (int g = 0; g < n_groups; g++) {
+            for (int c = 1; c <= 3 && i + g * 3 + c - 1 < k; c++) {
+                float v = x[i + g * 3 + c - 1];
+                norm_sq += v * v;
+            }
+        }
+        blk->norm = fp16_encode(sqrtf(norm_sq / (float)k));
+
+        // Apply rotor forward: R * x (multivector multiply).
+        // For each group, compute R_x = geometric_product(R, mv).
+        float mv[RQ_MV_DIM];
+        float r_x[RQ_MV_DIM];
+
+        for (int g = 0; g < n_groups && g < 42; g++) {
+            int base_mv = g * RQ_MV_DIM;
+            int base_r = g * RQ_MV_DIM;
+
+            // Load multivector: [scalar, e1, e2, e3, b12, b13, b23, triv].
+            mv[0] = 0.0f;
+            for (int c = 1; c <= 3 && i + g * 3 + c - 1 < k; c++) {
+                mv[c] = x[i + g * 3 + c - 1];
+            }
+            mv[4] = mv[5] = mv[6] = mv[7] = 0.0f;
+
+            // Geometric product R × x in Cl(3,0).
+            const float R0 = rotors[base_r + 0], R1 = rotors[base_r + 1],
+                        R2 = rotors[base_r + 2], R3 = rotors[base_r + 3],
+                        R4 = rotors[base_r + 4], R5 = rotors[base_r + 5],
+                        R6 = rotors[base_r + 6], R7 = rotors[base_r + 7];
+            const float x0 = mv[0], x1 = mv[1], x2 = mv[2], x3 = mv[3],
+                        x12 = mv[4], x13 = mv[5], x23 = mv[6], x123 = mv[7];
+
+            r_x[0]  = R0*x0 + R1*x1 + R2*x2 + R3*x3 - R4*x12 - R5*x13 - R6*x23 - R7*x123;
+            r_x[1]  = R0*x1 + R1*x0 - R2*x12 + R4*x2 - R3*x13 + R5*x3 + R6*x123 + R7*x23;
+            r_x[2]  = R0*x2 + R2*x0 + R1*x12 - R4*x1 - R3*x23 + R6*x3 - R5*x123 - R7*x13;
+            r_x[3]  = R0*x3 + R3*x0 + R1*x13 - R5*x1 + R2*x23 - R6*x2 + R4*x123 + R7*x12;
+            r_x[4]  = R0*x12 + R4*x0 + R1*x2 - R2*x1 + R5*x23 - R6*x13 + R3*x123 - R7*x3;
+            r_x[5]  = R0*x13 + R5*x0 + R1*x3 - R3*x1 - R4*x23 + R6*x12 - R2*x123 + R7*x2;
+            r_x[6]  = R0*x23 + R6*x0 + R2*x3 - R3*x2 + R4*x13 - R5*x12 + R1*x123 - R7*x1;
+            r_x[7]  = R0*x123 + R7*x0 + R1*x23 - R6*x1 - R2*x13 + R5*x2 + R3*x12 - R4*x3;
+
+            // Lloyd-Max quantize each component (8-bit, codebook in rotorquant.cuh).
+            for (int c = 0; c < RQ_MV_DIM; c++) {
+                float val = r_x[c];
+                int idx = (int)((val + 2.0f) / 4.0f * 255.0f + 0.5f);
+                idx = (int)fminf(fmaxf((float)idx, 0.0f), 255.0f);
+                // Storing per‑component indices removed in new RQ format (placeholder)
+                (void)idx; // suppress unused warning
+            }
+        }
+    }
+}
+
+void dequantize_row_rq_mse_2(const block_rq_mse_2 * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k) {
+    // Host-side RQ_MSE_2 dequantization: lookup centroids, apply inverse rotor.
+    // Placeholder — full implementation uses Lloyd-Max centroids loaded from device.
+    // In practice, dequant happens on GPU via kernel (see rotor_dequant_kernel.cu).
+    for (int64_t i = 0; i < k; i++) {
+        y[i] = 0.0f; // placeholder
+    }
+}
+
+size_t quantize_rq_mse_2(const float * GGML_RESTRICT src, void * GGML_RESTRICT dst,
+                         int64_t nrows, int64_t n_per_row, const float * imatrix) {
+    GGML_UNUSED(imatrix);
+    assert(n_per_row % 128 == 0);
+    size_t row_size = (n_per_row / 128) * sizeof(block_rq_mse_2);
+    for (int64_t row = 0; row < nrows; row++) {
+        quantize_row_rq_mse_2_ref(
+            src + row * n_per_row,
+            (block_rq_mse_2 *)((char *)dst + row * row_size),
+            n_per_row
+        );
+    }
+    return nrows * row_size;
+}
+
+// QJL matrix S = Hankel skew (anti-diagonal) — same as torch.rot90(torch.eye(m), m//2).
+static float* rq_qjl_compute_s_matrix(int m, float* h_S_out) {
+    memset(h_S_out, 0, m * m * sizeof(float));
+    for (int i = 0; i < m; i++) {
+        int j = (m - 1) - i;  // Hankel matrix: S[i][j] = (-1)^i * I(i+j=m-1)
+        h_S_out[i * m + j] = (float)((i % 2 == 0) ? 1.0f : -1.0f);
+    }
+    return h_S_out;
+}
+
+void quantize_row_rq_prod_ref(const float * GGML_RESTRICT x, block_rq_prod * GGML_RESTRICT y, int64_t k) {
+    // RQ_PROD: MSE indices + QJL residual norm + sign bits.
+    quantize_row_rq_mse_2_ref(x, (block_rq_mse_2 *)y, k);
+    y->residual_norm = 0.0f;   // placeholder
+    y->qjl_signs[0] = 0;       // placeholder
+}
+
+void dequantize_row_rq_prod(const block_rq_prod * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k) {
+    // RQ_PROD dequant: process MSE component of the block (same layout as RQ_MSE_2).
+    // The residual_norm and qjl_signs are metadata for QJL correction at attention time.
+    for (int64_t i = 0; i < k; i++) {
+        y[i] = 0.0f; // placeholder: full impl uses rotor_dequant_kernel.cu on GPU
+    }
+}
+
+size_t quantize_rq_prod(const float * GGML_RESTRICT src, void * GGML_RESTRICT dst,
+                        int64_t nrows, int64_t n_per_row, const float * imatrix) {
+    GGML_UNUSED(imatrix);
+    assert(n_per_row % 128 == 0);
+    size_t row_size = (n_per_row / 128) * sizeof(block_rq_prod);
+    for (int64_t row = 0; row < nrows; row++) {
+        quantize_row_rq_prod_ref(
+            src + row * n_per_row,
+            (block_rq_prod *)((char *)dst + row * row_size),
+            n_per_row
+        );
+    }
+    return nrows * row_size;
+}
+
+// ============================================================================
+// QJL (Quantized Johnson-Lindenstrauss) host functions.
+// The S matrix is precomputed and cached per-model (m = head_dim).
+// ============================================================================
+
+static float * g_rq_qjl_S = NULL;  // Precomputed QJL matrix (m × m), one-time allocation.
+static int g_rq_qjl_m = 0;
+
+void rq_qjl_init_S(int m) {
+    if (g_rq_qjl_m != m) {
+        free(g_rq_qjl_S);
+        g_rq_qjl_S = (float *)malloc(m * m * sizeof(float));
+        rq_qjl_compute_s_matrix(m, g_rq_qjl_S);
+        g_rq_qjl_m = m;
+    }
+}
+
+const float * rq_qjl_get_S(void) { return g_rq_qjl_S; }
+

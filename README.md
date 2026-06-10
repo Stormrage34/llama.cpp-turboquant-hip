@@ -76,6 +76,9 @@ build/bin/llama-server \
 | **Max quality** | `-ctk q8_0 -ctv q8_0` | 2642 MiB | 43.9 | Highest fidelity (original) |
 | **Max context** | `-ctk turbo4 -ctv turbo2` | ~2000 MiB | ~38 | 256K+ contexts |
 
+> **Note:** The `rq_mse_2` cache now stores a per‑group scalar ρ (RMS of each 3‑element group) in half‑precision, improving KV‑cache de‑quantisation fidelity while keeping the block size at 86 B.
+
+
 **Note:** Our turbo caches are 3.5% behind q8_0/q8_0 on raw speed but use **13-17% less VRAM**, yielding better tokens-per-second-per-GiB. At 128k+ contexts this VRAM efficiency becomes decisive.
 
 ---

@@ -168,6 +168,10 @@ if (NOT WIN32 OR NOT BUILD_SHARED_LIBS)
     endif()
 
     llama_build(test-gbnf-validator.cpp)
+    llama_build(test_rq_size.cpp)
+    llama_test(test_rq_size)
+    llama_build(test_rq_scalar.cpp)
+    llama_test(test_rq_scalar)
 
     # build test-tokenizer-1-bpe target once and add many tests
     llama_build(test-tokenizer-1-bpe.cpp)
