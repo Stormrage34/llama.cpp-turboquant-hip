@@ -206,17 +206,21 @@ llama_build_and_test(test-chat-template.cpp)
 llama_build_and_test(test-json-partial.cpp)
 llama_build_and_test(test-log.cpp)
 
-# RDNA2 HIP tests: unit + microbench
-# Resolve ROCM_PATH with fallback (same logic as ggml/src/ggml-hip/CMakeLists.txt)
-if (NOT EXISTS $ENV{ROCM_PATH})
-    if (NOT EXISTS /opt/rocm)
-        set(ROCM_PATH /usr)
+# RDNA2 HIP tests: unit + microbench (only when ggml-hip is available)
+if (GGML_HIP)
+    # Resolve ROCM_PATH with fallback (same logic as ggml/src/ggml-hip/CMakeLists.txt)
+    if (NOT EXISTS $ENV{ROCM_PATH})
+        if (NOT EXISTS /opt/rocm)
+            set(ROCM_PATH /usr)
+        else()
+            set(ROCM_PATH /opt/rocm)
+        endif()
     else()
-        set(ROCM_PATH /opt/rocm)
+        set(ROCM_PATH $ENV{ROCM_PATH})
     endif()
-else()
-    set(ROCM_PATH $ENV{ROCM_PATH})
 endif()
+
+if (GGML_HIP)
 add_executable(test_dequant_rdn2
     hip/test_dequant_rdn2.cpp
     ../ggml/src/ggml-cuda/iq4_dequant_rdn2.cu
@@ -245,6 +249,8 @@ target_compile_options(dequant_microbench PRIVATE -I${ROCM_PATH}/include)
 set_source_files_properties(hip/dequant_microbench.cpp PROPERTIES LANGUAGE CXX)
 target_link_directories(dequant_microbench PRIVATE ${CMAKE_BINARY_DIR}/bin ${ROCM_PATH}/lib)
 target_link_libraries(dequant_microbench PRIVATE llama-common ggml-hip amdhip64)
+
+endif()  # GGML_HIP
 
 llama_build_and_test(
     test-peg-parser.cpp

@@ -123,6 +123,22 @@ GGML_API void quantize_row_tq4_1s_ref(const float * GGML_RESTRICT x, block_tq4_1
 GGML_API void dequantize_row_tq4_1s(const block_tq4_1s * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k);
 GGML_API size_t quantize_tq4_1s(const float * GGML_RESTRICT src, void * GGML_RESTRICT dst, int64_t nrows, int64_t n_per_row, const float * imatrix);
 
+// RotorQuant: Clifford-algebra-based vector quantization (C host version)
+// Pre-define BLOCK_RQ_DEFINED so ggml-turbo-quant.c doesn't re-declare it.
+#ifndef BLOCK_RQ_DEFINED
+#define BLOCK_RQ_DEFINED 1
+typedef struct { uint16_t rho[42]; uint16_t norm; } block_rq_mse_2;  // C host version (quantize_row_rq_mse_2_ref uses rho)
+typedef struct { uint16_t norm; uint8_t qs[336]; float residual_norm; uint8_t qjl_signs[4]; } block_rq_prod;
+#endif /* BLOCK_RQ_DEFINED */
+GGML_API void quantize_row_rq_mse_2_ref(const float * GGML_RESTRICT x, block_rq_mse_2 * GGML_RESTRICT y, int64_t k);
+GGML_API void dequantize_row_rq_mse_2(const block_rq_mse_2 * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k);
+GGML_API size_t quantize_rq_mse_2(const float * GGML_RESTRICT src, void * GGML_RESTRICT dst,
+                                  int64_t nrows, int64_t n_per_row, const float * imatrix);
+GGML_API void quantize_row_rq_prod_ref(const float * GGML_RESTRICT x, block_rq_prod * GGML_RESTRICT y, int64_t k);
+GGML_API void dequantize_row_rq_prod(const block_rq_prod * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k);
+GGML_API size_t quantize_rq_prod(const float * GGML_RESTRICT src, void * GGML_RESTRICT dst,
+                                 int64_t nrows, int64_t n_per_row, const float * imatrix);
+
 GGML_API void iq2xs_init_impl(enum ggml_type type);
 GGML_API void iq2xs_free_impl(enum ggml_type type);
 GGML_API void iq3xs_init_impl(int grid_size);

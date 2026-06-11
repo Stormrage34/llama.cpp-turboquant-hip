@@ -13,6 +13,11 @@
 #define _USE_MATH_DEFINES
 #include <math.h>
 
+#ifndef BLOCK_RQ_DEFINED
+typedef struct { uint16_t rho[42]; uint16_t norm; } block_rq_mse_2;  // C host version (quantize_row_rq_mse_2_ref uses rho)
+typedef struct { uint16_t norm; uint8_t qs[336]; float residual_norm; uint8_t qjl_signs[4]; } block_rq_prod;
+#endif /* BLOCK_RQ_DEFINED */
+
 // Simple host-side float16 conversion (IEEE 754-2008 encoding)
 static inline uint16_t fp16_encode(float f) {
     uint32_t i = *(uint32_t*)&f;

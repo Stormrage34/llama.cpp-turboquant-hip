@@ -434,7 +434,18 @@ extern "C" {
         GGML_TYPE_TQ3_1S   = 44,
         GGML_TYPE_TQ4_1S   = 45,
         GGML_TYPE_Q1_0     = 46,
-        GGML_TYPE_COUNT    = 47,
+
+        // RotorQuant: Clifford-algebra-based vector quantization
+        GGML_TYPE_RQ_MSE_2 = 47,
+
+        // GGML_TYPE_RQ_PROD: Rotor MSE + QJL for attention (MSE indices + QJL signs for unbiased IP)
+        GGML_TYPE_RQ_PROD  = 48,
+
+        // PlanarQuant/IsoQuant — Clifford-algebra-based vector quantization (Planar3/Iso3)
+        GGML_TYPE_PLANAR3_0 = 49,
+        GGML_TYPE_ISO3_0    = 50,
+
+        GGML_TYPE_COUNT    = 51,
     };
 
     // precision

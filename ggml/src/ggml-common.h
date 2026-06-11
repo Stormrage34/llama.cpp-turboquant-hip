@@ -344,6 +344,10 @@ typedef struct {
 } block_turbo2_0;                       // 10 bytes total
 static_assert(sizeof(block_turbo2_0) == sizeof(ggml_half) + QK_TURBO2/4, "wrong turbo2_0 block size/padding");
 
+// RotorQuant: Clifford-algebra-based vector quantization (C host version of block types for RQ_MSE_2 and RQ_PROD)
+// NOTE: block_rq_mse_2 and block_rq_prod are declared in ggml-turbo-quant.c (host/CPU), not in ggml-common.h
+// This file provides type names only (ggml_type_table entries) for the enum values.
+
 // TQ3_1S: WHT-rotated 3-bit weight quantization (8-level Lloyd-Max for N(0,1))
 // Block size 32, dual half-block scales (d0 for [0..15], d1 for [16..31])
 // Per block: d0(fp16) + d1(fp16) + 3-bit indices packed (12 bytes) = 16 bytes per 32 values
