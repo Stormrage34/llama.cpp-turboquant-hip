@@ -186,21 +186,52 @@ static __global__ void flash_attn_ext_vec(
 
         __syncthreads();
 
+        // Q is NOT quantized (Q_q8_1 = true means K is quantized, not Q).
+        // Load Q directly from the Q tensor into Q_reg without any dequant.
+        // No Q_i32/Q_ds population needed for FP16 Q; vec_dot_KQ reads from Q_reg.
+#ifdef V_DOT2_F32_F16_AVAILABLE
+        const half2 scale_h2 = make_half2(scale, scale);
 #pragma unroll
         for (int j = 0; j < ncols; ++j) {
-            int    * tmp_q_i32 = (int    *) &KQ[j*D];
-            float2 * tmp_q_ds  = (float2 *) (tmp_q_i32 + D/sizeof(int));
-
+            const float2 * Q_j = (const float2 *) (Q + j*nb01);
 #pragma unroll
-            for (int i0 = 0; i0 < int(D/sizeof(int)); i0 += nthreads_KQ) {
-                const int i = i0 + (nthreads_KQ == WARP_SIZE ? threadIdx.x : threadIdx.x % nthreads_KQ);
-
-                Q_i32[j][i0/nthreads_KQ] = tmp_q_i32[i];
-                Q_ds[j][i0/nthreads_KQ]  = tmp_q_ds[i/QI8_1];
+            for (int i0 = 0; i0 < D/2; i0 += nthreads_KQ*cpy_ne) {
+                const int i = i0 + (nthreads_KQ == WARP_SIZE ? threadIdx.x : threadIdx.x % nthreads_KQ)*cpy_ne;
+                __align__(16) float2 tmp[cpy_ne] = {{0.0f, 0.0f}};
+                if (ncols == 1 || ic0 + j < int(ne01.z)) {
+                    ggml_cuda_memcpy_1<cpy_nb>(tmp,            &Q_j[i]);
+                    ggml_cuda_memcpy_1<cpy_nb>(tmp + cpy_ne/2, &Q_j[i + cpy_ne/2]);
+                }
+#pragma unroll
+                for (int i1 = 0; i1 < cpy_ne; ++i1) {
+                    Q_reg[j][i0/nthreads_KQ + i1] = make_half2(tmp[i1].x, tmp[i1].y);
+                }
+            }
+#pragma unroll
+            for (int k = 0; k < (D/2)/nthreads_KQ; ++k) {
+                Q_reg[j][k] *= scale_h2;
             }
         }
-
-        __syncthreads();
+#else
+        // Non-AVO path: load Q as float2 and store directly (no half2 conversion)
+#pragma unroll
+        for (int j = 0; j < ncols; ++j) {
+            const float2 * Q_j = (const float2 *) (Q + j*nb01);
+#pragma unroll
+            for (int i0 = 0; i0 < D/2; i0 += nthreads_KQ*cpy_ne) {
+                const int i = i0 + (nthreads_KQ == WARP_SIZE ? threadIdx.x : threadIdx.x % nthreads_KQ)*cpy_ne;
+                if (ncols == 1 || ic0 + j < int(ne01.z)) {
+                    ggml_cuda_memcpy_1<cpy_nb>(&Q_reg[j][i0/nthreads_KQ],            &Q_j[i]);
+                    ggml_cuda_memcpy_1<cpy_nb>(&Q_reg[j][i0/nthreads_KQ + cpy_ne/2], &Q_j[i + cpy_ne/2]);
+                }
+            }
+#pragma unroll
+            for (int k = 0; k < (D/2)/nthreads_KQ; ++k) {
+                Q_reg[j][k].x *= scale;
+                Q_reg[j][k].y *= scale;
+            }
+        }
+#endif
     } else {
 #ifdef V_DOT2_F32_F16_AVAILABLE
         const half2 scale_h2 = make_half2(scale, scale);
