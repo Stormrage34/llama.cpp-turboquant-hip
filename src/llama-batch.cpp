@@ -894,8 +894,9 @@ struct llama_batch llama_batch_init(int32_t n_tokens_alloc, int32_t embd, int32_
     batch.pos      = (llama_pos *)     malloc(sizeof(llama_pos)      * n_tokens_alloc);
     batch.n_seq_id = (int32_t *)       malloc(sizeof(int32_t)        * n_tokens_alloc);
     batch.seq_id   = (llama_seq_id **) malloc(sizeof(llama_seq_id *) * (n_tokens_alloc + 1));
+    llama_seq_id * seq_id_buf = (llama_seq_id *) malloc(sizeof(llama_seq_id) * n_tokens_alloc * n_seq_max);
     for (int i = 0; i < n_tokens_alloc; ++i) {
-        batch.seq_id[i] = (llama_seq_id *) malloc(sizeof(llama_seq_id) * n_seq_max);
+        batch.seq_id[i] = seq_id_buf + i * n_seq_max;
     }
     batch.seq_id[n_tokens_alloc] = nullptr;
 
@@ -910,9 +911,7 @@ void llama_batch_free(struct llama_batch batch) {
     if (batch.pos)      free(batch.pos);
     if (batch.n_seq_id) free(batch.n_seq_id);
     if (batch.seq_id) {
-        for (int i = 0; batch.seq_id[i] != nullptr; ++i) {
-            free(batch.seq_id[i]);
-        }
+        free(batch.seq_id[0]);
         free(batch.seq_id);
     }
     if (batch.logits)   free(batch.logits);

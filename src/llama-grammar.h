@@ -133,6 +133,33 @@ struct llama_grammar {
     const llama_grammar_rules  rules;  // TODO: shared ptr
           llama_grammar_stacks stacks;
 
+    llama_grammar(
+        const llama_vocab * vocab,
+        llama_grammar_rules rules,
+        llama_grammar_stacks stacks,
+        llama_partial_utf8 partial_utf8,
+        bool lazy,
+        bool awaiting_trigger,
+        std::string trigger_buffer,
+        std::vector<token_pos> trigger_buffer_positions,
+        std::vector<llama_token> trigger_tokens,
+        std::vector<llama_grammar_trigger_pattern> trigger_patterns)
+        : vocab(vocab)
+        , rules(std::move(rules))
+        , stacks(std::move(stacks))
+        , partial_utf8(partial_utf8)
+        , lazy(lazy)
+        , awaiting_trigger(awaiting_trigger)
+        , trigger_buffer(std::move(trigger_buffer))
+        , trigger_buffer_positions(std::move(trigger_buffer_positions))
+        , trigger_tokens(std::move(trigger_tokens))
+        , trigger_patterns(std::move(trigger_patterns))
+    {}
+
+    ~llama_grammar() = default;
+    llama_grammar(const llama_grammar &) = delete;
+    llama_grammar & operator=(const llama_grammar &) = delete;
+
     // buffer for partially generated UTF-8 sequence from accepted tokens
     llama_partial_utf8 partial_utf8;
 

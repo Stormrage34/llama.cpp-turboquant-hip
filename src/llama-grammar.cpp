@@ -1284,18 +1284,18 @@ struct llama_grammar * llama_grammar_init_impl(
     // Important: vec_rules has to be moved here, not copied, because stacks contains
     // pointers to elements of vec_rules. If vec_rules were copied into llama_grammar
     // then the pointers would be invalidated when the local vec_rules goes out of scope.
-    return new llama_grammar {
+    return new llama_grammar(
         vocab,
         std::move(vec_rules),
         std::move(stacks),
-        /* .partial_utf8 = */             {},
-        /* .lazy = */                     lazy,
-        /* .awaiting_trigger = */         lazy,
-        /* .trigger_buffer = */           "",
-        /* .trigger_buffer_positions = */ {},
+        {},                          // partial_utf8
+        lazy,                        // lazy
+        lazy,                        // awaiting_trigger
+        {},                          // trigger_buffer
+        {},                          // trigger_buffer_positions
         std::move(vec_trigger_tokens),
-        std::move(vec_trigger_patterns),
-    };
+        std::move(vec_trigger_patterns)
+    );
 }
 
 void llama_grammar_free_impl(struct llama_grammar * grammar) {
@@ -1307,7 +1307,7 @@ void llama_grammar_free_impl(struct llama_grammar * grammar) {
 }
 
 struct llama_grammar * llama_grammar_clone_impl(const struct llama_grammar & grammar) {
-    auto * result = new llama_grammar {
+    auto * result = new llama_grammar(
         grammar.vocab,
         grammar.rules,
         grammar.stacks,
@@ -1317,8 +1317,8 @@ struct llama_grammar * llama_grammar_clone_impl(const struct llama_grammar & gra
         grammar.trigger_buffer,
         grammar.trigger_buffer_positions,
         grammar.trigger_tokens,
-        grammar.trigger_patterns,
-    };
+        grammar.trigger_patterns
+    );
 
     // redirect elements in stacks to point to new rules
     for (size_t is = 0; is < result->stacks.size(); is++) {

@@ -8,6 +8,7 @@
 #include "pca.hpp"
 #include "mean.hpp"
 
+#include <cstdlib>
 #include <clocale>
 
 #ifdef GGML_USE_CUDA
@@ -198,6 +199,10 @@ struct train_context {
     // v_diff_tmp will get converted unto v_diff later on
     std::vector<std::vector<uint8_t>> v_diff_tmp;
 
+    // base pointers for pre-allocated data (freed once instead of per-tensor)
+    uint8_t * v_final_data = nullptr;
+    uint8_t * v_diff_data = nullptr;
+
     train_context(int n_embd_, int n_layers_) {
         n_embd = n_embd_;
         n_layers = n_layers_;
@@ -207,11 +212,13 @@ struct train_context {
             /*.no_alloc   =*/ true,
         };
         ctx_ggml = ggml_init(params_ggml);
+        v_final_data = (uint8_t *) calloc(1,
+            ggml_row_size(GGML_TYPE_F32, n_embd) * n_embd * (n_layers - 1));
         for (int il = 0; il < n_layers - 1; il++) {
             std::vector<uint8_t> empty;
             v_diff_tmp.push_back(empty);
             auto t = ggml_new_tensor_1d(ctx_ggml, GGML_TYPE_F32, n_embd);
-            t->data = malloc(ggml_nbytes(t)); // TODO: get rid of malloc if possible
+            t->data = v_final_data + il * ggml_nbytes(t);
             v_final.push_back(t);
         }
     }
@@ -232,6 +239,15 @@ struct train_context {
     // TODO @ngxson : maybe add option NOT to transpose v_diff; will be useful for "mean" method
     void build_v_diff(bool transpose) {
         printf("build_v_diff\n");
+        // pre-calculate total bytes needed and allocate once
+        size_t total_bytes = 0;
+        for (int il = 0; il < n_layers - 1; il++) {
+            int n_elem = v_diff_tmp[il].size() / sizeof(float);
+            GGML_ASSERT(n_elem % n_embd == 0);
+            int n_rows = n_elem / n_embd;
+            total_bytes += ggml_row_size(GGML_TYPE_F32, transpose ? n_embd : n_rows) * (transpose ? n_rows : n_embd);
+        }
+        v_diff_data = (uint8_t *) calloc(1, total_bytes);
         for (int il = 0; il < n_layers - 1; il++) {
             auto & diff_tmp = v_diff_tmp[il];
             int n_elem = diff_tmp.size() / sizeof(float);
@@ -241,7 +257,8 @@ struct train_context {
                 ? ggml_new_tensor_2d(ctx_ggml, GGML_TYPE_F32, n_rows, n_embd)
                 : ggml_new_tensor_2d(ctx_ggml, GGML_TYPE_F32, n_embd, n_rows);
             ggml_set_name(diff, (std::string("diff_") + std::to_string(il)).c_str());
-            diff->data = malloc(ggml_nbytes(diff)); // TODO: get rid of this malloc if possible
+            diff->data = v_diff_data;
+            v_diff_data += ggml_nbytes(diff);
             if (transpose) {
                 // copy data & transpose
                 float * arr = (float *) diff_tmp.data();
@@ -263,8 +280,8 @@ struct train_context {
     }
 
     ~train_context() {
-        for (auto ptr : v_final) free(ptr->data);
-        for (auto ptr : v_diff) free(ptr->data);
+        free(v_final_data);
+        free(v_diff_data);
         // no need to free v_diff_tmp, since we didn't use malloc
         ggml_free(ctx_ggml);
     }

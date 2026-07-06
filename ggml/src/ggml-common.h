@@ -449,8 +449,62 @@ typedef struct {
 } block_iq4_xs;
 static_assert(sizeof(block_iq4_xs) == sizeof(ggml_half) + sizeof(uint16_t) + QK_K/64 + QK_K/2, "wrong iq4_xs block size/padding");
 
-#endif // GGML_COMMON_DECL
-#endif // GGML_COMMON_DECL
+// ========================
+// Turbo Quantization Block Types (custom KV cache)
+// ========================
+
+#define QK_TURBO3 32
+#define QK_TURBO4 128
+#define QK_TURBO2 32
+#define QK_PLANAR3 128
+#define QK_ISO3 128
+
+typedef struct {
+    ggml_half norm;
+    uint8_t qs[QK_TURBO3/4];
+    uint8_t signs[QK_TURBO3/8];
+} block_turbo3_0;
+
+typedef struct {
+    ggml_half norm;
+    ggml_half rnorm;
+    uint8_t qs[QK_TURBO4/2];
+} block_turbo4_0;
+
+typedef struct {
+    ggml_half norm;
+    uint8_t qs[QK_TURBO2/4];
+} block_turbo2_0;
+
+typedef struct {
+    ggml_half norm;
+    uint8_t qs[QK_PLANAR3/4];
+    uint8_t signs[QK_PLANAR3/8];
+} block_planar3_0;
+
+typedef struct {
+    ggml_half norm;
+    uint8_t qs[QK_ISO3/4];
+    uint8_t signs[QK_ISO3/8];
+} block_iso3_0;
+
+// RQ types (Cl(3,0) rotor quantization)
+#define QK_RQ 128
+
+typedef struct {
+    uint16_t norm;
+    uint8_t  qs[336];
+} block_rq_mse;
+
+typedef struct {
+    uint16_t norm;
+    uint8_t  qs[336];
+    float    residual_norm;
+    uint8_t  qjl_signs[4];
+} block_rq_prod;
+
+#endif // GGML_COMMON_DECL (closes #if defined GGML_COMMON_DECL)
+#endif // GGML_COMMON_DECL (closes #ifndef GGML_COMMON_DECL)
 
 ////////////////////////////////////////////////////////////////////////////////
 

@@ -35,4 +35,5 @@ private:
     size_t used;
 
     std::vector<entry_t> entries;
+    mutable std::vector<uint32_t> freq;
 };

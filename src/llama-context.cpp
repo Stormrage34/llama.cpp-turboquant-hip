@@ -12,6 +12,9 @@
 #include "llama-ext.h"
 #include "llama.h"
 
+// Optional AMD ROCTx profiling markers for rocprofv3 --selected-regions
+#include "../common/roctx.h"
+
 #include <cinttypes>
 #include <cmath>
 #include <cstring>
@@ -2441,9 +2444,16 @@ ggml_status llama_context::graph_compute(
         set_n_threads_fn.second(set_n_threads_fn.first, n_threads);
     }
 
-    auto status = ggml_backend_sched_graph_compute_async(sched.get(), gf);
-    if (status != GGML_STATUS_SUCCESS) {
-        LLAMA_LOG_ERROR("%s: ggml_backend_sched_graph_compute_async failed with error %d\n", __func__, status);
+    // ROCTx range marker: wrap the GPU compute dispatch so that
+    // rocprofv3 --selected-regions isolates compute time from setup/teardown.
+    // Uses RAII (roctx::marker) so range_pop is guaranteed even on exception.
+    auto status = GGML_STATUS_SUCCESS;
+    {
+        roctx::marker _("llama_graph_compute");
+        status = ggml_backend_sched_graph_compute_async(sched.get(), gf);
+        if (status != GGML_STATUS_SUCCESS) {
+            LLAMA_LOG_ERROR("%s: ggml_backend_sched_graph_compute_async failed with error %d\n", __func__, status);
+        }
     }
 
     // fprintf(stderr, "splits: %d\n", ggml_backend_sched_get_n_splits(sched));

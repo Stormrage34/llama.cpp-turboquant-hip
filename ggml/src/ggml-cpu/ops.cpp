@@ -5837,6 +5837,13 @@ static void rotate_pairs(const int64_t n, const int64_t n_offset, const float * 
   }
 }
 
+// Extract a single float stored in op_params (which is int32_t*).
+static inline float op_param_float(const struct ggml_tensor * dst, int offset) {
+    float val;
+    memcpy(&val, (const int32_t *)dst->op_params + offset, sizeof(float));
+    return val;
+}
+
 template<typename T> //float or ggml_fp16_t
 static void ggml_compute_forward_rope_flt(
         const ggml_compute_params * params,
@@ -5859,12 +5866,12 @@ static void ggml_compute_forward_rope_flt(
     //const int n_ctx      = ((int32_t *) dst->op_params)[3];
     const int n_ctx_orig = ((int32_t *) dst->op_params)[4];
 
-    memcpy(&freq_base,   (int32_t *) dst->op_params +  5, sizeof(float));
-    memcpy(&freq_scale,  (int32_t *) dst->op_params +  6, sizeof(float));
-    memcpy(&ext_factor,  (int32_t *) dst->op_params +  7, sizeof(float));
-    memcpy(&attn_factor, (int32_t *) dst->op_params +  8, sizeof(float));
-    memcpy(&beta_fast,   (int32_t *) dst->op_params +  9, sizeof(float));
-    memcpy(&beta_slow,   (int32_t *) dst->op_params + 10, sizeof(float));
+    freq_base   = op_param_float(dst, 5);
+    freq_scale  = op_param_float(dst, 6);
+    ext_factor  = op_param_float(dst, 7);
+    attn_factor = op_param_float(dst, 8);
+    beta_fast   = op_param_float(dst, 9);
+    beta_slow   = op_param_float(dst, 10);
     memcpy(&sections,    (int32_t *) dst->op_params + 11, sizeof(int)*4);
 
     GGML_TENSOR_UNARY_OP_LOCALS

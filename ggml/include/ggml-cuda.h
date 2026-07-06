@@ -3,6 +3,9 @@
 #include "ggml.h"
 #include "ggml-backend.h"
 
+// forward declarations
+struct ggml_cuda_moe_cache;
+
 #ifdef  __cplusplus
 extern "C" {
 #endif
@@ -44,6 +47,35 @@ GGML_BACKEND_API bool ggml_backend_cuda_register_host_buffer(void * buffer, size
 GGML_BACKEND_API void ggml_backend_cuda_unregister_host_buffer(void * buffer);
 
 GGML_BACKEND_API ggml_backend_reg_t ggml_backend_cuda_reg(void);
+
+// MoE expert cache buffer types and configuration
+GGML_BACKEND_API ggml_backend_buffer_type_t ggml_backend_cuda_moe_cached_buffer_type(void);
+GGML_BACKEND_API bool ggml_backend_buft_is_cuda_moe_cached(ggml_backend_buffer_type_t buft);
+
+// Slot count: set from llama_model_load, consumed by dispatch hook
+GGML_BACKEND_API void ggml_backend_cuda_moe_set_cache_slots(int n_slots);
+GGML_BACKEND_API int  ggml_backend_cuda_moe_get_cache_slots(void);
+
+// Observation API: model loader records expert tensors for pool preallocation
+GGML_BACKEND_API void ggml_backend_cuda_moe_observe_expert_tensor(
+    const void * tensor_data,
+    const char * tensor_name,
+    size_t       per_expert_bytes);
+
+GGML_BACKEND_API void ggml_backend_cuda_moe_reset_expert_size_observation(void);
+
+// Preallocate all observed pools for a given device
+GGML_BACKEND_API void ggml_backend_cuda_moe_preallocate_pools(int device);
+
+// Sibling prefetch: warm up caches for up/gate/down tensors
+GGML_BACKEND_API void ggml_backend_cuda_moe_prefetch_experts(
+    int             device,
+    const char *    tensor_name,
+    const int32_t * eids,
+    int             n_eids);
+
+// Aggregate stats from all per-tensor caches and reset counters
+GGML_BACKEND_API void ggml_backend_cuda_moe_log_and_reset_stats(void);
 
 #ifdef  __cplusplus
 }

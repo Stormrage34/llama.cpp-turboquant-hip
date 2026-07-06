@@ -208,6 +208,91 @@ typedef pthread_t ggml_thread_t;
 #include <TargetConditionals.h>
 #endif
 
+// ─── Vec-dot stubs for custom KV-cache types ──────────────────────────────
+// These dequantize turbo/planar/iso blocks to F32 then compute a dot product
+// with the F32 Q vector.  Used by the CPU flash-attention fallback path.
+// Slow but correct — these types are designed for GPU FA, not CPU.
+
+static void ggml_vec_dot_turbo3_0_f32(int n, float * restrict s, int cs,
+        const void * restrict vx, int cx, const void * restrict vy, int cy) {
+    const int nb = n / QK_TURBO3;
+    const block_turbo3_0 * x = (const block_turbo3_0 *)vx;
+    const float * y = (const float *)vy;
+    float r = 0.0f;
+    for (int i = 0; i < nb; i++) {
+        float buf[QK_TURBO3];
+        dequantize_row_turbo3_0(&x[i], buf, QK_TURBO3);
+        for (int j = 0; j < QK_TURBO3; j++) {
+            r += buf[j] * y[i * QK_TURBO3 + j];
+        }
+    }
+    *s = r;
+}
+
+static void ggml_vec_dot_turbo2_0_f32(int n, float * restrict s, int cs,
+        const void * restrict vx, int cx, const void * restrict vy, int cy) {
+    const int nb = n / QK_TURBO2;
+    const block_turbo2_0 * x = (const block_turbo2_0 *)vx;
+    const float * y = (const float *)vy;
+    float r = 0.0f;
+    for (int i = 0; i < nb; i++) {
+        float buf[QK_TURBO2];
+        dequantize_row_turbo2_0(&x[i], buf, QK_TURBO2);
+        for (int j = 0; j < QK_TURBO2; j++) {
+            r += buf[j] * y[i * QK_TURBO2 + j];
+        }
+    }
+    *s = r;
+}
+
+static void ggml_vec_dot_turbo4_0_f32(int n, float * restrict s, int cs,
+        const void * restrict vx, int cx, const void * restrict vy, int cy) {
+    const int nb = n / QK_TURBO4;
+    const block_turbo4_0 * x = (const block_turbo4_0 *)vx;
+    const float * y = (const float *)vy;
+    float r = 0.0f;
+    for (int i = 0; i < nb; i++) {
+        float buf[QK_TURBO4];
+        dequantize_row_turbo4_0(&x[i], buf, QK_TURBO4);
+        for (int j = 0; j < QK_TURBO4; j++) {
+            r += buf[j] * y[i * QK_TURBO4 + j];
+        }
+    }
+    *s = r;
+}
+
+static void ggml_vec_dot_planar3_0_f32(int n, float * restrict s, int cs,
+        const void * restrict vx, int cx, const void * restrict vy, int cy) {
+    const int nb = n / 128;
+    const block_planar3_0 * x = (const block_planar3_0 *)vx;
+    const float * y = (const float *)vy;
+    float r = 0.0f;
+    for (int i = 0; i < nb; i++) {
+        float buf[128];
+        dequantize_row_planar3_0(&x[i], buf, 128);
+        for (int j = 0; j < 128; j++) {
+            r += buf[j] * y[i * 128 + j];
+        }
+    }
+    *s = r;
+}
+
+static void ggml_vec_dot_iso3_0_f32(int n, float * restrict s, int cs,
+        const void * restrict vx, int cx, const void * restrict vy, int cy) {
+    const int nb = n / 128;
+    const block_iso3_0 * x = (const block_iso3_0 *)vx;
+    const float * y = (const float *)vy;
+    float r = 0.0f;
+    for (int i = 0; i < nb; i++) {
+        float buf[128];
+        dequantize_row_iso3_0(&x[i], buf, 128);
+        for (int j = 0; j < 128; j++) {
+            r += buf[j] * y[i * 128 + j];
+        }
+    }
+    *s = r;
+}
+
 static const struct ggml_type_traits_cpu type_traits_cpu[GGML_TYPE_COUNT] = {
     [GGML_TYPE_F32] = {
         .from_float               = (ggml_from_float_t) ggml_cpu_fp32_to_fp32,
@@ -400,6 +485,36 @@ static const struct ggml_type_traits_cpu type_traits_cpu[GGML_TYPE_COUNT] = {
         .vec_dot_type             = GGML_TYPE_Q8_K,
         .nrows                    = 1,
     },
+    [GGML_TYPE_TURBO2_0] = {
+        .from_float               = (ggml_from_float_t) quantize_row_turbo2_0_ref,
+        .vec_dot                  = (ggml_vec_dot_t) ggml_vec_dot_turbo2_0_f32,
+        .vec_dot_type             = GGML_TYPE_F32,
+        .nrows                    = 1,
+    },
+    [GGML_TYPE_TURBO3_0] = {
+        .from_float               = (ggml_from_float_t) quantize_row_turbo3_0_ref,
+        .vec_dot                  = (ggml_vec_dot_t) ggml_vec_dot_turbo3_0_f32,
+        .vec_dot_type             = GGML_TYPE_F32,
+        .nrows                    = 1,
+    },
+    [GGML_TYPE_TURBO4_0] = {
+        .from_float               = (ggml_from_float_t) quantize_row_turbo4_0_ref,
+        .vec_dot                  = (ggml_vec_dot_t) ggml_vec_dot_turbo4_0_f32,
+        .vec_dot_type             = GGML_TYPE_F32,
+        .nrows                    = 1,
+    },
+    [GGML_TYPE_PLANAR3_0] = {
+        .from_float               = (ggml_from_float_t) quantize_row_planar3_0_ref,
+        .vec_dot                  = (ggml_vec_dot_t) ggml_vec_dot_planar3_0_f32,
+        .vec_dot_type             = GGML_TYPE_F32,
+        .nrows                    = 1,
+    },
+    [GGML_TYPE_ISO3_0] = {
+        .from_float               = (ggml_from_float_t) quantize_row_iso3_0_ref,
+        .vec_dot                  = (ggml_vec_dot_t) ggml_vec_dot_iso3_0_f32,
+        .vec_dot_type             = GGML_TYPE_F32,
+        .nrows                    = 1,
+    },
     [GGML_TYPE_I32] = {
         .from_float               = (ggml_from_float_t) ggml_cpu_fp32_to_i32,
     },
@@ -412,8 +527,6 @@ const struct ggml_type_traits_cpu * ggml_get_type_traits_cpu(enum ggml_type type
 //
 // Threading defs
 //
-
-typedef pthread_t          ggml_thread_t;
 
 #if defined(_WIN32)
 

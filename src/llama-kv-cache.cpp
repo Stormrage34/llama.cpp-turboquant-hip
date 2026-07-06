@@ -336,6 +336,7 @@ llama_kv_cache::llama_kv_cache(
             !attn_rot_disable &&
             n_embd_head_k_all > 0 &&
             ggml_is_quantized(type_k) &&
+            !ggml_is_turbo(type_k) &&   // turbo types store unrotated values (attn_rot_k disabled)
             hparams.n_embd_head_k() % 64 == 0;
 
         // always create Hadamard rotation tensors for DeepSeek lightning indexers
@@ -348,6 +349,7 @@ llama_kv_cache::llama_kv_cache(
             !attn_rot_disable &&
             n_embd_head_v_all > 0 &&
             ggml_is_quantized(type_v) &&
+            !ggml_is_turbo(type_v) &&   // turbo types store unrotated values (attn_rot_v disabled)
             hparams.n_embd_head_v() % 64 == 0;
     }
 
@@ -1874,15 +1876,19 @@ ggml_tensor * llama_kv_cache::build_rope_shift(
         // dequantize to f32 -> RoPE -> quantize back
         tmp = ggml_cast(ctx, cur, GGML_TYPE_F32);
 
-        // rotate back
-        tmp = ggml_mul_mat_aux(ctx, tmp, rot);
+        if (rot) {
+            // rotate back
+            tmp = ggml_mul_mat_aux(ctx, tmp, rot);
+        }
 
         tmp = ggml_rope_ext(ctx, tmp,
                 shift, factors, n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
                 yarn_ext_factor, yarn_attn_factor, yarn_beta_fast, yarn_beta_slow);
 
-        // rotate fwd
-        tmp = ggml_mul_mat_aux(ctx, tmp, rot);
+        if (rot) {
+            // rotate fwd
+            tmp = ggml_mul_mat_aux(ctx, tmp, rot);
+        }
 
         tmp = ggml_cpy(ctx, tmp, cur);
     } else {

@@ -924,6 +924,62 @@ static const struct ggml_type_traits type_traits[GGML_TYPE_COUNT] = {
         .type_size                = 0,
         .is_quantized             = false,
     },
+    [GGML_TYPE_TURBO2_0] = {
+        .type_name                = "turbo2_0",
+        .blck_size                = 32,
+        .type_size                = sizeof(block_turbo2_0),
+        .is_quantized             = true,
+        .to_float                 = (ggml_to_float_t) dequantize_row_turbo2_0,
+        .from_float_ref           = (ggml_from_float_t) quantize_row_turbo2_0_ref,
+    },
+    [GGML_TYPE_TURBO3_0] = {
+        .type_name                = "turbo3_0",
+        .blck_size                = 32,
+        .type_size                = sizeof(block_turbo3_0),
+        .is_quantized             = true,
+        .to_float                 = (ggml_to_float_t) dequantize_row_turbo3_0,
+        .from_float_ref           = (ggml_from_float_t) quantize_row_turbo3_0_ref,
+    },
+    [GGML_TYPE_TURBO4_0] = {
+        .type_name                = "turbo4_0",
+        .blck_size                = 128,
+        .type_size                = sizeof(block_turbo4_0),
+        .is_quantized             = true,
+        .to_float                 = (ggml_to_float_t) dequantize_row_turbo4_0,
+        .from_float_ref           = (ggml_from_float_t) quantize_row_turbo4_0_ref,
+    },
+    [GGML_TYPE_PLANAR3_0] = {
+        .type_name                = "planar3_0",
+        .blck_size                = 128,
+        .type_size                = sizeof(block_planar3_0),
+        .is_quantized             = true,
+        .to_float                 = (ggml_to_float_t) dequantize_row_planar3_0,
+        .from_float_ref           = (ggml_from_float_t) quantize_row_planar3_0_ref,
+    },
+    [GGML_TYPE_ISO3_0] = {
+        .type_name                = "iso3_0",
+        .blck_size                = 128,
+        .type_size                = sizeof(block_iso3_0),
+        .is_quantized             = true,
+        .to_float                 = (ggml_to_float_t) dequantize_row_iso3_0,
+        .from_float_ref           = (ggml_from_float_t) quantize_row_iso3_0_ref,
+    },
+    [GGML_TYPE_RQ_MSE] = {
+        .type_name                = "rq_mse",
+        .blck_size                = 128,
+        .type_size                = sizeof(block_rq_mse),
+        .is_quantized             = true,
+        .to_float                 = (ggml_to_float_t) ggml_fp16_to_fp32_row,
+        .from_float_ref           = NULL,
+    },
+    [GGML_TYPE_RQ_PROD] = {
+        .type_name                = "rq_prod",
+        .blck_size                = 128,
+        .type_size                = sizeof(block_rq_prod),
+        .is_quantized             = true,
+        .to_float                 = (ggml_to_float_t) ggml_fp16_to_fp32_row,
+        .from_float_ref           = NULL,
+    },
 };
 
 const struct ggml_type_traits * ggml_get_type_traits(enum ggml_type type) {
@@ -1332,6 +1388,12 @@ bool ggml_is_quantized(enum ggml_type type) {
     assert(type >= 0);
     assert(type < GGML_TYPE_COUNT);
     return type_traits[type].is_quantized;
+}
+
+bool ggml_is_turbo(enum ggml_type type) {
+    return type == GGML_TYPE_TURBO2_0 ||
+           type == GGML_TYPE_TURBO3_0 ||
+           type == GGML_TYPE_TURBO4_0;
 }
 
 const char * ggml_op_name(enum ggml_op op) {

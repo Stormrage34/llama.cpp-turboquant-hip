@@ -53,6 +53,7 @@
 #include "ggml-cuda/mean.cuh"
 #include "ggml-cuda/tsembd.cuh"
 #include "ggml-cuda/topk-moe.cuh"
+#include "ggml-cuda/moe-cache.cuh"
 #include "ggml-cuda/unary.cuh"
 #include "ggml-cuda/upscale.cuh"
 #include "ggml-cuda/wkv.cuh"
@@ -458,18 +459,65 @@ struct ggml_cuda_pool_leg : public ggml_cuda_pool {
     }
 
     void free(void * ptr, size_t size) override {
+        bool inserted = false;
         for (int i = 0; i < MAX_BUFFERS; ++i) {
             ggml_cuda_buffer& b = buffer_pool[i];
             if (b.ptr == nullptr) {
                 b.ptr = ptr;
                 b.size = size;
-                return;
+                inserted = true;
+                break;
             }
         }
-        GGML_LOG_DEBUG(GGML_CUDA_NAME " buffer pool full, increase MAX_CUDA_BUFFERS\n");
+
+        if (!inserted) {
+            GGML_LOG_DEBUG(GGML_CUDA_NAME " buffer pool full, increase MAX_CUDA_BUFFERS\n");
+            ggml_cuda_set_device(device);
+            CUDA_CHECK(cudaFree(ptr));
+            return;
+        }
+
+        // LRU eviction: if pool exceeds 90% of device memory, free largest unused buffers down to 70%.
+        size_t total_mem = 0, free_mem = 0;
         ggml_cuda_set_device(device);
-        CUDA_CHECK(cudaFree(ptr));
-        pool_size -= size;
+        CUDA_CHECK(cudaMemGetInfo(&free_mem, &total_mem));
+        const size_t evict_threshold   = total_mem * 9 / 10;
+        const size_t target_threshold  = total_mem * 7 / 10;
+
+        if (pool_size > evict_threshold) {
+            // Collect indices of buffers currently in the pool.
+            // We evict from largest to smallest, keeping at least 1 buffer.
+            int indices[MAX_BUFFERS];
+            int count = 0;
+            for (int i = 0; i < MAX_BUFFERS; ++i) {
+                if (buffer_pool[i].ptr != nullptr) {
+                    indices[count++] = i;
+                }
+            }
+            // Sort descending by size (simple selection sort — MAX_BUFFERS is small).
+            for (int i = 0; i < count - 1 && count > 1; ++i) {
+                int max_idx = i;
+                for (int j = i + 1; j < count; ++j) {
+                    if (buffer_pool[indices[j]].size > buffer_pool[indices[max_idx]].size) {
+                        max_idx = j;
+                    }
+                }
+                std::swap(indices[i], indices[max_idx]);
+            }
+            // Evict largest first, keep at least 1 buffer.
+            for (int k = 0; k < count - 1 && pool_size > target_threshold; ++k) {
+                int idx = indices[k];
+                ggml_cuda_set_device(device);
+                CUDA_CHECK(cudaFree(buffer_pool[idx].ptr));
+                pool_size -= buffer_pool[idx].size;
+                buffer_pool[idx].ptr = nullptr;
+                buffer_pool[idx].size = 0;
+            }
+        }
+
+        if (pool_size + size > pool_size) { // avoid overflow
+            pool_size += size;
+        }
     }
 };
 
@@ -496,13 +544,25 @@ struct ggml_cuda_pool_vmm : public ggml_cuda_pool {
         if (pool_addr != 0) {
 #if defined(GGML_USE_HIP)
             // Workaround for https://github.com/ROCm/ROCR-Runtime/issues/285
+            // Best-effort: log errors instead of aborting so cleanup can proceed.
             for (std::pair<CUdeviceptr, size_t> & mapping : mappings) {
-                CU_CHECK(cuMemUnmap(mapping.first, mapping.second));
+                CUresult err = cuMemUnmap(mapping.first, mapping.second);
+                if (err != CUDA_SUCCESS) {
+                    LLAMA_LOG_WARN("%s: cuMemUnmap failed for 0x%llx + %llu: %s\n", __func__,
+                                   (unsigned long long)mapping.first, (unsigned long long)mapping.second,
+                                   cu_get_error_str(err));
+                }
             }
 #else
-            CU_CHECK(cuMemUnmap(pool_addr, pool_size));
+            CUresult err = cuMemUnmap(pool_addr, pool_size);
+            if (err != CUDA_SUCCESS) {
+                LLAMA_LOG_WARN("%s: cuMemUnmap failed: %s\n", __func__, cu_get_error_str(err));
+            }
 #endif
-            CU_CHECK(cuMemAddressFree(pool_addr, CUDA_POOL_VMM_MAX_SIZE));
+            err = cuMemAddressFree(pool_addr, CUDA_POOL_VMM_MAX_SIZE);
+            if (err != CUDA_SUCCESS) {
+                LLAMA_LOG_WARN("%s: cuMemAddressFree failed: %s\n", __func__, cu_get_error_str(err));
+            }
         }
     }
 
@@ -634,7 +694,9 @@ struct ggml_backend_cuda_buffer_context {
     }
 
     ~ggml_backend_cuda_buffer_context() {
-        CUDA_CHECK(cudaFree(dev_ptr));
+        if (dev_ptr != nullptr) {
+            CUDA_CHECK(cudaFree(dev_ptr));
+        }
     }
 };
 
@@ -1560,7 +1622,7 @@ typedef void (*ggml_cuda_op_mul_mat_t)(
 #define GGML_CUDA_PEER_MAX_BATCH_SIZE 128
 #endif // GGML_CUDA_PEER_MAX_BATCH_SIZE
 
-#define MUL_MAT_SRC1_COL_STRIDE 128
+#define MUL_MAT_SRC1_COL_STRIDE (int) sizeof(block_q8_1)
 
 static cudaError_t ggml_cuda_cpy_tensor_2d(
     void * dst, const struct ggml_tensor * src, int64_t i3, int64_t i2, int64_t i1_low, int64_t i1_high, cudaStream_t stream) {
@@ -1782,7 +1844,8 @@ static void ggml_cuda_op_mul_mat_cublas(
     GGML_UNUSED_VARS(dst, src1_ddq_i, src1_padded_row_size);
 }
 
-static cudaError_t ggml_cuda_Memcpy2DPeerAsync(
+// Returns true on success, false if P2P is unavailable and the caller should fall back to host staging.
+static bool ggml_cuda_Memcpy2DPeerAsync(
     void * dst, int dstDevice, size_t dpitch, void * src, int srcDevice, size_t spitch, size_t width, size_t height, cudaStream_t stream) {
 
 #if !defined(GGML_USE_HIP) && !defined(GGML_USE_MUSA)
@@ -1793,12 +1856,22 @@ static cudaError_t ggml_cuda_Memcpy2DPeerAsync(
     p.srcDevice = srcDevice;
     p.srcPtr = make_cudaPitchedPtr(src, spitch, spitch, height);
     p.extent = make_cudaExtent(width, height, 1);
-    return cudaMemcpy3DPeerAsync(&p, stream);
+    cudaError_t err = cudaMemcpy3DPeerAsync(&p, stream);
+    if (err != cudaSuccess) {
+        GGML_LOG_WARN("%s: cudaMemcpy3DPeerAsync failed (err=%d), P2P fallback needed\n", __func__, err);
+        return false;
+    }
+    return true;
 #else
     // HIP does not support cudaMemcpy3DPeerAsync or vmm pools
     GGML_UNUSED(dstDevice);
     GGML_UNUSED(srcDevice);
-    return cudaMemcpy2DAsync(dst, dpitch, src, spitch, width, height, cudaMemcpyDeviceToDevice, stream);
+    cudaError_t err = cudaMemcpy2DAsync(dst, dpitch, src, spitch, width, height, cudaMemcpyDeviceToDevice, stream);
+    if (err != cudaSuccess) {
+        GGML_LOG_WARN("%s: cudaMemcpy2DAsync failed (err=%d), P2P fallback needed\n", __func__, err);
+        return false;
+    }
+    return true;
 #endif // !defined(GGML_USE_HIP) && !defined(GGML_USE_MUSA)
 }
 
@@ -2039,7 +2112,14 @@ static void ggml_cuda_op_mul_mat(
                                 const size_t pitch = ne11*sizeof(block_q8_1_mmq);
                                 const size_t width = src1_ncols*sizeof(block_q8_1_mmq);
                                 const size_t height = src1_padded_col_size/(4*QK8_1);
-                                CUDA_CHECK(ggml_cuda_Memcpy2DPeerAsync(src1_ddq_i, id, pitch, src1_ddq_i_source, ctx.device, pitch, width, height, stream));
+                                if (!ggml_cuda_Memcpy2DPeerAsync(src1_ddq_i, id, pitch, src1_ddq_i_source, ctx.device, pitch, width, height, stream)) {
+                                    // P2P unavailable, fall back to host-staged copy
+                                    void * host_buf = nullptr;
+                                    CUDA_CHECK(cudaMallocHost(&host_buf, width*height));
+                                    CUDA_CHECK(cudaMemcpyPeerAsync(host_buf, 0, src1_ddq_i_source, ctx.device, width*height, stream));
+                                    CUDA_CHECK(cudaMemcpy2DAsync(src1_ddq_i, pitch, host_buf, width, width, height, cudaMemcpyHostToDevice, stream));
+                                    CUDA_CHECK(cudaFreeHost(host_buf));
+                                }
                             } else {
                                 CUDA_CHECK(cudaMemcpyPeerAsync(
                                     src1_ddq_i, id, src1_ddq_i_source, ctx.device, src1_ncols*src1_padded_col_size*q8_1_ts/q8_1_bs, stream));
@@ -2087,8 +2167,15 @@ static void ggml_cuda_op_mul_mat(
                         float * dhf_dst_i = (float *) ((char *) dst_off_device + i02*nb2 + i03*nb3);
                         GGML_ASSERT(dst->nb[1] == ne0*sizeof(float));
                         dhf_dst_i += src1_col_0*ne0 + dev[id].row_low;
-                        CUDA_CHECK(ggml_cuda_Memcpy2DPeerAsync(
-                            dhf_dst_i, ctx.device, ne0*sizeof(float), dst_dd_i, id, row_diff*sizeof(float), row_diff*sizeof(float), src1_ncols, stream));
+                        if (!ggml_cuda_Memcpy2DPeerAsync(
+                            dhf_dst_i, ctx.device, ne0*sizeof(float), dst_dd_i, id, row_diff*sizeof(float), row_diff*sizeof(float), src1_ncols, stream)) {
+                            // P2P unavailable, fall back to host-staged copy
+                            void * host_buf = nullptr;
+                            CUDA_CHECK(cudaMallocHost(&host_buf, row_diff*sizeof(float)*src1_ncols));
+                            CUDA_CHECK(cudaMemcpyPeerAsync(host_buf, 0, dst_dd_i, id, row_diff*sizeof(float)*src1_ncols, stream));
+                            CUDA_CHECK(cudaMemcpyPeerAsync(dhf_dst_i, ctx.device, host_buf, 0, row_diff*sizeof(float)*src1_ncols, stream));
+                            CUDA_CHECK(cudaFreeHost(host_buf));
+                        }
                     } else {
                         float * dhf_dst_i = (float *) ((char *) dst_off_device + i02*nb2 + i03*nb3);
                         GGML_ASSERT(dst->nb[1] == ne0*sizeof(float));
@@ -2462,6 +2549,13 @@ static bool ggml_cuda_should_fuse_mul_mat(const ggml_tensor * ffn_up,
         return false;
     }
 
+    // Disable MoE FFN fusion when experts live in CUDA_MoE_Cached
+    // (slab-pool staging interferes with fused kernel semantics).
+    if (ggml_backend_buft_is_cuda_moe_cached(ffn_up->src[0]->buffer->buft) ||
+        ggml_backend_buft_is_cuda_moe_cached(ffn_gate->src[0]->buffer->buft)) {
+        return false;
+    }
+
     return true;
 }
 
@@ -2630,7 +2724,47 @@ static void ggml_cuda_mul_mat(ggml_backend_cuda_context & ctx, const ggml_tensor
     }
 }
 
+static void ggml_cuda_mul_mat_id_impl(ggml_backend_cuda_context & ctx, ggml_tensor * dst);
+
 static void ggml_cuda_mul_mat_id(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
+    const ggml_tensor * src0 = dst->src[0];
+
+    // Stage MoE experts from CPU pinned memory into the GPU slot pool before
+    // dispatching the kernel.  Without this, UVA-capable GPUs read pinned host
+    // memory directly via PCIe — functional but slow.
+    if (ggml_backend_buft_is_cuda_moe_cached(src0->buffer->buft)) {
+        const ggml_tensor * ids = dst->src[2];
+        int n_ids = (int)ggml_nelements(ids);
+
+        std::vector<int32_t> host_ids(n_ids);
+        CUDA_CHECK(cudaMemcpyAsync(host_ids.data(), ids->data,
+                                   n_ids * sizeof(int32_t), cudaMemcpyDeviceToHost, ctx.stream()));
+        CUDA_CHECK(cudaStreamSynchronize(ctx.stream()));
+
+        // Find unique expert IDs.
+        std::sort(host_ids.begin(), host_ids.end());
+        auto last = std::unique(host_ids.begin(), host_ids.end());
+        host_ids.erase(last, host_ids.end());
+
+        // Get or create per-tensor cache and stage each unique expert.
+        auto * cache = ggml_cuda_moe_cache_get_or_create_for_tensor(
+            ggml_cuda_get_device(), src0->data, src0->nb[2],
+            ggml_backend_cuda_moe_get_cache_slots(), src0->name);
+        if (cache) {
+            moe_stream_t copy_stream = ggml_cuda_moe_cache_copy_stream(cache);
+            size_t expert_size = src0->nb[2];
+            for (int32_t id : host_ids) {
+                const void * host_ptr = (const char *)src0->data + (size_t)id * expert_size;
+                (void)ggml_cuda_moe_cache_acquire(cache, host_ptr, expert_size, copy_stream);
+            }
+            CUDA_CHECK(cudaStreamSynchronize(copy_stream));
+        }
+    }
+
+    ggml_cuda_mul_mat_id_impl(ctx, dst);
+}
+
+static void ggml_cuda_mul_mat_id_impl(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
     const ggml_tensor * src0 = dst->src[0];
     const ggml_tensor * src1 = dst->src[1];
     const ggml_tensor * ids  = dst->src[2];
@@ -3143,6 +3277,8 @@ static const char * ggml_backend_cuda_get_name(ggml_backend_t backend) {
 
 static void ggml_backend_cuda_free(ggml_backend_t backend) {
     ggml_backend_cuda_context * cuda_ctx = (ggml_backend_cuda_context *)backend->context;
+
+    ggml_cuda_moe_cache_free_all();
 
     delete cuda_ctx;
     delete backend;
@@ -5200,6 +5336,9 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
                     case GGML_TYPE_Q5_0:
                     case GGML_TYPE_Q5_1:
                     case GGML_TYPE_Q8_0:
+                    case GGML_TYPE_TURBO2_0:
+                    case GGML_TYPE_TURBO3_0:
+                    case GGML_TYPE_TURBO4_0:
                         return true;
                     default:
                         return false;
@@ -5209,13 +5348,16 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
             {
                 return op->type == GGML_TYPE_F32 && op->src[0]->type == GGML_TYPE_F32 && op->ne[2] == 1 && op->ne[3] == 1;
             } break;
-        case GGML_OP_SET_ROWS:
+         case GGML_OP_SET_ROWS:
             {
+                // Only turbo types have CUDA SET_ROWS kernels. Planar, iso and rq
+                // fall back to CPU where type_traits_cpu provides quantize functions.
                 return (op->type == GGML_TYPE_F32 || op->type == GGML_TYPE_F16 || op->type == GGML_TYPE_BF16 ||
-                       op->type == GGML_TYPE_Q4_0 || op->type == GGML_TYPE_Q4_1 || op->type == GGML_TYPE_Q5_0 ||
-                       op->type == GGML_TYPE_Q5_1 || op->type == GGML_TYPE_Q8_0 || op->type == GGML_TYPE_IQ4_NL) &&
-                       op->src[0]->type == GGML_TYPE_F32 &&
-                       (op->src[1]->type == GGML_TYPE_I64 || op->src[1]->type == GGML_TYPE_I32);
+                        op->type == GGML_TYPE_Q4_0 || op->type == GGML_TYPE_Q4_1 || op->type == GGML_TYPE_Q5_0 ||
+                        op->type == GGML_TYPE_Q5_1 || op->type == GGML_TYPE_Q8_0 || op->type == GGML_TYPE_IQ4_NL ||
+                        op->type == GGML_TYPE_TURBO2_0 || op->type == GGML_TYPE_TURBO3_0 || op->type == GGML_TYPE_TURBO4_0) &&
+                        op->src[0]->type == GGML_TYPE_F32 &&
+                        (op->src[1]->type == GGML_TYPE_I64 || op->src[1]->type == GGML_TYPE_I32);
             } break;
         case GGML_OP_SET:
             {
@@ -5458,6 +5600,13 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
 static bool ggml_backend_cuda_device_supports_buft(ggml_backend_dev_t dev, ggml_backend_buffer_type_t buft) {
     ggml_backend_cuda_device_context * dev_ctx = (ggml_backend_cuda_device_context *) dev->context;
     const bool integrated = ggml_cuda_info().devices[dev_ctx->device].integrated;
+    // CUDA_MoE_Cached is host-pinned but routes through CUDA backend's
+    // mul_mat_id dispatch hook (stages slabs to GPU slot pool on miss).
+    // Let any CUDA device claim it so the scheduler routes ops to GPU
+    // instead of CPU.
+    if (ggml_backend_buft_is_cuda_moe_cached(buft)) {
+        return true;
+    }
     return (((ggml_backend_buft_is_cuda(buft) || ggml_backend_buft_is_cuda_split(buft)) && buft->device == dev) || (integrated && ggml_backend_buft_is_cuda_host(buft)));
 }
 

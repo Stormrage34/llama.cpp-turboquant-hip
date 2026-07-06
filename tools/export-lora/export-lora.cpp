@@ -139,10 +139,9 @@ struct lora_merge_ctx {
             throw std::runtime_error("split model is not yet supported");
         }
 
+        adapters.reserve(lora_files.size());
         for (auto & lora_inp : lora_files) {
-            auto fname = lora_inp.path;
-            auto scale = lora_inp.scale;
-            std::unique_ptr<file_input> adapter(new file_input(fname, scale));
+            auto adapter = std::make_unique<file_input>(lora_inp.path, lora_inp.scale);
             check_metadata_lora(adapter.get());
             adapters.push_back(std::move(adapter));
         }

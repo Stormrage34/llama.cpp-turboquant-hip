@@ -8,6 +8,7 @@
 
 common_ngram_mod::common_ngram_mod(uint16_t n, size_t size) : n(n), used(0) {
     entries.resize(size);
+    freq.assign(size, 0);
 
     reset();
 }
@@ -29,19 +30,27 @@ void common_ngram_mod::add(const entry_t * tokens) {
 
     if (entries[i] == EMPTY) {
         used++;
+        entries[i] = tokens[n];
+        freq[i] = 1;
+    } else if (freq[i] <= 1 || freq[i] < 1000000) {
+        entries[i] = tokens[n];
+        freq[i] = 1;
     }
-
-    entries[i] = tokens[n];
 }
 
 common_ngram_mod::entry_t common_ngram_mod::get(const entry_t * tokens) const {
     const size_t i = idx(tokens);
+
+    if (entries[i] != EMPTY) {
+        freq[i]++;
+    }
 
     return entries[i];
 }
 
 void common_ngram_mod::reset() {
     std::fill(entries.begin(), entries.end(), EMPTY);
+    std::fill(freq.begin(), freq.end(), 0u);
     used = 0;
 }
 

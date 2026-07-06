@@ -27,7 +27,7 @@ server_http_context::server_http_context()
 
 server_http_context::~server_http_context() = default;
 
-static void log_server_request(const httplib::Request & req, const httplib::Response & res) {
+static void log_server_request(const httplib::Request & req, const httplib::Response & res, const common_params & params) {
     // skip logging requests that are regularly sent, to avoid log spam
     if (req.path == "/health"
         || req.path == "/v1/health"
@@ -43,8 +43,10 @@ static void log_server_request(const httplib::Request & req, const httplib::Resp
 
     SRV_TRC("done request: %s %s %s %d\n", req.method.c_str(), req.path.c_str(), req.remote_addr.c_str(), res.status);
 
-    SRV_DBG("request:  %s\n", req.body.c_str());
-    SRV_DBG("response: %s\n", res.body.c_str());
+    if (params.log_request_bodies) {
+        SRV_DBG("request:  %s\n", req.body.c_str());
+        SRV_DBG("response: %s\n", res.body.c_str());
+    }
 }
 
 // For Google Cloud Platform deployment compatibility

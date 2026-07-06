@@ -1022,7 +1022,7 @@ class tensor_traits : public ggml::cpu::tensor_traits {
         // with cols == n.
         const size_t nchunk_size = std::max<size_t>(1, ceil_div_size(n, chunk_cols));
         GGML_ASSERT(nchunk_size <= (size_t)INT_MAX);
-        const int nchunk = (int)nchunk_size;
+        const size_t nchunk = nchunk_size;
         const size_t dst_stride = dst->nb[1];
 
         auto run_chunk = [&](runtime_slot & slot, size_t global_start, size_t cols, uint8_t * dst_batch_base) {
@@ -1095,7 +1095,7 @@ class tensor_traits : public ggml::cpu::tensor_traits {
             ggml_barrier(params->threadpool);
 
             runtime_slot & slot = runtime[local_slot];
-            int current_chunk = ith_total;
+            size_t current_chunk = ith_total;
             while (current_chunk < nchunk) {
                 const size_t global_start = (size_t)current_chunk * chunk_cols;
                 if (global_start >= n) {

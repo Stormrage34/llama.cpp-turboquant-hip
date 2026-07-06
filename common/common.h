@@ -62,13 +62,15 @@ struct common_control_vector_load_info;
 // CPU utils
 //
 
+constexpr uint32_t DEFAULT_CPU_POLL_LEVEL = 50;
+
 struct common_cpu_params {
     int      n_threads                   = -1;
     bool     cpumask[GGML_MAX_N_THREADS] = {false}; // CPU affinity mask.
     bool     mask_valid                  = false;   // Default: any CPU
     enum ggml_sched_priority  priority   = GGML_SCHED_PRIO_NORMAL;  // Scheduling prio : (0 - normal, 1 - medium, 2 - high, 3 - realtime)
     bool     strict_cpu                  = false;   // Use strict CPU placement
-    uint32_t poll                        = 50;      // Polling (busywait) level (0 - no polling, 100 - mostly polling)
+    uint32_t poll                        = DEFAULT_CPU_POLL_LEVEL;  // Polling (busywait) level (0 - no polling, 100 - mostly polling)
 };
 
 int32_t common_cpu_get_num_physical_cores();
@@ -215,36 +217,53 @@ inline bool common_grammar_needs_prefill(const common_grammar & g) {
         || g.type == COMMON_GRAMMAR_TYPE_TOOL_CALLS;
 }
 
+// sampling parameter defaults
+constexpr int32_t DEFAULT_N_PREV              = 64;
+constexpr int32_t DEFAULT_TOP_K               = 40;
+constexpr float   DEFAULT_TOP_P               = 0.95f;
+constexpr float   DEFAULT_MIN_P               = 0.05f;
+constexpr float   DEFAULT_XTC_THRESHOLD       = 0.10f;
+constexpr float   DEFAULT_TYPICAL_P           = 1.00f;
+constexpr float   DEFAULT_TEMPERATURE         = 0.80f;
+constexpr float   DEFAULT_DYNATEMP_EXPONENT   = 1.00f;
+constexpr int32_t DEFAULT_PENALTY_LAST_N      = 64;
+constexpr float   DEFAULT_PENALTY_REPEAT      = 1.00f;
+constexpr float   DEFAULT_DRY_BASE            = 1.75f;
+constexpr int32_t DEFAULT_DRY_ALLOWED_LENGTH  = 2;
+constexpr float   DEFAULT_ADAPTIVE_DECAY      = 0.90f;
+constexpr float   DEFAULT_MIROSTAT_TAU        = 5.00f;
+constexpr float   DEFAULT_MIROSTAT_ETA        = 0.10f;
+
 // sampling parameters
 struct common_params_sampling {
     uint32_t seed = LLAMA_DEFAULT_SEED; // the seed used to initialize llama_sampler
 
-    int32_t n_prev             = 64;     // number of previous tokens to remember
+    int32_t n_prev             = DEFAULT_N_PREV;
     int32_t n_probs            = 0;      // if greater than 0, output the probabilities of top n_probs tokens.
     int32_t min_keep           = 0;      // 0 = disabled, otherwise samplers should return at least min_keep tokens
-    int32_t top_k              = 40;     // <= 0 to use vocab size
-    float   top_p              = 0.95f;  // 1.0 = disabled
-    float   min_p              = 0.05f;  // 0.0 = disabled
+    int32_t top_k              = DEFAULT_TOP_K;
+    float   top_p              = DEFAULT_TOP_P;
+    float   min_p              = DEFAULT_MIN_P;
     float   xtc_probability    = 0.00f;  // 0.0 = disabled
-    float   xtc_threshold      = 0.10f;  // > 0.5 disables XTC
-    float   typ_p              = 1.00f;  // typical_p, 1.0 = disabled
-    float   temp               = 0.80f;  // <= 0.0 to sample greedily, 0.0 to not output probabilities
+    float   xtc_threshold      = DEFAULT_XTC_THRESHOLD;
+    float   typ_p              = DEFAULT_TYPICAL_P;
+    float   temp               = DEFAULT_TEMPERATURE;
     float   dynatemp_range     = 0.00f;  // 0.0 = disabled
-    float   dynatemp_exponent  = 1.00f;  // controls how entropy maps to temperature in dynamic temperature sampler
-    int32_t penalty_last_n     = 64;     // last n tokens to penalize (0 = disable penalty, -1 = context size)
-    float   penalty_repeat     = 1.00f;  // 1.0 = disabled
+    float   dynatemp_exponent  = DEFAULT_DYNATEMP_EXPONENT;
+    int32_t penalty_last_n     = DEFAULT_PENALTY_LAST_N;
+    float   penalty_repeat     = DEFAULT_PENALTY_REPEAT;
     float   penalty_freq       = 0.00f;  // 0.0 = disabled
     float   penalty_present    = 0.00f;  // 0.0 = disabled
     float   dry_multiplier     = 0.0f;   // 0.0 = disabled;      DRY repetition penalty for tokens extending repetition:
-    float   dry_base           = 1.75f;  // 0.0 = disabled;      multiplier * base ^ (length of sequence before token - allowed length)
-    int32_t dry_allowed_length = 2;      // tokens extending repetitions beyond this receive penalty
+    float   dry_base           = DEFAULT_DRY_BASE;
+    int32_t dry_allowed_length = DEFAULT_DRY_ALLOWED_LENGTH;
     int32_t dry_penalty_last_n = -1;     // how many tokens to scan for repetitions (0 = disable penalty, -1 = context size)
     float   adaptive_target    = -1.0f;  // select tokens near this probability (valid range 0.0 to 1.0; negative = disabled)
-    float   adaptive_decay     = 0.90f;  // EMA decay for adaptation; history ≈ 1/(1-decay) tokens (0.0 - 0.99)
+    float   adaptive_decay     = DEFAULT_ADAPTIVE_DECAY;
     int32_t mirostat           = 0;      // 0 = disabled, 1 = mirostat, 2 = mirostat 2.0
     float   top_n_sigma        = -1.00f; // -1.0 = disabled
-    float   mirostat_tau       = 5.00f;  // target entropy
-    float   mirostat_eta       = 0.10f;  // learning rate
+    float   mirostat_tau       = DEFAULT_MIROSTAT_TAU;
+    float   mirostat_eta       = DEFAULT_MIROSTAT_ETA;
     bool    ignore_eos         = false;
     bool    no_perf            = false;  // disable performance metrics
     bool    timing_per_token   = false;
@@ -321,12 +340,17 @@ struct common_params_model {
 };
 
 // draft-model-based speculative decoding parameters
-struct common_params_speculative_draft {
-    int32_t n_max = 3; // maximum number of tokens to draft during speculative decoding
-    int32_t n_min = 0; // minimum number of draft tokens to use for speculative decoding
+constexpr int32_t DEFAULT_SPECULATIVE_N_MAX = 3;
+constexpr int32_t DEFAULT_SPECULATIVE_N_MIN = 0;
+constexpr float   DEFAULT_SPECULATIVE_P_SPLIT = 0.1f;
+constexpr float   DEFAULT_SPECULATIVE_P_MIN   = 0.0f;
 
-    float p_split = 0.1f; // speculative decoding split probability
-    float p_min   = 0.0f; // minimum speculative decoding probability (greedy)
+struct common_params_speculative_draft {
+    int32_t n_max = DEFAULT_SPECULATIVE_N_MAX; // maximum number of tokens to draft during speculative decoding
+    int32_t n_min = DEFAULT_SPECULATIVE_N_MIN; // minimum number of draft tokens to use for speculative decoding
+
+    float p_split = DEFAULT_SPECULATIVE_P_SPLIT; // speculative decoding split probability
+    float p_min   = DEFAULT_SPECULATIVE_P_MIN;   // minimum speculative decoding probability (greedy)
 
     bool backend_sampling = true; // offload draft sampling to the backend (default: on)
 
@@ -348,17 +372,24 @@ struct common_params_speculative_draft {
     std::vector<llama_model_tensor_buft_override> tensor_buft_overrides;
 };
 
-struct common_params_speculative_ngram_mod {
-    int32_t n_match = 24;
+constexpr int32_t DEFAULT_NGRAM_MOD_N_MATCH = 24;
+constexpr int32_t DEFAULT_NGRAM_MOD_N_MAX   = 64;
+constexpr int32_t DEFAULT_NGRAM_MOD_N_MIN   = 48;
+constexpr uint16_t DEFAULT_NGRAM_MAP_SIZE_N = 12;
+constexpr uint16_t DEFAULT_NGRAM_MAP_SIZE_M = 48;
+constexpr uint16_t DEFAULT_NGRAM_MAP_MIN_HITS = 1;
 
-    int32_t n_max = 64;
-    int32_t n_min = 48;
+struct common_params_speculative_ngram_mod {
+    int32_t n_match = DEFAULT_NGRAM_MOD_N_MATCH;
+
+    int32_t n_max = DEFAULT_NGRAM_MOD_N_MAX;
+    int32_t n_min = DEFAULT_NGRAM_MOD_N_MIN;
 };
 
 struct common_params_speculative_ngram_map {
-    uint16_t size_n   = 12; // ngram size for lookup
-    uint16_t size_m   = 48; // mgram size for speculative tokens
-    uint16_t min_hits = 1;  // minimum hits at ngram/mgram lookup for mgram to be proposed
+    uint16_t size_n   = DEFAULT_NGRAM_MAP_SIZE_N; // ngram size for lookup
+    uint16_t size_m   = DEFAULT_NGRAM_MAP_SIZE_M; // mgram size for speculative tokens
+    uint16_t min_hits = DEFAULT_NGRAM_MAP_MIN_HITS;  // minimum hits at ngram/mgram lookup for mgram to be proposed
 };
 
 struct common_params_speculative_ngram_cache {
@@ -400,14 +431,17 @@ struct common_params_vocoder {
     bool use_guide_tokens = false; // enable guide tokens to improve TTS accuracy
 };
 
+constexpr int32_t DEFAULT_DIFFUSION_STEPS = 128;
+constexpr int32_t DEFAULT_DIFFUSION_ALGORITHM = 4;
+
 struct common_params_diffusion {
-    int32_t steps         = 128;
+    int32_t steps         = DEFAULT_DIFFUSION_STEPS;
     bool    visual_mode   = false;
 
     float   eps           = 0;        // epsilon for timesteps
     int32_t block_length  = 0;        // block length for generation
 
-    int32_t algorithm     = 4;        // default algorithm: low-confidence
+    int32_t algorithm     = DEFAULT_DIFFUSION_ALGORITHM;        // default algorithm: low-confidence
     float   alg_temp      = 0.0f;     // algorithm temperature
 
     float   cfg_scale     = 0;        // classifier-free guidance scale
@@ -427,13 +461,15 @@ enum common_reasoning_format {
 };
 
 
+constexpr unsigned DEFAULT_TRAINING_EPOCHS = 2;
+
 struct lr_opt {
     float    lr0          = 1e-5; // learning rate at first epoch
     float    lr_min       = -1;
     float    decay_epochs = -1;   // if >0, the learning rate starts at lr0 and decays to lr_min after this many epochs
     float    scale_epoch  = 0;
     float    wd           = 0;
-    unsigned epochs       = 2;
+    unsigned epochs       = DEFAULT_TRAINING_EPOCHS;
 
     unsigned epoch; // set by optimizer outer (epochs) loop
     // learning rate decay - constant LR per epoch only for now
@@ -445,18 +481,41 @@ struct lr_opt {
 
 struct ggml_opt_optimizer_params common_opt_lr_pars(void * userdata);
 
+constexpr int32_t DEFAULT_N_BATCH   = 2048;
+constexpr int32_t DEFAULT_N_UBATCH  = 512;
+constexpr int32_t DEFAULT_GRP_ATTN_W = 512;
+constexpr int TENSOR_SPLIT_MAX      = 128;
+constexpr size_t FIT_PARAMS_MARGIN_BYTES = 1024 * 1024 * 1024; // 1 GiB
+constexpr int32_t DEFAULT_SSE_PING_INTERVAL     = 30;
+constexpr int32_t DEFAULT_N_CTX_CHECKPOINTS     = 32;
+constexpr int32_t DEFAULT_CHECKPOINT_MIN_STEP   = 8192;
+constexpr int32_t DEFAULT_CACHE_RAM_MIB         = 8192;
+constexpr int32_t DEFAULT_CHUNK_SIZE            = 64;
+constexpr int32_t DEFAULT_PASSKEY_JUNK_COUNT    = 250;
+constexpr int32_t DEFAULT_IMATRIX_OUT_FREQ      = 10;
+constexpr int   DEFAULT_PCABATCH_SIZE           = 100;
+constexpr int   DEFAULT_PCA_ITERATIONS          = 1000;
+constexpr size_t DEFAULT_HELLOWAG_TASKS         = 400;
+constexpr int32_t DEFAULT_EMBD_NORMALIZE        = 2;
+constexpr int32_t DEFAULT_SERVER_PORT           = 8080;
+constexpr int32_t DEFAULT_HTTP_TIMEOUT_READ     = 3600;
+constexpr int   DEFAULT_ROUTER_MAX_MODELS       = 4;
+constexpr float DEFAULT_SLOT_PROMPT_SIMILARITY  = 0.1f;
+constexpr float DEFAULT_VAL_SPLIT               = 0.05f;
+constexpr int   DEFAULT_MTMD_BATCH_MAX_TOKENS   = 1024;
+
 struct common_params {
     int32_t n_predict             =    -1; // max. number of new tokens to predict, -1 == no limit
     int32_t n_ctx                 =     0; // context size, 0 == context the model was trained with
-    int32_t n_batch               =  2048; // logical batch size for prompt processing (must be >=32 to use BLAS)
-    int32_t n_ubatch              =   512; // physical batch size for prompt processing (must be >=32 to use BLAS)
+    int32_t n_batch               = DEFAULT_N_BATCH; // logical batch size for prompt processing (must be >=32 to use BLAS)
+    int32_t n_ubatch              = DEFAULT_N_UBATCH; // physical batch size for prompt processing (must be >=32 to use BLAS)
     int32_t n_keep                =     0; // number of tokens to keep from initial prompt
     int32_t n_chunks              =    -1; // max number of chunks to process (-1 = unlimited)
     int32_t n_parallel            =     1; // number of parallel sequences to decode
     int32_t n_sequences           =     1; // number of sequences to decode
     int32_t n_outputs_max         =     0; // max outputs in a batch (0 = n_batch)
     int32_t grp_attn_n            =     1; // group-attention factor
-    int32_t grp_attn_w            =   512; // group-attention width
+    int32_t grp_attn_w            = DEFAULT_GRP_ATTN_W; // group-attention width
     int32_t n_print               =    -1; // print token count every n tokens (-1 = disabled)
     float   rope_freq_base        =  0.0f; // RoPE base frequency
     float   rope_freq_scale       =  0.0f; // RoPE frequency scaling factor
@@ -470,14 +529,15 @@ struct common_params {
     std::vector<ggml_backend_dev_t> devices; // devices to use for offloading
 
     int32_t n_gpu_layers       = -1;    // number of layers to store in VRAM, -1 is auto, <= -2 is all
+    int32_t moe_expert_cache_size = 0;  // MoE expert cache slots per tensor (0 = disabled)
     int32_t main_gpu           = 0;     // the GPU that is used for scratch and small tensors
-    float   tensor_split[128]  = {0};   // how split tensors should be distributed across GPUs
+    float   tensor_split[TENSOR_SPLIT_MAX] = {0};   // how split tensors should be distributed across GPUs
     bool    fit_params         = true;  // whether to fit unset model/context parameters to free device memory
     bool    fit_params_print   = false; // print the estimated required memory to run the model
     int32_t fit_params_min_ctx = 4096;  // minimum context size to set when trying to reduce memory use
 
     // margin per device in bytes for fitting parameters to free memory:
-    std::vector<size_t> fit_params_target = std::vector<size_t>(llama_max_devices(), 1024 * 1024*1024);
+    std::vector<size_t> fit_params_target = std::vector<size_t>(llama_max_devices(), FIT_PARAMS_MARGIN_BYTES);
 
     enum llama_split_mode split_mode = LLAMA_SPLIT_MODE_LAYER; // how to split the model across GPUs
 
@@ -538,7 +598,7 @@ struct common_params {
                                      //                                       (which is more convenient to use for plotting)
                                      //
     bool   hellaswag        = false; // compute HellaSwag score over random tasks from datafile supplied in prompt
-    size_t hellaswag_tasks  = 400;   // number of tasks to use when computing the HellaSwag score
+    size_t hellaswag_tasks  = DEFAULT_HELLOWAG_TASKS;   // number of tasks to use when computing the HellaSwag score
 
     bool   winogrande       = false; // compute Winogrande score over random tasks from datafile supplied in prompt
     size_t winogrande_tasks = 0;     // number of tasks to use when computing the Winogrande score. If 0, all tasks will be computed
@@ -596,33 +656,33 @@ struct common_params {
     std::vector<std::string> image; // path to image file(s) ; TODO: change the name to "media"
     int image_min_tokens = -1;
     int image_max_tokens = -1;
-    int mtmd_batch_max_tokens = 1024;
+    int mtmd_batch_max_tokens = DEFAULT_MTMD_BATCH_MAX_TOKENS;
 
     // finetune
     struct lr_opt lr;
     enum ggml_opt_optimizer_type optimizer = GGML_OPT_OPTIMIZER_TYPE_ADAMW;
-    float val_split = 0.05f; // fraction of the data used for the validation set
+    float val_split = DEFAULT_VAL_SPLIT; // fraction of the data used for the validation set
 
     // embedding
     bool embedding         = false; // get only sentence embedding
-    int32_t embd_normalize = 2;     // normalisation for embeddings (-1=none, 0=max absolute int16, 1=taxicab, 2=euclidean, >2=p-norm)
+    int32_t embd_normalize = DEFAULT_EMBD_NORMALIZE;     // normalisation for embeddings (-1=none, 0=max absolute int16, 1=taxicab, 2=euclidean, >2=p-norm)
     std::string embd_out   = "";    // empty = default, "array" = [[],[]...], "json" = openai style, "json+" = same "json" + cosine similarity matrix
     std::string embd_sep   = "\n";  // separator of embeddings
     std::string cls_sep    = "\t";  // separator of classification sequences
 
     // server params
-    int32_t port                = 8080;          // server listens on this network port
+    int32_t port                = DEFAULT_SERVER_PORT;          // server listens on this network port
     bool    reuse_port          = false;         // allow multiple sockets to bind to the same port
-    int32_t timeout_read        = 3600;          // http read timeout in seconds
+    int32_t timeout_read        = DEFAULT_HTTP_TIMEOUT_READ;          // http read timeout in seconds
     int32_t timeout_write       = timeout_read;  // http write timeout in seconds
-    int32_t sse_ping_interval   = 30;            // SSE ping interval in seconds
+    int32_t sse_ping_interval   = DEFAULT_SSE_PING_INTERVAL;            // SSE ping interval in seconds
     int32_t n_threads_http      = -1;    // number of threads to process HTTP requests (TODO: support threadpool)
     int32_t n_cache_reuse       = 0;     // min chunk size to reuse from the cache via KV shifting
     bool    cache_prompt        = true;  // whether to enable prompt caching
     bool    cache_idle_slots    = true;  // save and clear idle slots upon starting a new task
-    int32_t n_ctx_checkpoints   = 32;    // max number of context checkpoints per slot
-    int32_t checkpoint_min_step = 8192;  // minimum spacing between context checkpoints
-    int32_t cache_ram_mib       = 8192;  // -1 = no limit, 0 - disable, 1 = 1 MiB, etc.
+    int32_t n_ctx_checkpoints   = DEFAULT_N_CTX_CHECKPOINTS;    // max number of context checkpoints per slot
+    int32_t checkpoint_min_step = DEFAULT_CHECKPOINT_MIN_STEP;  // minimum spacing between context checkpoints
+    int32_t cache_ram_mib       = DEFAULT_CACHE_RAM_MIB;  // -1 = no limit, 0 - disable, 1 = 1 MiB, etc.
 
     std::string hostname      = "127.0.0.1";
     std::string public_path   = "";                                                                         // NOLINT
@@ -659,16 +719,17 @@ struct common_params {
     // router server configs
     std::string models_dir    = "";     // directory containing models for the router server
     std::string models_preset = "";     // directory containing model presets for the router server
-    int models_max = 4;                 // maximum number of models to load simultaneously
+    int models_max = DEFAULT_ROUTER_MAX_MODELS;                 // maximum number of models to load simultaneously
     bool models_autoload = true;        // automatically load models when requested via the router server
     std::string models_preset_hf = "";  // show a warning about remote presets on router loaded (if not empty)
 
     bool log_json = false;
+    bool log_request_bodies = false; // when true, log request/response bodies in server debug output
 
     std::string slot_save_path;
     std::string media_path; // path to directory for loading media files
 
-    float slot_prompt_similarity = 0.1f;
+    float slot_prompt_similarity = DEFAULT_SLOT_PROMPT_SIMILARITY;
 
     // batched-bench params
     bool is_pp_shared   = false;
@@ -681,16 +742,16 @@ struct common_params {
     // retrieval params
     std::vector<std::string> context_files; // context files to embed
 
-    int32_t chunk_size = 64; // chunk size for context embedding
+    int32_t chunk_size = DEFAULT_CHUNK_SIZE; // chunk size for context embedding
 
     std::string chunk_separator = "\n"; // chunk separator for context embedding
 
     // passkey params
-    int32_t n_junk = 250; // number of times to repeat the junk text
+    int32_t n_junk = DEFAULT_PASSKEY_JUNK_COUNT; // number of times to repeat the junk text
     int32_t i_pos  = -1;  // position of the passkey in the junk text
 
     // imatrix params
-    int32_t n_out_freq  = 10; // output the imatrix every n_out_freq iterations
+    int32_t n_out_freq  = DEFAULT_IMATRIX_OUT_FREQ; // output the imatrix every n_out_freq iterations
     int32_t n_save_freq =  0; // save the imatrix every n_save_freq iterations
     int32_t i_chunk     =  0; // start processing from this chunk
     int8_t  imat_dat    =  0; // whether the legacy imatrix.dat format should be output (gguf <= 0 < dat)
@@ -701,8 +762,8 @@ struct common_params {
     bool parse_special   = false; // whether to parse special tokens during imatrix tokenization
 
     // cvector-generator params
-    int n_pca_batch = 100;
-    int n_pca_iterations = 1000;
+    int n_pca_batch = DEFAULT_PCABATCH_SIZE;
+    int n_pca_iterations = DEFAULT_PCA_ITERATIONS;
     dimre_method cvector_dimre_method = DIMRE_METHOD_PCA;
     std::string cvector_positive_file = "tools/cvector-generator/positive.txt";
     std::string cvector_negative_file = "tools/cvector-generator/negative.txt";

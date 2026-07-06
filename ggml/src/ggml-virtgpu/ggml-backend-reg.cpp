@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <mutex>
+#include <vector>
 
 void ggml_virtgpu_cleanup(virtgpu * gpu);
 
@@ -129,21 +130,24 @@ static void ggml_backend_remoting_reg_init_devices(ggml_backend_reg_t reg) {
         static std::mutex           mutex;
         std::lock_guard<std::mutex> lock(mutex);
         if (!initialized) {
-            for (int i = 0; i < ggml_backend_remoting_get_device_count(); i++) {
-                ggml_backend_remoting_device_context * ctx       = new ggml_backend_remoting_device_context;
-                char                                   desc[256] = "ggml-virtgpu API Remoting device";
-
+            int n_devices = ggml_backend_remoting_get_device_count();
+            // Storage must outlive the individual device contexts.
+            // Since this is a process-lifetime registry, use a static vector.
+            static std::vector<ggml_backend_remoting_device_context> ctx_storage;
+            static std::vector<ggml_backend_device> dev_storage;
+            ctx_storage.reserve(n_devices);
+            dev_storage.reserve(n_devices);
+            for (int i = 0; i < n_devices; i++) {
+                char desc[256] = "ggml-virtgpu API Remoting device";
+                ctx_storage.emplace_back();
+                auto * ctx = &ctx_storage.back();
                 ctx->device      = i;
                 ctx->name        = GGML_VIRTGPU_NAME + std::to_string(i);
                 ctx->description = desc;
                 ctx->gpu         = gpu;
 
-                ggml_backend_dev_t dev = new ggml_backend_device{
-                    /* .iface   = */ ggml_backend_remoting_device_interface,
-                    /* .reg     = */ reg,
-                    /* .context = */ ctx,
-                };
-                devices.push_back(dev);
+                dev_storage.push_back({ggml_backend_remoting_device_interface, reg, ctx});
+                devices.push_back(&dev_storage.back());
             }
             initialized = true;
         }

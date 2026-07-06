@@ -621,6 +621,8 @@ static void ggml_backend_webgpu_buffer_memset(webgpu_global_context & ctx,
                                               uint32_t                value,
                                               size_t                  offset,
                                               size_t                  size) {
+    GGML_ASSERT(offset <= UINT32_MAX && "WebGPU buffer offset exceeds 32-bit range");
+    GGML_ASSERT(size   <= UINT32_MAX && "WebGPU buffer size exceeds 32-bit range");
     std::vector<uint32_t>             params  = { (uint32_t) offset, (uint32_t) size, value };
     std::vector<wgpu::BindGroupEntry> entries = { ggml_webgpu_make_bind_group_entry(0, buf, 0, buf.GetSize()) };
     size_t                            bytes_per_wg =

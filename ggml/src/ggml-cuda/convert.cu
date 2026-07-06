@@ -1,5 +1,10 @@
 #include "convert.cuh"
 #include "dequantize.cuh"
+#include "turbo-quant.cuh"
+#include "planar-iso-dequant.cuh"
+// ggml-common.h (included via convert.cuh → common.cuh) already defines block_rq_prod
+#define BLOCK_RQ_PROD_DEFINED
+#include "rotorquant.cuh"
 
 #include <cstdint>
 
@@ -502,6 +507,11 @@ static void dequantize_block_cont_cuda(const void * __restrict__ vx, dst_t * __r
     dequantize_block_cuda<qk, qr, dequantize_kernel, dst_t>(vx, y, k, 1, 1, 1, k/qk, k/qk, k/qk, stream);
 }
 
+// ---- Wrappers: dequant + inverse WHT rotation for turbo KV cache types ----
+// Dequant produces unrotated centroid values; post-processing applies inverse
+// rotation to each 128-element group, matching k_set_rows_turbo3/turbo4 which
+// now apply forward rotation during quantization.
+
 static void dequantize_block_q8_0_f16_cuda(const void * __restrict__ vx, half * __restrict__ y, const int64_t k, cudaStream_t stream) {
     const int num_blocks = (k + CUDA_Q8_0_NE_ALIGN - 1) / CUDA_Q8_0_NE_ALIGN;
     if (k % CUDA_Q8_0_NE_ALIGN == 0) {
@@ -762,6 +772,20 @@ to_fp16_cuda_t ggml_get_to_fp16_cuda(ggml_type type) {
             return convert_unary_cont_cuda<float>;
         case GGML_TYPE_BF16:
             return convert_unary_cont_cuda<nv_bfloat16>;
+        case GGML_TYPE_TURBO3_0:
+            return dequantize_block_cont_cuda<QK_TURBO3, QR_TURBO3, dequantize_turbo3_0>;
+        case GGML_TYPE_TURBO4_0:
+            return dequantize_block_cont_cuda<QK_TURBO4, QR_TURBO4, dequantize_turbo4_0>;
+        case GGML_TYPE_TURBO2_0:
+            return dequantize_block_cont_cuda<QK_TURBO2, QR_TURBO2, dequantize_turbo2_0>;
+        case GGML_TYPE_PLANAR3_0:
+            return dequantize_block_cont_cuda<QK_PLANAR3, QR_PLANAR3, dequantize_planar3_0>;
+        case GGML_TYPE_ISO3_0:
+            return dequantize_block_cont_cuda<QK_ISO3, QR_ISO3, dequantize_iso3_0>;
+        case GGML_TYPE_RQ_MSE:
+            return dequantize_block_cont_cuda<QK_RQ, QR_RQ_MSE_2, dequantize_rq_mse_2>;
+        case GGML_TYPE_RQ_PROD:
+            return dequantize_block_cont_cuda<QK_RQ, QR_RQ_PROD, dequantize_rq_prod>;
         default:
             return nullptr;
     }
@@ -813,6 +837,20 @@ to_fp32_cuda_t ggml_get_to_fp32_cuda(ggml_type type) {
             return dequantize_row_mxfp4_cuda;
         case GGML_TYPE_NVFP4:
             return dequantize_row_nvfp4_cuda;
+        case GGML_TYPE_TURBO3_0:
+            return dequantize_block_cont_cuda<QK_TURBO3, QR_TURBO3, dequantize_turbo3_0>;
+        case GGML_TYPE_TURBO4_0:
+            return dequantize_block_cont_cuda<QK_TURBO4, QR_TURBO4, dequantize_turbo4_0>;
+        case GGML_TYPE_TURBO2_0:
+            return dequantize_block_cont_cuda<QK_TURBO2, QR_TURBO2, dequantize_turbo2_0>;
+        case GGML_TYPE_PLANAR3_0:
+            return dequantize_block_cont_cuda<QK_PLANAR3, QR_PLANAR3, dequantize_planar3_0>;
+        case GGML_TYPE_ISO3_0:
+            return dequantize_block_cont_cuda<QK_ISO3, QR_ISO3, dequantize_iso3_0>;
+        case GGML_TYPE_RQ_MSE:
+            return dequantize_block_cont_cuda<QK_RQ, QR_RQ_MSE_2, dequantize_rq_mse_2>;
+        case GGML_TYPE_RQ_PROD:
+            return dequantize_block_cont_cuda<QK_RQ, QR_RQ_PROD, dequantize_rq_prod>;
         case GGML_TYPE_F16:
             return convert_unary_cont_cuda<half>;
         case GGML_TYPE_BF16:
@@ -840,6 +878,21 @@ to_fp16_nc_cuda_t ggml_get_to_fp16_nc_cuda(ggml_type type) {
             return dequantize_block_cuda<QK8_0, QR8_0, dequantize_q8_0>;
         case GGML_TYPE_BF16:
             return convert_unary_cuda<nv_bfloat16>;
+        // fp16 nc output: standard dequant without inverse rotation (half output)
+        case GGML_TYPE_TURBO3_0:
+            return dequantize_block_cuda<QK_TURBO3, QR_TURBO3, dequantize_turbo3_0>;
+        case GGML_TYPE_TURBO4_0:
+            return dequantize_block_cuda<QK_TURBO4, QR_TURBO4, dequantize_turbo4_0>;
+        case GGML_TYPE_TURBO2_0:
+            return dequantize_block_cuda<QK_TURBO2, QR_TURBO2, dequantize_turbo2_0>;
+        case GGML_TYPE_PLANAR3_0:
+            return dequantize_block_cuda<QK_PLANAR3, QR_PLANAR3, dequantize_planar3_0>;
+        case GGML_TYPE_ISO3_0:
+            return dequantize_block_cuda<QK_ISO3, QR_ISO3, dequantize_iso3_0>;
+        case GGML_TYPE_RQ_MSE:
+            return dequantize_block_cuda<QK_RQ, QR_RQ_MSE_2, dequantize_rq_mse_2>;
+        case GGML_TYPE_RQ_PROD:
+            return dequantize_block_cuda<QK_RQ, QR_RQ_PROD, dequantize_rq_prod>;
         default:
             return nullptr;
     }
@@ -863,6 +916,21 @@ to_bf16_nc_cuda_t ggml_get_to_bf16_nc_cuda(ggml_type type) {
             return dequantize_block_cuda<QK8_0, QR8_0, dequantize_q8_0>;
         case GGML_TYPE_F16:
             return convert_unary_cuda<half, nv_bfloat16>;
+        // bf16 nc output: standard dequant without inverse rotation (bf16 output)
+        case GGML_TYPE_TURBO3_0:
+            return dequantize_block_cuda<QK_TURBO3, QR_TURBO3, dequantize_turbo3_0>;
+        case GGML_TYPE_TURBO4_0:
+            return dequantize_block_cuda<QK_TURBO4, QR_TURBO4, dequantize_turbo4_0>;
+        case GGML_TYPE_TURBO2_0:
+            return dequantize_block_cuda<QK_TURBO2, QR_TURBO2, dequantize_turbo2_0>;
+        case GGML_TYPE_PLANAR3_0:
+            return dequantize_block_cuda<QK_PLANAR3, QR_PLANAR3, dequantize_planar3_0>;
+        case GGML_TYPE_ISO3_0:
+            return dequantize_block_cuda<QK_ISO3, QR_ISO3, dequantize_iso3_0>;
+        case GGML_TYPE_RQ_MSE:
+            return dequantize_block_cuda<QK_RQ, QR_RQ_MSE_2, dequantize_rq_mse_2>;
+        case GGML_TYPE_RQ_PROD:
+            return dequantize_block_cuda<QK_RQ, QR_RQ_PROD, dequantize_rq_prod>;
         default:
             return nullptr;
     }
@@ -886,6 +954,20 @@ to_fp32_nc_cuda_t ggml_get_to_fp32_nc_cuda(ggml_type type) {
             return dequantize_block_cuda<QK8_0, QR8_0, dequantize_q8_0>;
         case GGML_TYPE_BF16:
             return convert_unary_cuda<nv_bfloat16, float>;
+        case GGML_TYPE_TURBO3_0:
+            return dequantize_block_cuda<QK_TURBO3, QR_TURBO3, dequantize_turbo3_0>;
+        case GGML_TYPE_TURBO4_0:
+            return dequantize_block_cuda<QK_TURBO4, QR_TURBO4, dequantize_turbo4_0>;
+        case GGML_TYPE_TURBO2_0:
+            return dequantize_block_cuda<QK_TURBO2, QR_TURBO2, dequantize_turbo2_0>;
+        case GGML_TYPE_PLANAR3_0:
+            return dequantize_block_cuda<QK_PLANAR3, QR_PLANAR3, dequantize_planar3_0>;
+        case GGML_TYPE_ISO3_0:
+            return dequantize_block_cuda<QK_ISO3, QR_ISO3, dequantize_iso3_0>;
+        case GGML_TYPE_RQ_MSE:
+            return dequantize_block_cuda<QK_RQ, QR_RQ_MSE_2, dequantize_rq_mse_2>;
+        case GGML_TYPE_RQ_PROD:
+            return dequantize_block_cuda<QK_RQ, QR_RQ_PROD, dequantize_rq_prod>;
         default:
             return nullptr;
     }

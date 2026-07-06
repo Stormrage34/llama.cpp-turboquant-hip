@@ -618,12 +618,46 @@ struct llama_mmap::impl {
 };
 
 llama_mmap::llama_mmap(struct llama_file * file, size_t prefetch, bool numa) : pimpl(std::make_unique<impl>(file, prefetch, numa)) {}
-llama_mmap::~llama_mmap() = default;
+
+llama_mmap::~llama_mmap() {
+    // unpin before the pages are unmapped by the impl destructor
+    if (host_reg_addr && host_unreg_fn) {
+        host_unreg_fn(host_reg_addr);
+    }
+}
 
 size_t llama_mmap::size() const { return pimpl->size; }
 void * llama_mmap::addr() const { return pimpl->addr; }
 
 void llama_mmap::unmap_fragment(size_t first, size_t last) { pimpl->unmap_fragment(first, last); }
+
+size_t llama_mmap::register_host(size_t first, size_t last, bool (*reg_fn)(void *, size_t), void (*unreg_fn)(void *)) {
+#ifdef _POSIX_MAPPED_FILES
+    if (host_reg_addr || !reg_fn || !unreg_fn || last <= first) {
+        return 0;
+    }
+
+    // expand outward to the page boundaries retained by unmap_fragment
+    const size_t page_size = sysconf(_SC_PAGESIZE);
+    first = first & ~(page_size - 1);
+    last  = (last + page_size - 1) & ~(page_size - 1);
+
+    void * reg_addr = (uint8_t *) pimpl->addr + first;
+    if (!reg_fn(reg_addr, last - first)) {
+        return 0;
+    }
+
+    host_reg_addr  = reg_addr;
+    host_unreg_fn  = unreg_fn;
+    return last - first;
+#else
+    GGML_UNUSED(first);
+    GGML_UNUSED(last);
+    GGML_UNUSED(reg_fn);
+    GGML_UNUSED(unreg_fn);
+    return 0;
+#endif
+}
 
 #if defined(_POSIX_MEMLOCK_RANGE) || defined(_WIN32)
 const bool llama_mmap::SUPPORTED  = true;

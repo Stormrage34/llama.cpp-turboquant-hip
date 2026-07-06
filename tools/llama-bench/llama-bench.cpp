@@ -476,31 +476,13 @@ static void print_usage(int /* argc */, char ** argv) {
 }
 
 static ggml_type ggml_type_from_name(const std::string & s) {
-    if (s == "f16") {
-        return GGML_TYPE_F16;
+    // Iterate all registered types and match by name
+    for (int i = 0; i < GGML_TYPE_COUNT; i++) {
+        const char * name = ggml_type_name((ggml_type) i);
+        if (name && s == name) {
+            return (ggml_type) i;
+        }
     }
-    if (s == "bf16") {
-        return GGML_TYPE_BF16;
-    }
-    if (s == "q8_0") {
-        return GGML_TYPE_Q8_0;
-    }
-    if (s == "q4_0") {
-        return GGML_TYPE_Q4_0;
-    }
-    if (s == "q4_1") {
-        return GGML_TYPE_Q4_1;
-    }
-    if (s == "q5_0") {
-        return GGML_TYPE_Q5_0;
-    }
-    if (s == "q5_1") {
-        return GGML_TYPE_Q5_1;
-    }
-    if (s == "iq4_nl") {
-        return GGML_TYPE_IQ4_NL;
-    }
-
     return GGML_TYPE_COUNT;
 }
 

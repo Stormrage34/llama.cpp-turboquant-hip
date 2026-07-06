@@ -1,0 +1,66 @@
+{
+  "summary": {
+    "block_structure": "PASS",
+    "wht_roundtrip": "PASS",
+    "pipeline_consistency": "PASS",
+    "attention_collapse": "PASS",
+    "norm_blowup": "PASS",
+    "innerq_interference": "PASS",
+    "centroid_distribution": "PASS",
+    "full_pipeline": "PASS",
+    "per_centroid_errors": "PASS",
+    "structured_kv": "PASS",
+    "wrong_pipeline_detection": "PASS",
+    "precision_audit": "PASS"
+  },
+  "precision_audit": {
+    "distributions": [
+      {
+        "distribution": "gaussian",
+        "mse_turbo3": 0.00276976,
+        "mse_q8": 8.9e-07,
+        "mse_ratio": 3103.32,
+        "snr_turbo3_db": 10.6,
+        "snr_q8_db": 45.5,
+        "max_err_turbo3": 0.228831,
+        "max_err_q8": 0.001909
+      },
+      {
+        "distribution": "heavy_tailed",
+        "mse_turbo3": 0.00757528,
+        "mse_q8": 2.32e-06,
+        "mse_ratio": 3268.64,
+        "snr_turbo3_db": 7.0,
+        "snr_q8_db": 42.4,
+        "max_err_turbo3": 0.458656,
+        "max_err_q8": 0.003447
+      },
+      {
+        "distribution": "bimodal",
+        "mse_turbo3": 0.0014165,
+        "mse_q8": 8.2e-07,
+        "mse_ratio": 1728.41,
+        "snr_turbo3_db": 18.2,
+        "snr_q8_db": 50.5,
+        "max_err_turbo3": 0.097044,
+        "max_err_q8": 0.00165
+      },
+      {
+        "distribution": "sparse",
+        "mse_turbo3": 0.00672027,
+        "mse_q8": 2.3e-07,
+        "mse_ratio": 28945.18,
+        "snr_turbo3_db": 5.8,
+        "snr_q8_db": 51.3,
+        "max_err_turbo3": 0.366217,
+        "max_err_q8": 0.002991
+      }
+    ],
+    "attention_quality": {}
+  },
+  "rotation_mismatch": {},
+  "quant_comparison": {
+    "centroid_entropy": 2.93
+  },
+  "exit_code": 0
+}

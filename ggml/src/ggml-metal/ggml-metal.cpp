@@ -290,13 +290,10 @@ static ggml_backend_buffer_type_t ggml_backend_metal_buffer_type_shared(int devi
         bufts.reserve(g_devices);
         ctxs.reserve(g_devices);
 
+        ctxs.resize(g_devices);
         for (int i = 0; i < g_devices; ++i) {
-            ggml_backend_metal_buffer_type * raw_ctx =
-                new ggml_backend_metal_buffer_type {
-                    /* .device = */ i,
-                    /* .name   = */ GGML_METAL_NAME + std::to_string(i),
-                };
-            ctxs.emplace_back(raw_ctx);
+            ctxs[i].device = i;
+            ctxs[i].name = GGML_METAL_NAME + std::to_string(i);
 
             ggml_backend_buffer_type buft = {
                 /* .iface = */ {
@@ -308,7 +305,7 @@ static ggml_backend_buffer_type_t ggml_backend_metal_buffer_type_shared(int devi
                     /* .is_host          = */ ggml_backend_metal_buffer_type_shared_is_host,
                 },
                 /* .device  = */ ggml_backend_reg_dev_get(ggml_backend_metal_reg(), i),
-                /* .context = */ raw_ctx,
+                /* .context = */ &ctxs[i],
             };
 
             bufts.emplace_back(buft);
@@ -366,12 +363,10 @@ static ggml_backend_buffer_type_t ggml_backend_metal_buffer_type_private(int dev
         bufts.reserve(g_devices);
         ctxs.reserve(g_devices);
 
+        ctxs.resize(g_devices);
         for (int i = 0; i < g_devices; ++i) {
-            ggml_backend_metal_buffer_type * raw_ctx = new ggml_backend_metal_buffer_type{
-                /* .device = */ i,
-                /* .name   = */ GGML_METAL_NAME + std::to_string(i) + "_Private"
-            };
-            ctxs.emplace_back(raw_ctx);
+            ctxs[i].device = i;
+            ctxs[i].name = GGML_METAL_NAME + std::to_string(i) + "_Private";
 
             ggml_backend_buffer_type buft = {
                 /* .iface = */ {
@@ -383,7 +378,7 @@ static ggml_backend_buffer_type_t ggml_backend_metal_buffer_type_private(int dev
                     /* .is_host          = */ ggml_backend_metal_buffer_type_private_is_host,
                 },
                 /* .device  = */ ggml_backend_reg_dev_get(ggml_backend_metal_reg(), i),
-                /* .context = */ raw_ctx,
+                /* .context = */ &ctxs[i],
             };
 
             bufts.emplace_back(buft);
@@ -442,12 +437,10 @@ static ggml_backend_buffer_type_t ggml_backend_metal_buffer_type_mapped(int devi
         bufts.reserve(g_devices);
         ctxs.reserve(g_devices);
 
+        ctxs.resize(g_devices);
         for (int i = 0; i < g_devices; ++i) {
-            ggml_backend_metal_buffer_type * raw_ctx = new ggml_backend_metal_buffer_type{
-                /* .device = */ i,
-                /* .name   = */ GGML_METAL_NAME + std::to_string(i) + "_Mapped"
-            };
-            ctxs.emplace_back(raw_ctx);
+            ctxs[i].device = i;
+            ctxs[i].name = GGML_METAL_NAME + std::to_string(i) + "_Mapped";
 
             // note: not obvious, but this buffer type still needs to implement .alloc_buffer:
             //       https://github.com/ggml-org/llama.cpp/pull/15832#discussion_r2333177099
@@ -461,7 +454,7 @@ static ggml_backend_buffer_type_t ggml_backend_metal_buffer_type_mapped(int devi
                     /* .is_host          = */ ggml_backend_metal_buffer_type_mapped_is_host,
                 },
                 /* .device  = */ ggml_backend_reg_dev_get(ggml_backend_metal_reg(), i),
-                /* .context = */ raw_ctx,
+                /* .context = */ &ctxs[i],
             };
 
             bufts.emplace_back(buft);

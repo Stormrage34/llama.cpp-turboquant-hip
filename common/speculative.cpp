@@ -1752,6 +1752,10 @@ struct common_speculative_impl_ngram_mod : public common_speculative_impl {
     // enable trace logging if LLAMA_TRACE is set
     const bool verbose;
 
+    // EMA of effective minimum draft length for adaptive drafting
+    double n_min_eff_ema_ = 0.0;
+    static constexpr double kEmaAlpha = 0.4;
+
     struct seq_info {
         // the last position in the prompt that was added to the ngram container
         size_t i_last = 0;
@@ -1759,8 +1763,8 @@ struct common_speculative_impl_ngram_mod : public common_speculative_impl {
         // length of the last drafted n-gram (number of tokens returned by draft)
         size_t n_draft_last = 0;
 
-        // consecutive accept rounds with low acceptance fraction (< 0.5)
-        int n_low = 0;
+        // EMA-adapted minimum draft length
+        uint16_t n_min_eff = 0;
     };
 
     std::vector<seq_info> sinfos;
@@ -1771,7 +1775,8 @@ struct common_speculative_impl_ngram_mod : public common_speculative_impl {
         : common_speculative_impl(COMMON_SPECULATIVE_TYPE_NGRAM_MOD, n_seq)
         , params(params.ngram_mod)
         , mod(params.ngram_mod.n_match, 4*1024*1024)
-        , verbose(std::getenv("LLAMA_TRACE") != nullptr) {
+        , verbose(std::getenv("LLAMA_TRACE") != nullptr)
+        , n_min_eff_ema_(params.ngram_mod.n_min) {
         static_assert(sizeof(llama_token) == sizeof(common_ngram_mod::entry_t));
 
         SPC_TRC("%s", "adding speculative implementation 'ngram-mod'\n");
@@ -1851,7 +1856,7 @@ struct common_speculative_impl_ngram_mod : public common_speculative_impl {
         for (int i = 0; i < params.n_max; ++i) {
             const llama_token token = mod.get(result.data() + i);
             if (token == common_ngram_mod::EMPTY) {
-                if (i < params.n_min) {
+                if (i < sinfo.n_min_eff) {
                     result.clear();
                     return;
                 }
@@ -1900,20 +1905,12 @@ struct common_speculative_impl_ngram_mod : public common_speculative_impl {
         // compute acceptance fraction if we have a recorded draft length
         if (sinfo.n_draft_last > 0) {
             const double f_acc = (double)n_accepted / (double)sinfo.n_draft_last;
-            if (f_acc < 0.25) {
-                sinfo.n_low++;
-                if (sinfo.n_low >= 5) {
-                    if (verbose) {
-                        SPC_TRC("low acceptance streak (%d) - resetting ngram_mod\n", sinfo.n_low);
-                    }
 
-                    mod.reset();
-                    sinfo.n_low = 0;
-                    sinfo.i_last = 0;
-                }
-            } else {
-                sinfo.n_low = 0;
-            }
+            // EMA-adapted minimum draft length for smoother response to quality shifts
+            n_min_eff_ema_ = kEmaAlpha * f_acc + (1.0 - kEmaAlpha) * n_min_eff_ema_;
+            n_min_eff_ema_ = std::max(2.0, std::min((double)params.n_max, n_min_eff_ema_));
+
+            sinfo.n_min_eff = (uint16_t)n_min_eff_ema_;
         }
     }
 

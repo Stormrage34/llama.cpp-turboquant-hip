@@ -89,6 +89,12 @@ static void ggml_cuda_flash_attn_ext_mma_f16_switch_ncols2(ggml_backend_cuda_con
         }
     }
 
+    if constexpr (DKQ <= 256) {
+        ggml_cuda_flash_attn_ext_mma_f16_switch_ncols1<DKQ, DV, 1>(ctx, dst);
+    } else {
+        GGML_ABORT("fatal error");
+    }
+
     if (use_gqa_opt && gqa_ratio > 4) {
         ggml_cuda_flash_attn_ext_mma_f16_switch_ncols1<DKQ, DV, 8>(ctx, dst);
         return;
@@ -102,12 +108,6 @@ static void ggml_cuda_flash_attn_ext_mma_f16_switch_ncols2(ggml_backend_cuda_con
     if (use_gqa_opt && gqa_ratio > 1) {
         ggml_cuda_flash_attn_ext_mma_f16_switch_ncols1<DKQ, DV, 2>(ctx, dst);
         return;
-    }
-
-    if constexpr (DKQ <= 256) {
-        ggml_cuda_flash_attn_ext_mma_f16_switch_ncols1<DKQ, DV, 1>(ctx, dst);
-    } else {
-        GGML_ABORT("fatal error");
     }
 }
 
@@ -263,6 +263,9 @@ static void ggml_cuda_flash_attn_ext_vec(ggml_backend_cuda_context & ctx, ggml_t
     ggml_tensor * V = dst->src[2];
 
 #ifdef GGML_CUDA_FA_ALL_QUANTS
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_TURBO3_0, GGML_TYPE_F16)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_TURBO4_0, GGML_TYPE_F16)
+
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_F16,  GGML_TYPE_F16)
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q4_0, GGML_TYPE_F16)
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q4_1, GGML_TYPE_F16)
@@ -425,6 +428,12 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
     if (K->type != V->type) {
         return BEST_FATTN_KERNEL_NONE;
     }
+    // Without FA_ALL_QUANTS, only standard types (f16, bf16, q4_0, q8_0)
+    // have compiled fattn-vec template instances with vec_dot_KQ support.
+    if (K->type != GGML_TYPE_F16 && K->type != GGML_TYPE_BF16 &&
+        K->type != GGML_TYPE_Q4_0 && K->type != GGML_TYPE_Q8_0) {
+        return BEST_FATTN_KERNEL_NONE;
+    }
 #endif // GGML_CUDA_FA_ALL_QUANTS
 
     switch (K->type) {
@@ -441,6 +450,14 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
         case GGML_TYPE_Q8_0:
         case GGML_TYPE_BF16:
             break;
+        case GGML_TYPE_TURBO2_0:
+        case GGML_TYPE_TURBO3_0:
+        case GGML_TYPE_TURBO4_0:
+        case GGML_TYPE_PLANAR3_0:
+        case GGML_TYPE_ISO3_0:
+        case GGML_TYPE_RQ_MSE:
+        case GGML_TYPE_RQ_PROD:
+            break;
         default:
             return BEST_FATTN_KERNEL_NONE;
     }
@@ -453,6 +470,10 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
     // 192 satisfies % 64 == 0 but has no vec instance (DKQ != DV); force it onto the MMA path.
     const bool can_use_vector_kernel = Q->ne[0] <= 256 && Q->ne[0] % 64 == 0 && Q->ne[0] != 192 && K->ne[1] % FATTN_KQ_STRIDE == 0;
 
+    // Turbo types have no VEC template instantiations and must use MMA/TILE/WMMA paths.
+    const bool is_turbo_K = ggml_is_turbo(K->type);
+    const bool is_turbo_V = ggml_is_turbo(V->type);
+
     // If Turing tensor cores are available, use them:
     if (turing_mma_available(cc) && Q->ne[0] != 40 && Q->ne[0] != 72) {
         if (can_use_vector_kernel) {
@@ -460,7 +481,7 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
                 if (cc >= GGML_CUDA_CC_ADA_LOVELACE && Q->ne[1] == 1 && Q->ne[3] == 1 && !(gqa_ratio > 4 && K->ne[1] >= 8192)) {
                     return BEST_FATTN_KERNEL_VEC;
                 }
-            } else {
+            } else if (!is_turbo_K && !is_turbo_V) {
                 if (cc >= GGML_CUDA_CC_ADA_LOVELACE) {
                     if (Q->ne[1] <= 2) {
                         return BEST_FATTN_KERNEL_VEC;
@@ -471,7 +492,7 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
                     }
                 }
             }
-            if (!gqa_opt_applies && Q->ne[1] == 1) {
+            if (!gqa_opt_applies && Q->ne[1] == 1 && !is_turbo_K) {
                 return BEST_FATTN_KERNEL_VEC;
             }
         }
@@ -485,7 +506,7 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
     }
 
     if (volta_mma_available(cc) && Q->ne[0] != 40 && Q->ne[0] != 72) {
-        if (can_use_vector_kernel && Q->ne[1] * gqa_ratio_eff <= 2) {
+        if (can_use_vector_kernel && Q->ne[1] * gqa_ratio_eff <= 2 && !is_turbo_K) {
             return BEST_FATTN_KERNEL_VEC;
         }
         if (Q->ne[1] * gqa_ratio_eff <= 16) {
@@ -496,7 +517,7 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
 
     // Use the WMMA kernel if possible:
     if (ggml_cuda_should_use_wmma_fattn(cc) && K->ne[1] % FATTN_KQ_STRIDE == 0 && Q->ne[0] != 40 && Q->ne[0] != 72 && Q->ne[0] != 192 && Q->ne[0] != 512 && Q->ne[0] != 576) {
-        if (can_use_vector_kernel && Q->ne[1] <= 2) {
+        if (can_use_vector_kernel && Q->ne[1] <= 2 && !is_turbo_K) {
             return BEST_FATTN_KERNEL_VEC;
         }
         return BEST_FATTN_KERNEL_WMMA_F16;
@@ -528,11 +549,16 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
                     return BEST_FATTN_KERNEL_VEC;
                 }
             }
-        } else {
+        } else if (!is_turbo_K) {
             if (Q->ne[1] <= 2) {
                 return BEST_FATTN_KERNEL_VEC;
             }
         }
+    }
+    // Turbo types must never reach TILE/MMA kernels (they expect F16).
+    // Non-VEC path cannot decompress turbo blocks — fall back to getrows.
+    if (is_turbo_K || is_turbo_V) {
+        return BEST_FATTN_KERNEL_NONE;
     }
     return BEST_FATTN_KERNEL_TILE;
 }

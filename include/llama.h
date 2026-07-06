@@ -295,6 +295,7 @@ extern "C" {
         // NULL-terminated list of buffer types to use for tensors that match a pattern
         const struct llama_model_tensor_buft_override * tensor_buft_overrides;
 
+        int32_t moe_expert_cache_slots; // MoE expert cache: N GPU slots per tensor (0 = disabled)
         int32_t n_gpu_layers; // number of layers to store in VRAM, a negative value means all layers
         enum llama_split_mode split_mode; // how to split the model across multiple GPUs
 

@@ -94,16 +94,20 @@ static std::vector<std::string> ingest_args(int raw_argc, char ** raw_argv) {
     (void) raw_argc;
     (void) raw_argv;
 
+    std::vector<char> output_buf;
+    output_buf.reserve(256);
+
     for (int i = 0; i < argc; ++i) {
         int length_needed = WideCharToMultiByte(CP_UTF8, 0, wargv[i], wcslen(wargv[i]), 0, 0, NULL, NULL);
-        char * output_buf = (char *) calloc(length_needed+1, sizeof(char));
-        GGML_ASSERT(output_buf);
 
-        WideCharToMultiByte(CP_UTF8, 0, wargv[i], wcslen(wargv[i]), output_buf, length_needed, NULL, NULL);
+        if (length_needed + 1 > output_buf.size()) {
+            output_buf.resize(length_needed + 1);
+        }
+
+        WideCharToMultiByte(CP_UTF8, 0, wargv[i], wcslen(wargv[i]), output_buf.data(), length_needed, NULL, NULL);
         output_buf[length_needed] = '\0';
 
-        argv.push_back(output_buf);
-        free(output_buf);
+        argv.push_back(output_buf.data());
     }
 
     LocalFree((HLOCAL) wargv);

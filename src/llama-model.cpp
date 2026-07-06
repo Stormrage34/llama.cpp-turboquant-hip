@@ -21,12 +21,17 @@
 #include "ggml.h"
 #include "ggml-cpp.h"
 
+#ifdef GGML_USE_CUDA
+#include "ggml-cuda.h"
+#endif
+
 #include <algorithm>
 #include <cassert>
 #include <cfloat>
 #include <cstdint>
 #include <cstring>
 #include <cmath>
+#include <dlfcn.h>
 #include <functional>
 #include <map>
 #include <numeric>
@@ -1228,6 +1233,17 @@ bool llama_model_base::load_tensors(llama_model_loader & ml) {
     LLAMA_LOG_INFO("%s: loading model tensors, this can take a while... (mmap = %s, direct_io = %s)\n",
         __func__, ml.use_mmap ? "true" : "false", ml.use_direct_io ? "true" : "false");
 
+    // MoE expert cache: configure slot count before any GPU allocations
+#ifdef GGML_USE_CUDA
+    if (params.moe_expert_cache_slots > 0) {
+        typedef void (*set_slots_fn)(int);
+        auto fn = (set_slots_fn)dlsym(RTLD_DEFAULT, "ggml_backend_cuda_moe_set_cache_slots");
+        if (fn) {
+            fn(params.moe_expert_cache_slots);
+        }
+    }
+#endif
+
     // build a list of buffer types for the CPU and GPU devices
     pimpl->cpu_buft_list = make_cpu_buft_list(devices, params.use_extra_bufts, params.no_host);
     for (const auto & dev : devices) {
@@ -1623,6 +1639,23 @@ bool llama_model_base::load_tensors(llama_model_loader & ml) {
             pimpl->mappings.emplace_back(std::move(mapping));
         }
     }
+
+    // MoE expert cache: preallocate pools on each CUDA device
+#ifdef GGML_USE_CUDA
+    if (params.moe_expert_cache_slots > 0) {
+        typedef void (*prealloc_fn)(int);
+        auto fn = (prealloc_fn)dlsym(RTLD_DEFAULT, "ggml_backend_cuda_moe_preallocate_pools");
+        if (fn) {
+            int gpu_idx = 0;
+            for (const auto & dev : devices) {
+                if (ggml_backend_dev_type(dev.dev) == GGML_BACKEND_DEVICE_TYPE_GPU) {
+                    fn(gpu_idx);
+                    gpu_idx++;
+                }
+            }
+        }
+    }
+#endif
 
     return true;
 }
@@ -2284,6 +2317,7 @@ llama_model_params llama_model_default_params() {
     llama_model_params result = {
         /*.devices                     =*/ nullptr,
         /*.tensor_buft_overrides       =*/ nullptr,
+        /*.moe_expert_cache_slots      =*/ 0,
         /*.n_gpu_layers                =*/ -1,
         /*.split_mode                  =*/ LLAMA_SPLIT_MODE_LAYER,
         /*.main_gpu                    =*/ 0,

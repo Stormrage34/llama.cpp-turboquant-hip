@@ -321,8 +321,7 @@ static void launch_topk_moe_cuda(ggml_backend_cuda_context & ctx,
                 logits, weights, ids, bias, n_rows, n_expert_used, clamp_val, scale_val, config);
             break;
         default:
-            GGML_ASSERT(false && "fatal error");
-            break;
+            GGML_ABORT("unsupported n_expert=%d in top-k MoE dispatch", n_expert);
     }
 }
 

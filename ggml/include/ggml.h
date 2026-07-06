@@ -429,7 +429,14 @@ extern "C" {
         GGML_TYPE_MXFP4   = 39, // MXFP4 (1 block)
         GGML_TYPE_NVFP4   = 40, // NVFP4 (4 blocks, E4M3 scale)
         GGML_TYPE_Q1_0    = 41,
-        GGML_TYPE_COUNT   = 42,
+        GGML_TYPE_TURBO2_0 = 42,
+        GGML_TYPE_TURBO3_0 = 43,
+        GGML_TYPE_TURBO4_0 = 44,
+        GGML_TYPE_PLANAR3_0 = 45,
+        GGML_TYPE_ISO3_0   = 46,
+        GGML_TYPE_RQ_MSE = 47,
+        GGML_TYPE_RQ_PROD  = 48,
+        GGML_TYPE_COUNT   = 49,
     };
 
     // precision
@@ -757,6 +764,7 @@ extern "C" {
     GGML_API size_t  ggml_element_size(const struct ggml_tensor * tensor);
 
     GGML_API bool    ggml_is_quantized(enum ggml_type type);
+    GGML_API bool    ggml_is_turbo(enum ggml_type type);
 
     // TODO: temporary until model loading of ggml examples is refactored
     GGML_API enum ggml_type ggml_ftype_to_ggml_type(enum ggml_ftype ftype);

@@ -307,6 +307,13 @@ const std::vector<ggml_type> kv_cache_types = {
     GGML_TYPE_IQ4_NL,
     GGML_TYPE_Q5_0,
     GGML_TYPE_Q5_1,
+    GGML_TYPE_TURBO2_0,
+    GGML_TYPE_TURBO3_0,
+    GGML_TYPE_TURBO4_0,
+    GGML_TYPE_PLANAR3_0,
+    GGML_TYPE_ISO3_0,
+    GGML_TYPE_RQ_MSE,
+    GGML_TYPE_RQ_PROD,
 };
 
 static ggml_type kv_cache_type_from_str(const std::string & s) {
@@ -2494,6 +2501,19 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
             }
         }
     ).set_env("LLAMA_ARG_N_GPU_LAYERS"));
+    add_opt(common_arg(
+        {"-mece", "--moe-expert-cache-size"}, "N",
+        "MoE expert cache: number of GPU slot-pool entries per expert tensor (0 = disabled). "
+        "When > 0, expert weights live in CPU pinned memory and are staged to a persistent "
+        "GPU slot pool on first access. Cold experts trigger an H2D copy; hot experts hit "
+        "the cache and skip PCIe traffic.",
+        [](common_params & params, int value) {
+            if (value < 0) {
+                throw std::invalid_argument("value must be >= 0");
+            }
+            params.moe_expert_cache_size = value;
+        }
+    ).set_env("LLAMA_ARG_MOE_EXPERT_CACHE_SIZE"));
     add_opt(common_arg(
         {"-sm", "--split-mode"}, "{none,layer,row,tensor}",
         "how to split the model across multiple GPUs, one of:\n"
