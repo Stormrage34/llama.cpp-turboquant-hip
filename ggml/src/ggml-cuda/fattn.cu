@@ -498,7 +498,9 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
     // 192 satisfies % 64 == 0 but has no vec instance (DKQ != DV); force it onto the MMA path.
     const bool can_use_vector_kernel = Q->ne[0] <= 256 && Q->ne[0] % 64 == 0 && Q->ne[0] != 192 && K->ne[1] % FATTN_KQ_STRIDE == 0;
 
-    // Turbo types have no VEC template instantiations and must use MMA/TILE/WMMA paths.
+        // Turbo types have VEC template instantiations (lines 276-304).
+        // Non-VEC paths (TILE/WMMA/MMA) cannot decompress turbo blocks —
+        // fall back to getrows (grid-level dequant → F16).
     const bool is_turbo_K = ggml_is_turbo(K->type);
     const bool is_turbo_V = ggml_is_turbo(V->type);
 
@@ -524,6 +526,11 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
                 return BEST_FATTN_KERNEL_VEC;
             }
         }
+        // Prefer VEC for turbo V — handles turbo dequant inline,
+        // avoiding the expensive bulk F16 conversion MMA requires.
+        if ((is_turbo_K || is_turbo_V) && can_use_vector_kernel && Q->ne[1] <= 16) {
+            return BEST_FATTN_KERNEL_VEC;
+        }
         return BEST_FATTN_KERNEL_MMA_F16;
     }
 
@@ -537,8 +544,15 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
         if (can_use_vector_kernel && Q->ne[1] * gqa_ratio_eff <= 2 && !is_turbo_K) {
             return BEST_FATTN_KERNEL_VEC;
         }
+        if ((is_turbo_K || is_turbo_V) && can_use_vector_kernel && Q->ne[1] * gqa_ratio_eff <= 16) {
+            return BEST_FATTN_KERNEL_VEC;
+        }
         if (Q->ne[1] * gqa_ratio_eff <= 16) {
             return BEST_FATTN_KERNEL_TILE; // On Volta tensor cores are only faster for sufficiently large matrices.
+        }
+        // For turbo V, use VEC regardless of batch size to avoid MMA bulk dequant path
+        if ((is_turbo_K || is_turbo_V) && can_use_vector_kernel) {
+            return BEST_FATTN_KERNEL_VEC;
         }
         return BEST_FATTN_KERNEL_MMA_F16;
     }

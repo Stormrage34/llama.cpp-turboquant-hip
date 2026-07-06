@@ -505,7 +505,7 @@ static __device__ __forceinline__ float turbo2_dequant_element(
 
 static __device__ __forceinline__ void dequantize_turbo3_0(const void * vx, const int64_t ib, const int iqs, float2 & v) {
     const block_turbo3_0 * x = (const block_turbo3_0 *) vx;
-    const __half2 norm_h2 = __half2half2(x[ib].norm);
+    const float norm = __half2float(x[ib].norm);
     uint8_t low0 = (x[ib].qs[iqs / 4] >> ((iqs % 4) * 2)) & 0x3;
     uint8_t hi0  = (x[ib].signs[iqs / 8] >> (iqs % 8)) & 0x1;
     uint8_t idx0 = low0 | (hi0 << 2);
@@ -513,34 +513,28 @@ static __device__ __forceinline__ void dequantize_turbo3_0(const void * vx, cons
     uint8_t low1 = (x[ib].qs[iqs1 / 4] >> ((iqs1 % 4) * 2)) & 0x3;
     uint8_t hi1  = (x[ib].signs[iqs1 / 8] >> (iqs1 % 8)) & 0x1;
     uint8_t idx1 = low1 | (hi1 << 2);
-    const __half2 cent_h2 = make_half2(__float2half(TURBO_CENTROIDS_3BIT[idx0]), __float2half(TURBO_CENTROIDS_3BIT[idx1]));
-    const __half2 prod    = __hmul2(norm_h2, cent_h2);
-    v.x = __half2float(prod.x);
-    v.y = __half2float(prod.y);
+    v.x = TURBO_CENTROIDS_3BIT[idx0] * norm;
+    v.y = TURBO_CENTROIDS_3BIT[idx1] * norm;
 }
 
 static __device__ __forceinline__ void dequantize_turbo4_0(const void * vx, const int64_t ib, const int iqs, float2 & v) {
     const block_turbo4_0 * x = (const block_turbo4_0 *) vx;
-    const __half2 norm_h2 = __half2half2(x[ib].norm);
+    const float norm = __half2float(x[ib].norm);
     uint8_t idx0 = (x[ib].qs[iqs / 2] >> ((iqs % 2) * 4)) & 0xF;
     int iqs1 = iqs + 1;
     uint8_t idx1 = (x[ib].qs[iqs1 / 2] >> ((iqs1 % 2) * 4)) & 0xF;
-    const __half2 cent_h2 = make_half2(__float2half(TURBO_CENTROIDS_4BIT[idx0]), __float2half(TURBO_CENTROIDS_4BIT[idx1]));
-    const __half2 prod    = __hmul2(norm_h2, cent_h2);
-    v.x = __half2float(prod.x);
-    v.y = __half2float(prod.y);
+    v.x = TURBO_CENTROIDS_4BIT[idx0] * norm;
+    v.y = TURBO_CENTROIDS_4BIT[idx1] * norm;
 }
 
 static __device__ __forceinline__ void dequantize_turbo2_0(const void * vx, const int64_t ib, const int iqs, float2 & v) {
     const block_turbo2_0 * x = (const block_turbo2_0 *) vx;
-    const __half2 norm_h2 = __half2half2(x[ib].norm);
+    const float norm = __half2float(x[ib].norm);
     uint8_t idx0 = (x[ib].qs[iqs / 4] >> ((iqs % 4) * 2)) & 0x3;
     int iqs1 = iqs + 1;
     uint8_t idx1 = (x[ib].qs[iqs1 / 4] >> ((iqs1 % 4) * 2)) & 0x3;
-    const __half2 cent_h2 = make_half2(__float2half(TURBO_CENTROIDS_2BIT[idx0]), __float2half(TURBO_CENTROIDS_2BIT[idx1]));
-    const __half2 prod    = __hmul2(norm_h2, cent_h2);
-    v.x = __half2float(prod.x);
-    v.y = __half2float(prod.y);
+    v.x = TURBO_CENTROIDS_2BIT[idx0] * norm;
+    v.y = TURBO_CENTROIDS_2BIT[idx1] * norm;
 }
 
 // ============================================================================

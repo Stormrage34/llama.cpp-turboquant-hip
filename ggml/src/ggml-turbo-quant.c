@@ -6,6 +6,10 @@
  * GGML_TYPE_TURBO4_0 (4-bit) for use as --cache-type-k turboN in llama-server.
  */
 
+// NOTE: TURBO4_USE_4BIT=1 uses N(0,1) centroids with WHT rotation — incompatible
+// with the GPU KV-cache path (N(0,1/128) centroids, no rotation). The CPU quantize
+// is only used for initial model weight quantization; turbo4 is a KV-cache type
+// populated at runtime by the GPU set-rows kernel, so this mismatch is benign.
 #define TURBO4_USE_4BIT 1
 
 #include "ggml-quants.h"
