@@ -1,0 +1,12 @@
+{
+  "jobs": [
+    {
+      "pmc": [
+        "MeanOccupancyPerCU",
+        "WavesPerCU",
+        "ALUStalledByLDS",
+        "MemUnitBusy"
+      ]
+    }
+  ]
+}

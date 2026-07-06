@@ -1,0 +1,31 @@
+{
+  "jobs": [
+    {
+      "pmc": [
+        "ALUStalledByLDS",
+        "GL2C_EA_RDREQ_128B",
+        "GL2C_EA_RDREQ_32B",
+        "GL2C_EA_RDREQ_64B",
+        "GL2C_EA_RDREQ_96B",
+        "GL2C_HIT",
+        "GL2C_MISS",
+        "LDSBankConflict",
+        "MeanOccupancyPerCU",
+        "MemUnitBusy",
+        "SALUInsts",
+        "SQ_INSTS_SALU",
+        "SQ_INSTS_VALU",
+        "SQ_INST_CYCLES_VMEM",
+        "SQ_LEVEL_WAVES",
+        "SQ_WAIT_ANY",
+        "SQ_WAIT_INST_ANY",
+        "SQ_WAIT_INST_LDS",
+        "VALUInsts",
+        "WAVE_DEP_WAIT",
+        "WAVE_ISSUE_WAIT",
+        "WRITE_SIZE",
+        "WriteUnitStalled"
+      ]
+    }
+  ]
+}
