@@ -432,6 +432,7 @@ struct ggml_cuda_pool_leg : public ggml_cuda_pool {
             ggml_cuda_buffer& b = buffer_pool[ibest];
             void * ptr = b.ptr;
             *actual_size = b.size;
+            pool_size -= b.size;
             b.ptr = nullptr;
             b.size = 0;
             return ptr;
@@ -455,7 +456,6 @@ struct ggml_cuda_pool_leg : public ggml_cuda_pool {
         }
         CUDA_CHECK(err);
         *actual_size = look_ahead_size;
-        pool_size += look_ahead_size;
 #ifdef DEBUG_CUDA_MALLOC
         GGML_LOG_INFO("%s[%d]: %d buffers, max_size = %u MB, pool_size = %u MB, requested %u MB\n", __func__, device, nnz,
                            (uint32_t)(max_size / 1024 / 1024), (uint32_t)(pool_size / 1024 / 1024), (uint32_t)(size / 1024 / 1024));
@@ -482,16 +482,13 @@ struct ggml_cuda_pool_leg : public ggml_cuda_pool {
             return;
         }
 
-        // LRU eviction: if pool exceeds 90% of device memory, free largest unused buffers down to 70%.
+        // LRU eviction: if free GPU memory drops below 10%, free largest cached buffers.
         size_t total_mem = 0, free_mem = 0;
         ggml_cuda_set_device(device);
         CUDA_CHECK(cudaMemGetInfo(&free_mem, &total_mem));
-        const size_t evict_threshold   = total_mem * 9 / 10;
-        const size_t target_threshold  = total_mem * 7 / 10;
 
-        if (pool_size > evict_threshold) {
+        if (free_mem < total_mem / 10 && pool_size > 0) {
             // Collect indices of buffers currently in the pool.
-            // We evict from largest to smallest, keeping at least 1 buffer.
             int indices[MAX_BUFFERS];
             int count = 0;
             for (int i = 0; i < MAX_BUFFERS; ++i) {
@@ -509,20 +506,22 @@ struct ggml_cuda_pool_leg : public ggml_cuda_pool {
                 }
                 std::swap(indices[i], indices[max_idx]);
             }
-            // Evict largest first, keep at least 1 buffer.
-            for (int k = 0; k < count - 1 && pool_size > target_threshold; ++k) {
+            // Evict largest first, keep at least 1 buffer, until free > 20%.
+            for (int k = 0; k < count - 1; ++k) {
                 int idx = indices[k];
                 ggml_cuda_set_device(device);
                 CUDA_CHECK(cudaFree(buffer_pool[idx].ptr));
                 pool_size -= buffer_pool[idx].size;
                 buffer_pool[idx].ptr = nullptr;
                 buffer_pool[idx].size = 0;
+                CUDA_CHECK(cudaMemGetInfo(&free_mem, &total_mem));
+                if (free_mem >= total_mem / 5) {
+                    break;
+                }
             }
         }
 
-        if (pool_size + size > pool_size) { // avoid overflow
-            pool_size += size;
-        }
+        pool_size += size;
     }
 };
 
