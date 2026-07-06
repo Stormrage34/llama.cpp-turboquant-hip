@@ -6,17 +6,24 @@
 #include "fattn-wmma-f16.cuh"
 #include "fattn.cuh"
 
+static bool fattn_strides_aligned_16(const ggml_tensor * Q, const ggml_tensor * K, const ggml_tensor * V, const ggml_tensor * mask) {
+    for (const ggml_tensor * t : {Q, K, V, mask}) {
+        if (t == nullptr || ggml_is_quantized(t->type)) {
+            continue;
+        }
+        for (size_t i = 1; i < GGML_MAX_DIMS; ++i) {
+            if (t->nb[i] % 16 != 0) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 template <int DKQ, int DV, int ncols2>
 static void ggml_cuda_flash_attn_ext_mma_f16_switch_ncols1(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
     const int cc = ggml_cuda_info().devices[ggml_cuda_get_device()].cc;
     const ggml_tensor * Q = dst->src[0];
-
-    if constexpr (ncols2 <= 8) {
-        if (turing_mma_available(cc) && Q->ne[1] <= 8/ncols2) {
-            ggml_cuda_flash_attn_ext_mma_f16_case<DKQ, DV, 8/ncols2, ncols2>(ctx, dst);
-            return;
-        }
-    }
 
     if constexpr (ncols2 <= 16) {
         if (Q->ne[1] <= 16/ncols2) {
@@ -44,22 +51,13 @@ static void ggml_cuda_flash_attn_ext_mma_f16_switch_ncols2(ggml_backend_cuda_con
     const ggml_tensor * mask = dst->src[3];
 
     float max_bias = 0.0f;
+    GGML_ASSERT(sizeof(KQV->op_params) >= 2 * (int)sizeof(float));
     memcpy(&max_bias, (const float *) KQV->op_params + 1, sizeof(float));
 
     // Edge cases like no mask, ALiBi, unpadded K/V, or misaligned addresses for large data transfers
     //     are put into the template specialization without GQA optimizations.
-    bool use_gqa_opt = mask && max_bias == 0.0f && K->ne[1] % FATTN_KQ_STRIDE == 0;
-    for (const ggml_tensor * t : {Q, K, V, mask}) {
-        if (t == nullptr || ggml_is_quantized(t->type)) {
-            continue;
-        }
-        for (size_t i = 1; i < GGML_MAX_DIMS; ++i) {
-            if (t->nb[i] % 16 != 0) {
-                use_gqa_opt = false;
-                break;
-            }
-        }
-    }
+    bool use_gqa_opt = mask && max_bias == 0.0f && K->ne[1] % FATTN_KQ_STRIDE == 0
+                       && fattn_strides_aligned_16(Q, K, V, mask);
 
     GGML_ASSERT(Q->ne[2] % K->ne[2] == 0);
     const int gqa_ratio = Q->ne[2] / K->ne[2];
@@ -89,10 +87,13 @@ static void ggml_cuda_flash_attn_ext_mma_f16_switch_ncols2(ggml_backend_cuda_con
         }
     }
 
-    if constexpr (DKQ <= 256) {
-        ggml_cuda_flash_attn_ext_mma_f16_switch_ncols1<DKQ, DV, 1>(ctx, dst);
-    } else {
-        GGML_ABORT("fatal error");
+    if (!use_gqa_opt) {
+        if constexpr (DKQ <= 256) {
+            ggml_cuda_flash_attn_ext_mma_f16_switch_ncols1<DKQ, DV, 1>(ctx, dst);
+        } else {
+            GGML_ABORT("fatal error");
+        }
+        return;
     }
 
     if (use_gqa_opt && gqa_ratio > 4) {
@@ -109,15 +110,21 @@ static void ggml_cuda_flash_attn_ext_mma_f16_switch_ncols2(ggml_backend_cuda_con
         ggml_cuda_flash_attn_ext_mma_f16_switch_ncols1<DKQ, DV, 2>(ctx, dst);
         return;
     }
+
+    // use_gqa_opt with gqa_ratio <= 1 (standard MHA with aligned strides):
+    // none of the GQA-optimized branches matched, fall back to single-head
+    if constexpr (DKQ <= 256) {
+        ggml_cuda_flash_attn_ext_mma_f16_switch_ncols1<DKQ, DV, 1>(ctx, dst);
+    } else {
+        GGML_ABORT("fatal error");
+    }
 }
 
 static void ggml_cuda_flash_attn_ext_mma_f16(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
     const int cc = ggml_cuda_info().devices[ggml_cuda_get_device()].cc;
-    const ggml_tensor * KQV  = dst;
-    const ggml_tensor * Q    = dst->src[0];
-    const ggml_tensor * K    = dst->src[1];
-    const ggml_tensor * V    = dst->src[2];
-    const ggml_tensor * mask = dst->src[3];
+    const ggml_tensor * Q = dst->src[0];
+    const ggml_tensor * K = dst->src[1];
+    const ggml_tensor * V = dst->src[2];
 
     switch (Q->ne[0]) {
         case 64:
@@ -144,8 +151,9 @@ static void ggml_cuda_flash_attn_ext_mma_f16(ggml_backend_cuda_context & ctx, gg
             // MiMo-V2.5 / V2.5-Pro / V2-Flash: gqa_ratio is 8 (SWA) or 16 (full attn)
             GGML_ASSERT(V->ne[0] == 128);
             float max_bias = 0.0f;
-            memcpy(&max_bias, (const float *) KQV->op_params + 1, sizeof(float));
-            const bool use_gqa_opt = mask && max_bias == 0.0f;
+            GGML_ASSERT(sizeof(dst->op_params) >= 2 * (int)sizeof(float));
+            memcpy(&max_bias, (const float *) dst->op_params + 1, sizeof(float));
+            const bool use_gqa_opt = max_bias == 0.0f;
             GGML_ASSERT(use_gqa_opt);
             GGML_ASSERT(Q->ne[2] % K->ne[2] == 0);
             const int gqa_ratio = Q->ne[2] / K->ne[2];
@@ -165,9 +173,10 @@ static void ggml_cuda_flash_attn_ext_mma_f16(ggml_backend_cuda_context & ctx, gg
             GGML_ASSERT(V->ne[0] == 256);
             {
                 float max_bias = 0.0f;
-                memcpy(&max_bias, (const float *) KQV->op_params + 1, sizeof(float));
+                GGML_ASSERT(sizeof(dst->op_params) >= 2 * (int)sizeof(float));
+                memcpy(&max_bias, (const float *) dst->op_params + 1, sizeof(float));
 
-                const bool use_gqa_opt = mask && max_bias == 0.0f;
+                const bool use_gqa_opt = max_bias == 0.0f;
                 GGML_ASSERT(use_gqa_opt);
                 GGML_ASSERT(Q->ne[2] % K->ne[2] == 0);
                 const int gqa_ratio = Q->ne[2] / K->ne[2];
@@ -184,9 +193,10 @@ static void ggml_cuda_flash_attn_ext_mma_f16(ggml_backend_cuda_context & ctx, gg
             // For Deepseek, go straight to the ncols1 switch to avoid compiling unnecessary kernels.
             GGML_ASSERT(V->ne[0] == 512);
             float max_bias = 0.0f;
-            memcpy(&max_bias, (const float *) KQV->op_params + 1, sizeof(float));
+            GGML_ASSERT(sizeof(dst->op_params) >= 2 * (int)sizeof(float));
+            memcpy(&max_bias, (const float *) dst->op_params + 1, sizeof(float));
 
-            const bool use_gqa_opt = mask && max_bias == 0.0f;
+            const bool use_gqa_opt = max_bias == 0.0f;
             GGML_ASSERT(use_gqa_opt);
 
             GGML_ASSERT(Q->ne[2] % K->ne[2] == 0);
@@ -356,22 +366,13 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
     GGML_ASSERT(Q->ne[2] % K->ne[2] == 0);
 
     float max_bias = 0.0f;
+    GGML_ASSERT(sizeof(KQV->op_params) >= 2 * (int)sizeof(float));
     memcpy(&max_bias, (const float *) KQV->op_params + 1, sizeof(float));
 
     // The effective batch size for the kernel can be increased by gqa_ratio.
     // The kernel versions without this optimization are also used for ALiBi, if there is no mask, or if the KV cache is not padded,
-    bool gqa_opt_applies = gqa_ratio >= 2 && mask && max_bias == 0.0f && K->ne[1] % FATTN_KQ_STRIDE == 0;
-    for (const ggml_tensor * t : {Q, K, V, mask}) {
-        if (t == nullptr || ggml_is_quantized(t->type)) {
-            continue;
-        }
-        for (size_t i = 1; i < GGML_MAX_DIMS; ++i) {
-            if (t->nb[i] % 16 != 0) {
-                gqa_opt_applies = false;
-                break;
-            }
-        }
-    }
+    bool gqa_opt_applies = gqa_ratio >= 2 && mask && max_bias == 0.0f && K->ne[1] % FATTN_KQ_STRIDE == 0
+                           && fattn_strides_aligned_16(Q, K, V, mask);
 
     const int cc = ggml_cuda_info().devices[device].cc;
 
