@@ -1,0 +1,81 @@
+{
+  "timestamp": "2026-07-02 04:30:15",
+  "variants": [
+    {
+      "name": "baseline",
+      "description": "Standard build, no turbo FA instances. Baseline.",
+      "hipfire_ref": "Phase 0 baseline",
+      "dense": {
+        "512": {
+          "pp": 1333.331516,
+          "tg": 54.577154,
+          "passes": true
+        }
+      },
+      "moe": {
+        "512": {
+          "pp": 2589.681908,
+          "tg": 101.828466,
+          "passes": true
+        }
+      }
+    },
+    {
+      "name": "hipgraph",
+      "description": "hipGraph capture enabled. hipfire #300 F1: +10-20%.",
+      "hipfire_ref": "#300 F1: hipGraph for prefill (+10-20%)",
+      "dense": {
+        "512": {
+          "pp": 1332.097114,
+          "tg": 54.783509,
+          "passes": true
+        }
+      },
+      "moe": {
+        "512": {
+          "pp": 2609.344753,
+          "tg": 102.874338,
+          "passes": true
+        }
+      }
+    },
+    {
+      "name": "fa_turbo",
+      "description": "FA instances for all quant types (turbo/planar/iso).",
+      "hipfire_ref": "N/A \u2014 llama.cpp specific",
+      "dense": {
+        "512": {
+          "pp": 1335.15412,
+          "tg": 55.01411,
+          "passes": true
+        }
+      },
+      "moe": {
+        "512": {
+          "pp": 2605.464114,
+          "tg": 103.482928,
+          "passes": true
+        }
+      }
+    },
+    {
+      "name": "fa_graphs",
+      "description": "FA + hipGraph combined.",
+      "hipfire_ref": "Combined: #300 F1 + turbo FA",
+      "dense": {
+        "512": {
+          "pp": 1333.073988,
+          "tg": 54.504765,
+          "passes": true
+        }
+      },
+      "moe": {
+        "512": {
+          "pp": 2586.549036,
+          "tg": 102.173078,
+          "passes": true
+        }
+      }
+    }
+  ]
+}

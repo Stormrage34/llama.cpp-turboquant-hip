@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+
 // TurboQuant InnerQ per-channel equalization — cross-TU shared state
 // The host-side state lives in turbo-innerq.cu; device-side state is per-TU
 // in turbo-quant.cuh (only set-rows.cu needs device access).
@@ -21,7 +23,7 @@
 #endif
 
 // Host-side shared state (defined in turbo-innerq.cu)
-TURBO_IQ_API extern bool  g_innerq_finalized;
+TURBO_IQ_API extern std::atomic<bool> g_innerq_finalized;
 TURBO_IQ_API extern float g_innerq_scale_inv_host[INNERQ_MAX_CHANNELS];
 
 // Called from set-rows.cu after InnerQ finalization to publish scale_inv

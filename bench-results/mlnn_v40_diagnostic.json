@@ -1,0 +1,46 @@
+{
+  "timestamp": "2026-07-06",
+  "mode": "quick",
+  "occupancy_analysis": {
+    "DKQ=40_DV=40": {
+      "calculated_occupancy_pct": 25.0,
+      "limiting_factor": "Compiler Launch Gate"
+    },
+    "DKQ=64_DV=64": {
+      "calculated_occupancy_pct": 100.0,
+      "limiting_factor": "Hardware Saturation (Max Waves Reached)"
+    },
+    "DKQ=72_DV=72": {
+      "calculated_occupancy_pct": 25.0,
+      "limiting_factor": "Compiler Launch Gate"
+    },
+    "DKQ=80_DV=80": {
+      "calculated_occupancy_pct": 25.0,
+      "limiting_factor": "Compiler Launch Gate"
+    },
+    "DKQ=96_DV=96": {
+      "calculated_occupancy_pct": 25.0,
+      "limiting_factor": "Compiler Launch Gate"
+    }
+  },
+  "memory_analysis": {
+    "qkv_vram_working_set_mb": 17.94,
+    "qkv_lds_working_set_kb": 1.5,
+    "scores_matrix_mb": 47851.56,
+    "lds_hit_rate_estimate": 100.0,
+    "l1_hit_rate_estimate": 2.07,
+    "vram_throughput": {
+      "bytes_per_token": 680.0,
+      "vram_throughput_mb_s": 0.4319,
+      "peak_utilization_pct": 8.8e-05
+    }
+  },
+  "validation": {
+    "simulated_occupancy": 100.0,
+    "measured_occupancy": 12.5,
+    "variance": 87.5,
+    "tolerance": 5.0,
+    "is_valid": false,
+    "recommendation": "FAIL - Simulation needs calibration"
+  }
+}

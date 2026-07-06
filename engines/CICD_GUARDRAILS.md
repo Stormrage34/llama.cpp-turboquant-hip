@@ -21,22 +21,22 @@ This document defines the operational constraints and best practices for running
 ```bash
 # FROM REPOSITORY ROOT
 cd /path/to/llama.cpp
-python3 engines/mlnn.py --mode kernels
+python3 engines/run_diagnostics.py --mode quick
 
 # OR from engines directory directly
 cd /path/to/llama.cpp/engines
-python3 mlnn.py --mode kernels
+python3 run_diagnostics.py --mode quick
 ```
 
 **Incorrect Usage (will fail):**
 ```bash
 # WRONG - relative path resolution breaks
 cd /tmp
-python3 /path/to/llama.cpp/engines/mlnn.py --mode kernels
+python3 /path/to/llama.cpp/engines/run_diagnostics.py --mode quick
 
 # WRONG - symlink may resolve incorrectly
-ln -s /path/to/llama.cpp/engines/mlnn.py /usr/local/bin/mlnn
-mlnn --mode kernels
+ln -s /path/to/llama.cpp/engines/run_diagnostics.py /usr/local/bin/mlnn
+mlnn --mode quick
 ```
 
 ### 2. sys.path Mutation Warning
@@ -87,7 +87,7 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
           # CRITICAL: Must run from repository root
-          python3 engines/mlnn.py --mode kernels --quick
+          python3 engines/run_diagnostics.py --mode quick
 ```
 
 ### Local CI Testing
@@ -95,13 +95,13 @@ jobs:
 ```bash
 # Test from repository root (CORRECT)
 cd /path/to/llama.cpp
-python3 engines/mlnn.py --mode kernels --quick
+python3 engines/run_diagnostics.py --mode quick
 
 # Test with hardware telemetry
 rocprofv3 --hip-trace --stat -d ./telemetry_output/ \
   ./build/bin/llama-bench -m model.gguf -n 1000
 
-python3 engines/mlnn_v40_runner.py --profile-dir telemetry_output
+python3 engines/run_diagnostics.py --mode all --profile-dir telemetry_output
 ```
 
 ---
@@ -125,11 +125,11 @@ When RDNA2 simulation modules fail to load:
 
 ### Validation Gate (Hard Exit)
 
-When `--mode kernels` is requested without accurate simulation:
+When `--mode quick` or `--mode all` is requested without accurate simulation:
 
 ```
 [FATAL] RDNA2 accurate simulation modules failed to load.
-[FATAL] Required for --mode kernels with physics-accurate occupancy/memory models.
+[FATAL] Required for --mode quick/all with physics-accurate occupancy/memory models.
 [FATAL] Run with --allow-fallback to override with legacy v4.0 metrics (NOT RECOMMENDED).
 ```
 
@@ -141,7 +141,7 @@ When `--mode kernels` is requested without accurate simulation:
 ### Explicit Fallback Override
 
 ```bash
-python3 engines/mlnn.py --mode kernels --allow-fallback
+python3 engines/run_diagnostics.py --mode quick --allow-fallback
 ```
 
 **Output:**
@@ -185,16 +185,18 @@ python3 engines/mlnn.py --mode kernels --allow-fallback
 
 ## Module Dependencies
 
-### Required Modules (for --mode kernels)
+### Required Modules (for --mode quick / --mode all)
 
-- `rdna2_occupancy_solver.py` - Physics-accurate occupancy calculation
+All modules are imported by the master entry point `run_diagnostics.py`:
+
+- `rdna2_occupancy_solver.py` - Physics-accurate occupancy calculation (SIMDS_PER_CU=4)
 - `rdna2_memory_simulator.py` - Multi-tier memory hierarchy simulation
-- `compiler_telemetry_bridge.py` - Hardware counter telemetry parser
+- `compiler_telemetry_bridge.py` - Hardware counter telemetry parser (duration-weighted averaging)
 
-### Optional Modules
+### Imported Modules (via run_diagnostics.py)
 
-- `master_debug_turbo.py` - Turbo3 quantization validation (standalone)
-- `mlnn_v40_runner.py` - Standalone diagnostic runner
+- `master_debug_turbo.py` - Turbo3 quantization validation suite (12 tests)
+- `mlnn.py` - Long-context attention simulation pipeline
 
 ---
 
@@ -234,7 +236,7 @@ include = ["engines*"]
 ## Contact & Support
 
 For issues with MNLN v4.1 simulation engines, refer to:
-- `engines/mlnn.py` - Main entry point
-- `engines/rdna2_occupancy_solver.py` - Occupancy calculations
+- `engines/run_diagnostics.py` - Master entry point (unified diagnostic runner)
+- `engines/rdna2_occupancy_solver.py` - Occupancy calculations (SIMDS_PER_CU=4)
 - `engines/rdna2_memory_simulator.py` - Memory simulation
-- `engines/compiler_telemetry_bridge.py` - Hardware telemetry
+- `engines/compiler_telemetry_bridge.py` - Hardware telemetry (duration-weighted averaging)

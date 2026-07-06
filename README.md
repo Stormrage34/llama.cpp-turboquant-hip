@@ -524,6 +524,65 @@ To learn more about model quantization, [read this documentation](tools/quantize
 - Make sure to read this: [Inference at the edge](https://github.com/ggml-org/llama.cpp/discussions/205)
 - A bit of backstory for those who are interested: [Changelog podcast](https://changelog.com/podcast/532)
 
+## Engine Suite (`engines/`)
+
+Diagnostic and simulation tools for RDNA 2 microarchitectural analysis, performance profiling, and turbo quantization validation. The master entry point is `run_diagnostics.py`.
+
+```sh
+# Quick diagnostics (no GPU required)
+python3 engines/run_diagnostics.py --mode quick
+
+# Turbo3 quantization validation suite (12 tests)
+python3 engines/run_diagnostics.py --mode turbo-validate
+
+# Long-context attention simulation pipeline
+python3 engines/run_diagnostics.py --mode long-context
+
+# Turbo vs upstream reference comparison
+python3 engines/run_diagnostics.py --mode compare-upstream
+
+# Run everything; optionally feed rocprofv3 telemetry
+python3 engines/run_diagnostics.py --mode all --profile-dir telemetry_output/
+```
+
+- `--mode quick` — imports RDNA2OccupancySolver, RDNA2MemoryHardwareSimulator, CompilerTelemetryBridge for no-GPU-required diagnostics
+- `--mode turbo-validate` — runs the 12-test turbo3 quantization validation suite
+- `--mode long-context` — runs the long-context attention simulation pipeline
+- `--mode compare-upstream` — turbo vs upstream reference comparison
+- `--mode all` — runs everything; pass `--profile-dir <rocprofv3-output>` to include hardware telemetry
+
+Structured JSON output is saved to `bench-results/diagnostic_*.json`.
+
+#### Engine architecture
+
+```
+engines/run_diagnostics.py — master entry point
+├── imports → rdna2_occupancy_solver.py   (VGPR/LDS occupancy)
+├── imports → rdna2_memory_simulator.py   (cache hierarchy, VRAM BW)
+├── imports → compiler_telemetry_bridge.py (rocprofv3 parsing)
+├── imports → master_debug_turbo.py       (12-test suite via importlib)
+├── imports → mlnn.py                     (long-context pipeline)
+└── outputs → bench-results/diagnostic_*.json
+```
+
+#### Recent fixes
+
+- **Engine scripts unified** — `run_diagnostics.py` replaces standalone runners (`mlnn_v40_runner.py`, `master_debug_turbo.py`) as the single entry point for all diagnostic modes.
+- **RDNA2 occupancy corrected** — `SIMDS_PER_CU` fixed from 2 to 4 (RDNA 2 has 4 SIMD32 per CU). All occupancy calculations now reflect correct hardware specs.
+- **Telemetry averaging** — Compiler telemetry bridge now uses duration-weighted averaging across multi-kernel traces instead of overwriting with last kernel value.
+- **Server PII leak** — Request/response bodies are no longer logged unconditionally. Added `log_request_bodies = false` to `common_params`; only logs when explicitly enabled.
+- **Grammar dangling pointer** — `llama_grammar` constructor added; copy constructor and copy assignment operator deleted. Prevents shallow copies where `stacks` raw pointers dangle. Both init sites converted to constructor calls.
+- **CUDA P2P fallback** — `ggml_cuda_Memcpy2DPeerAsync` return type changed from `cudaError_t` to `bool`. Falls back to host-staged copy when P2P is unsupported instead of aborting.
+- **CUDA hardcoded stride** — `MUL_MAT_SRC1_COL_STRIDE` changed from magic `128` to `sizeof(block_q8_1)`.
+- **CUDA pool eviction** — Added LRU eviction when pool exceeds 90% of device memory, freeing largest buffers down to 70%.
+- **CUDA VMM cleanup** — Changed `CU_CHECK` to best-effort logging on unmap/address-free failures. HIP path continues unmap loop even if one fails.
+- **CUDA destructor null guard** — Added `nullptr` check on `dev_ptr` in `~ggml_backend_cuda_buffer_context()` to prevent crash if CUDA runtime is already unloaded.
+- **Backend sync removed** — Removed redundant `ggml_backend_synchronize(input_backend)` from async copy fallback; blocking `ggml_backend_tensor_copy` inherently synchronizes.
+- **topk-moe diagnostics** — Changed `default:` case from `GGML_ASSERT(false && "fatal error")` to `GGML_ABORT("unsupported n_expert=%d", n_expert)` for clear diagnostics.
+- **WebGPU bounds check** — Added `GGML_ASSERT` guards for offset/size > UINT32_MAX before truncating to `uint32_t` for GPU memset params.
+- **kleidiai types** — Changed `nchunk` and `current_chunk` from `int` to `size_t`, eliminating fragile truncation.
+- **ops.cpp memcpy helper** — Centralized 6 raw `memcpy` float extractions from `op_params` into a typed `op_param_float()` helper.
+
 ## Other documentation
 
 - [cli](tools/cli/README.md)

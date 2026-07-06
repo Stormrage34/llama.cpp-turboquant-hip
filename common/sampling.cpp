@@ -39,14 +39,14 @@ struct ring_buffer {
         if (sz == 0) {
             throw std::runtime_error("ring buffer is empty");
         }
-        return data[pos];
+        return data[(pos - 1 + capacity) % capacity];
     }
 
     const T & back() const {
         if (sz == 0) {
             throw std::runtime_error("ring buffer is empty");
         }
-        return data[pos];
+        return data[(pos - 1 + capacity) % capacity];
     }
 
     void push_back(const T & value) {

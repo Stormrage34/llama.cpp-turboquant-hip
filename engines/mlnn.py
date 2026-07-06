@@ -204,6 +204,11 @@ LDS_DOUBLE_BUFFER_SPEEDUP = 0.85
 PERSISTENT_KERNELS = True
 KERNEL_LAUNCH_LATENCY_CYCLES = 500
 
+# Default build does NOT define GGML_CUDA_FA_ALL_QUANTS.
+# Only F16, BF16, Q4_0, Q8_0 can use VEC FA (fattn.cu:420-430).
+# All other types (including turbo) get BEST_FATTN_KERNEL_NONE and fall back to CPU.
+GGML_CUDA_FA_ALL_QUANTS = False
+
 # Block-size speedup table (from research exp1-exp4)
 TURBO_GROUP_SPEEDUP = {
     32:  1.95,   # block-32 WHT: 2747 vs 1411 tok/s
@@ -2056,14 +2061,17 @@ QUANT_BYTES_PER_ELEMENT = {
     "turbo2":            0.3125,
     "planar3":           0.375,
     "iso3":              0.375,
-    "rotor":             1.015625,  # 130 bytes/128 el: fp16 norm (2) + 16x8 uint8 indices (128)
+    "rq_mse":            1.015625,  # RQ_MSE: 130.0 bytes / 128 elements
+    "rq_prod":           1.015625,  # RQ_PROD: 130.0 bytes / 128 elements, QJL residual
     "symmetric_q8_0":    1.0625,
     "asymmetric_q8_0":   1.125,
+    "mxfp4":     0.5,     # MXFP4: 1 block scale per element
+    "nvfp4":     1.5,     # NVFP4: 4 blocks with E4M3 scale per element (approximate)
 }
 
 # Types with CUDA set-rows kernels (set-rows.cu: k_set_rows_turbo3, k_set_rows_turbo4).
-# turbo2_0, planar3_0, iso3_0, rotor_0 have no CUDA set-rows kernel — they fall
-# back to the generic copy path which won't produce correct turbo blocks.
+# turbo2_0, planar3_0, iso3_0, rq_mse, rq_prod have no CUDA set-rows kernel —
+# they fall back to the generic copy path which won't produce correct blocks.
 # Simulation still works for research but these types cannot be used on GPU.
 CUDA_SET_ROWS_SUPPORTED = {"turbo3_0", "turbo4", "symmetric_q8_0", "asymmetric_q8_0"}
 
@@ -2099,10 +2107,10 @@ def _quantize_kv_head(values, quant_type, is_k=True):
         return q8_quantize_vector(values) if quant_type == "symmetric_q8_0" else asymmetric_q8_quantize_vector(values)
     
     # For turbo types, decompose into 128-element groups (GROUP_SIZE)
-    # turbo3_0, turbo4, planar3, iso3, rotor all work on GROUP_SIZE=128 chunks
+    # turbo3_0, turbo4, planar3, iso3, rq_mse, rq_prod all work on GROUP_SIZE=128 chunks
     # turbo2 works on QK_TURBO2=32 chunks
     
-    if quant_type in ("turbo3_0", "turbo4", "planar3", "iso3", "rotor"):
+    if quant_type in ("turbo3_0", "turbo4", "planar3", "iso3", "rq_mse", "rq_prod"):
         n_groups = vec_len // GROUP_SIZE
         assert vec_len % GROUP_SIZE == 0, f"{quant_type} requires head_dim multiple of {GROUP_SIZE}, got {vec_len}"
         recon = np.zeros(vec_len, dtype=np.float32)
@@ -2121,7 +2129,7 @@ def _quantize_kv_head(values, quant_type, is_k=True):
             elif quant_type == "iso3":
                 norm, qs, signs = iso3_quantize_block(chunk)
                 recon[off:off + GROUP_SIZE] = iso3_dequantize_block(norm, qs, signs)
-            elif quant_type == "rotor":
+            elif quant_type in ("rq_mse", "rq_prod"):
                 norm, qs, signs = rotor_quantize_block(chunk)
                 recon[off:off + GROUP_SIZE] = rotor_dequantize_block(norm, qs, signs)
         return recon
@@ -2208,7 +2216,7 @@ def simulate_long_context_attention(
         # VRAM overflow check
         if kv_cache_mb_turbo > GPU_MEMORY_SIZE_GB * 1024:
             print(f"  ⚠ VRAM OVERFLOW: {kv_cache_mb_turbo:.0f} MB exceeds {GPU_MEMORY_SIZE_GB} GB GPU VRAM.")
-            print(f"    This quantized KV cache cannot fit on the GPU. FA path will fall back to CPU.")
+            print(f"    WARNING: KV cache exceeds VRAM. GPU throughput estimates assume ideal fit.")
     
     # Simulate prompt processing phase (first iteration)
     print(f"\n  --- Prompt Processing Phase ---")
@@ -2498,7 +2506,7 @@ def simulate_all_quant_comparison(
     if not model_config.supports_turbo:
         # head_dim < GROUP_SIZE (e.g. lfm2 with head_dim=64): turbo types require
         # at least GROUP_SIZE=128 elements per group for WHT-based quantization
-        turbo_types = [qt for qt in quant_types if qt.startswith("turbo") or qt in ("planar3", "iso3", "rotor")]
+        turbo_types = [qt for qt in quant_types if qt.startswith("turbo") or qt in ("planar3", "iso3", "rq_mse", "rq_prod")]
         quant_types = [qt for qt in quant_types if qt not in turbo_types]
         print(f"  head_dim={model_config.head_dim} < GROUP_SIZE={GROUP_SIZE}: excluded {len(turbo_types)} WHT-based types")
     
@@ -2530,9 +2538,9 @@ def simulate_all_quant_comparison(
     
     print(f"  {'-'*78}")
     
-    # Rotor note: surface structural zero limitation
-    if "rotor" in all_results:
-        print(f"\n  ⚠ rotor: 62.5% of stored components are structural zeros (Cl(3,0) grade-aware")
+    # RQ note: surface structural zero limitation (Rotor subgroup routing)
+    if "rq_mse" in all_results or "rq_prod" in all_results:
+        print(f"\n  ⚠ rq_mse, rq_prod: 62.5% of stored components are structural zeros (Cl(3,0) grade-aware")
         print(f"           routing zeroes scalar/bivector/pseudoscalar; only 3/8 components/group carry data)")
     
     # GPU unsupported types note
@@ -2774,12 +2782,19 @@ def simulate_kernel_interactions_long_context(
         },
     }
 
-    # Determine FA kernel based on turbo type
+    # Determine FA kernel based on turbo type.
+    # When GGML_CUDA_FA_ALL_QUANTS is False (default), only F16/BF16/Q4_0/Q8_0
+    # get VEC FA dispatch (fattn.cu:420-430). All other types — including turbo —
+    # receive BEST_FATTN_KERNEL_NONE and fall back to CPU attention.
     is_turbo = "turbo" in k_quant
     turbo_group_size = getattr(model_config, 'turbo_group_size', 128)
     bs_scale = BLOCK_SIZE_FA_SCALING.get(turbo_group_size, 1.0)
 
-    if is_turbo:
+    # Non-standard quantization types: VEC FA not available without FA_ALL_QUANTS
+    is_nonstandard_quant = k_quant not in ("f16", "bf16", "q4_0", "q8_0")
+    if not GGML_CUDA_FA_ALL_QUANTS and is_nonstandard_quant:
+        fa_kernel = "none"  # BEST_FATTN_KERNEL_NONE — CPU fallback
+    elif is_turbo:
         fa_kernel = "flash_attn_tile"
     else:
         fa_kernel = "flash_attn_vec"
@@ -2889,8 +2904,9 @@ def simulate_kernel_interactions_long_context(
     # Throughput with occupancy effects
     max_throughput_tps = CYCLES_PER_SECOND / (bottleneck_cycles / model_config.n_layers)
 
-    total_cycles_sum = sum(layer_cycles.values())
-    wall_time_ms = total_cycles_sum / CYCLES_PER_SECOND * 1000
+    total_cycles_sum_serial = sum(layer_cycles.values())
+    total_cycles_parallel = total_cycles_sum_serial / GPU_CU_COUNT
+    wall_time_ms = total_cycles_parallel / CYCLES_PER_SECOND * 1000
     effective_bw_gb_s = total_bytes / (wall_time_ms / 1000) / 1e9
     mem_utilization = effective_bw_gb_s / GPU_MEMORY_BW_GB_S * 100
 
@@ -2901,7 +2917,7 @@ def simulate_kernel_interactions_long_context(
         "bottleneck_kernel": bottleneck_kernel,
         "bottleneck_cycles_per_layer": bottleneck_cycles,
         "max_throughput_tps": round(max_throughput_tps, 2),
-        "total_cycles_per_iter": total_cycles_sum,
+        "total_cycles_per_iter": total_cycles_sum_serial,
         "wall_time_ms_per_iter": round(wall_time_ms, 3),
         "effective_bw_gb_s": round(effective_bw_gb_s, 2),
         "mem_utilization_pct": round(mem_utilization, 1),
@@ -2934,7 +2950,7 @@ def simulate_kernel_interactions_long_context(
 
     print(f"\n  OCCUPANCY & REGISTER PRESSURE:")
     for kname, od in occupancy_details.items():
-        print(f"    {kname:<20}: VGPR={od['vgpr_per_thread']}, "
+        print(f"    {kname:<20}: VGPR={od['vgpr_per_thread']} [ESTIMATED], "
               f"penalty={od['combined_penalty']:.2f}x, occ={od['occupancy_pct']:.0f}%")
 
     print(f"\n  RDNA 2 ISA SIMULATION COUNTERS:")
@@ -2942,7 +2958,7 @@ def simulate_kernel_interactions_long_context(
     print(f"    VALU divergent paths:       {rdna2_sim_state['valu_divergent_paths']}")
     print(f"    Wavefronts issued:          {rdna2_sim_state['wavefronts_issued']}")
 
-    print(f"\n  CACHE HIERARCHY (L0/L1/L2/L3/VRAM):")
+    print(f"\n  CACHE HIERARCHY (per-tile working set, {fa_tile_size} bytes):")
     cache_total = max(1, sum([
         rdna2_sim_state["cache_hits_l0"],
         rdna2_sim_state["cache_hits_l1"],
@@ -3602,27 +3618,30 @@ def analyze_kernel_fusion_opportunities() -> Dict[str, Any]:
 def analyze_kernel_selection_fragility(arch: str = "rdna2") -> Dict[str, Any]:
     """Analyze kernel selection robustness for RDNA 2.
 
-    Codebase reality (verified by explorer): When best_fattn_kernel() returns
-    BEST_FATTN_KERNEL_NONE, supports_op returns false and the backend scheduler
-    properly falls back to CPU FA or standard attention. No crash — graceful
-    degradation exists.
+    Codebase reality: When best_fattn_kernel() returns BEST_FATTN_KERNEL_NONE,
+    supports_op returns false and the backend scheduler falls back to CPU FA or
+    standard attention. However, for unsupported GQA ratios (head_dim 192/320),
+    the dispatch at fattn.cu:155/175 uses GGML_ASSERT(gqa_ratio % 8 == 0) —
+    these are hard aborts, not graceful fallbacks.
     """
     
     failure_conditions = [
         "GQA requires K->ne[1] % FATTN_KQ_STRIDE == 0 (stride=256)",
-        "Head dimension 192 needs GQA ratio divisible by 8 or 16",
-        "Head dimension 320 needs GQA ratio divisible by 32"
+        "Head dimension 192 needs GQA ratio divisible by 8 or 16 — GGML_ASSERT abort, not fallback",
+        "Head dimension 320 needs GQA ratio divisible by 32 — GGML_ASSERT abort, not fallback",
+        "Head dimension 512 requires gqa_opt_applies (max_bias == 0), see fattn.cu:180",
+        "Head dimension 576 requires gqa_ratio == 20 (GLM) or gqa_ratio == 1 (DGX Spark), see fattn.cu:200-215"
     ]
     
     return {
-        "detected": False,
-        "rdna2_note": "supports_op + backend scheduler provide proper CPU fallback — no crash",
-        "issue": "Edge cases in best_fattn_kernel() for non-standard configs",
-        "affected_file": "ggml/src/ggml-cuda/fattn.cu (lines 332-400)",
+        "detected": True,
+        "rdna2_note": "GGML_ASSERT aborts on unsupported GQA ratios (fattn.cu:155/175) — not graceful",
+        "issue": "Hard aborts in best_fattn_kernel() for non-standard configs",
+        "affected_file": "ggml/src/ggml-cuda/fattn.cu (lines 155, 175, 332-400)",
         "failure_conditions": failure_conditions,
-        "severity": "LOW",
-        "impact_estimate": "Graceful degradation: falls back to CPU attention",
-        "fix": "All handled — supports_op returns false, scheduler falls back to CPU"
+        "severity": "MEDIUM",
+        "impact_estimate": "Hard abort (GGML_ASSERT) — no graceful degradation for unsupported ratios",
+        "fix": "Replace GGML_ASSERT with runtime check + fallback to CPU attention"
     }
 
 
@@ -4866,7 +4885,7 @@ ROCTx Profiling:
         status = "OK" if od["occupancy_pct"] >= 50 else "LOW"
         print(f"    {kname:<20}: {od['vgpr']:2d} VGPR/thread "
               f"-> {od['occupancy_pct']:.0f}% occ (penalty={od['penalty']:.2f}x) [{status}]")
-    print(f"  Cache hierarchy for 256K footprint:")
+    print(f"  Cache hierarchy ({kv_full_bytes} B footprint):")
     cache_tot = max(1, sum([cache_sim["hits"].get(l, 0) for l in ["L0","L1","L2","L3","VRAM"]]) 
                          + rdna2_sim_state.get("cache_misses_vram", 0))
     for tier, lvl_cyc in [("L0",CACHE_L0_CYCLES),("L1",CACHE_L1_CYCLES),

@@ -9,6 +9,7 @@
 #include <cstdint>
 
 #define CUDA_Q8_0_NE_ALIGN 2048
+#define CUDA_GRID_MAX_DIM_Y_Z 65535
 
 template <int qk, int qr, dequantize_kernel_t dequantize_kernel, typename dst_t>
 static __global__ void dequantize_block(const void * __restrict__ vx, dst_t * __restrict__ y,
@@ -58,11 +59,12 @@ static __global__ void dequantize_block_q8_0_f16(const void * __restrict__ vx, h
 
 #pragma unroll
     for (int ix0 = 0; ix0 < nint; ix0 += WARP_SIZE) {
-        if (need_check && i0*sizeof(block_q8_0)/QK8_0 + sizeof(int)*(ix0 + threadIdx.x) >= k*sizeof(block_q8_0)/QK8_0) {
-            break;
+        const int ix = ix0 + threadIdx.x;
+        if (need_check && i0*sizeof(block_q8_0)/QK8_0 + sizeof(int)*ix >= k*sizeof(block_q8_0)/QK8_0) {
+            vals[ix] = 0;
+            continue;
         }
 
-        const int ix = ix0 + threadIdx.x;
         vals[ix] = x0[ix];
     }
 
@@ -495,9 +497,10 @@ template <int qk, int qr, dequantize_kernel_t dequantize_kernel, typename dst_t>
 static void dequantize_block_cuda(const void * vx, dst_t * y,
         const int64_t ne00, const int64_t ne01, const int64_t ne02, const int64_t ne03,
         const int64_t s01, const int64_t s02, const int64_t s03, cudaStream_t stream) {
+    GGML_ASSERT(ne02 <= INT64_MAX / ne03);
     const int64_t ne0203 = ne02*ne03;
     const uint3 ne02_fdv = init_fastdiv_values(ne02);
-    const dim3 num_blocks((ne00 + 2*CUDA_DEQUANTIZE_BLOCK_SIZE - 1) / (2*CUDA_DEQUANTIZE_BLOCK_SIZE), (int)std::min(ne01, (int64_t)65535), (int)std::min(ne0203, (int64_t)65535));
+    const dim3 num_blocks((ne00 + 2*CUDA_DEQUANTIZE_BLOCK_SIZE - 1) / (2*CUDA_DEQUANTIZE_BLOCK_SIZE), (int)std::min(ne01, (int64_t)CUDA_GRID_MAX_DIM_Y_Z), (int)std::min(ne0203, (int64_t)CUDA_GRID_MAX_DIM_Y_Z));
     dequantize_block<qk, qr, dequantize_kernel><<<num_blocks, CUDA_DEQUANTIZE_BLOCK_SIZE, 0, stream>>>
         (vx, y, ne00, ne01, ne0203, ne02_fdv, s01, s02, s03);
 }
@@ -671,7 +674,7 @@ static __global__ void convert_unary(
         const void * __restrict__ vx, dst_t * __restrict__ y, const int64_t ne00, const int64_t ne01,
         const int64_t ne0203, const uint3 ne02,
         const int64_t s01, const int64_t s02, const int64_t s03) {
-    const int64_t i00 = (int64_t)blockDim.x*blockIdx.x + threadIdx.x;
+    const int64_t i00 = (int64_t)blockDim.x * (int64_t)blockIdx.x + threadIdx.x;
 
     if (i00 >= ne00) {
         return;
@@ -698,7 +701,7 @@ static void convert_unary_cuda(const void * vx, dst_t * y,
         const int64_t s01, const int64_t s02, const int64_t s03, cudaStream_t stream) {
     const int64_t ne0203 = ne02*ne03;
     const uint3 ne02_fdv = init_fastdiv_values(ne02);
-    const dim3 num_blocks((ne00 + CUDA_DEQUANTIZE_BLOCK_SIZE - 1) / CUDA_DEQUANTIZE_BLOCK_SIZE, (int)std::min(ne01, (int64_t)65535), (int)std::min(ne0203, (int64_t)65535));
+    const dim3 num_blocks((ne00 + CUDA_DEQUANTIZE_BLOCK_SIZE - 1) / CUDA_DEQUANTIZE_BLOCK_SIZE, (int)std::min(ne01, (int64_t)CUDA_GRID_MAX_DIM_Y_Z), (int)std::min(ne0203, (int64_t)CUDA_GRID_MAX_DIM_Y_Z));
     convert_unary<src_t><<<num_blocks, CUDA_DEQUANTIZE_BLOCK_SIZE, 0, stream>>>
         (vx, y, ne00, ne01, ne0203, ne02_fdv, s01, s02, s03);
 }

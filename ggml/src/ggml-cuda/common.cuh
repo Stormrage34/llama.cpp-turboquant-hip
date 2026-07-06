@@ -4,6 +4,7 @@
 #include "ggml-impl.h"
 #include "ggml-cuda.h"
 
+#include <atomic>
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
@@ -230,11 +231,11 @@ static const char * cu_get_error_str(CUresult err) {
 #if !defined(GGML_USE_HIP) && !defined(GGML_USE_MUSA)
 #    define CUDA_SET_SHARED_MEMORY_LIMIT(kernel, nbytes)                                                       \
         do {                                                                                                   \
-            static bool shared_memory_limit_raised[GGML_CUDA_MAX_DEVICES] = { false };                         \
-            const int   id                                                = ggml_cuda_get_device();            \
-            if (!shared_memory_limit_raised[id]) {                                                             \
+            static std::atomic<bool> shared_memory_limit_raised[GGML_CUDA_MAX_DEVICES] = {};                   \
+            const int id = ggml_cuda_get_device();                                                             \
+            if (!shared_memory_limit_raised[id].load(std::memory_order_relaxed)) {                             \
                 CUDA_CHECK(cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, nbytes)); \
-                shared_memory_limit_raised[id] = true;                                                         \
+                shared_memory_limit_raised[id].store(true, std::memory_order_relaxed);                         \
             }                                                                                                  \
         } while (0)
 #else

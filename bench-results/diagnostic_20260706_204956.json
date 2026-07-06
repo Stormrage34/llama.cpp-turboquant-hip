@@ -1,0 +1,61 @@
+{
+  "mode": "turbo-validate",
+  "timestamp": "2026-07-06T20:49:40",
+  "status": "completed",
+  "turbo_tests": {
+    "total": 12,
+    "passed": 12,
+    "failed": 0,
+    "all_pass": true,
+    "results": [
+      {
+        "test": "Block Structure Integrity",
+        "passed": true
+      },
+      {
+        "test": "WHT Rotation Roundtrip",
+        "passed": true
+      },
+      {
+        "test": "Quant Pipeline Consistency",
+        "passed": true
+      },
+      {
+        "test": "Attention Pipeline Quality",
+        "passed": true
+      },
+      {
+        "test": "Norm Blowup Detection",
+        "passed": true
+      },
+      {
+        "test": "InnerQ Calibration Interference",
+        "passed": true
+      },
+      {
+        "test": "Centroid Distribution Analysis",
+        "passed": true
+      },
+      {
+        "test": "Full Pipeline Simulation",
+        "passed": true
+      },
+      {
+        "test": "Per-centroid Error Analysis",
+        "passed": true
+      },
+      {
+        "test": "Structured KV Pattern Test",
+        "passed": true
+      },
+      {
+        "test": "Wrong-Pipeline Detection",
+        "passed": true
+      },
+      {
+        "test": "Precision Audit",
+        "passed": true
+      }
+    ]
+  }
+}

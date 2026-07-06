@@ -1,0 +1,43 @@
+{
+  "timestamp": "2026-07-02 04:19:22",
+  "variants": [
+    {
+      "name": "baseline",
+      "description": "Standard build, no turbo FA instances. Baseline.",
+      "hipfire_ref": "Phase 0 baseline",
+      "dense": {
+        "512": {
+          "pp": 1340.609937,
+          "tg": 54.620299,
+          "passes": true
+        }
+      },
+      "moe": {
+        "512": {
+          "pp": 2586.173616,
+          "tg": 101.82122,
+          "passes": true
+        }
+      }
+    },
+    {
+      "name": "hipgraph",
+      "description": "hipGraph capture enabled. hipfire #300 F1: +10-20%.",
+      "hipfire_ref": "#300 F1: hipGraph for prefill (+10-20%)",
+      "dense": {
+        "512": {
+          "pp": 1338.14086,
+          "tg": 54.741455,
+          "passes": true
+        }
+      },
+      "moe": {
+        "512": {
+          "pp": 2602.726113,
+          "tg": 102.799147,
+          "passes": true
+        }
+      }
+    }
+  ]
+}

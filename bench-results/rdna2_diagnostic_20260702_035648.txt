@@ -1,0 +1,157 @@
+==============================================================================
+RDNA2 MASTER DIAGNOSTIC — Heuristic + Bayesian Probability Analysis
+==============================================================================
+Date: 2026-07-02 03:56:48
+GPU: AMD Radeon RX 6800 XT (gfx1030, wave-32, 72 CUs)
+
+------------------------------------------------------------------------------
+KERNEL SUMMARY
+------------------------------------------------------------------------------
+Total kernel time:  2754.4 ms
+Total dispatches:   164,345
+Avg dispatch time:  16.8 us
+
+Time by Category:
+  matmul                 2366.4 ms  ( 85.9%)  [36,907 dispatches]
+  normalization           130.4 ms  (  4.7%)  [44,147 dispatches]
+  flash_attention         126.1 ms  (  4.6%)  [12,576 dispatches]
+  quantize                 56.5 ms  (  2.1%)  [36,907 dispatches]
+  other                    36.5 ms  (  1.3%)  [20,899 dispatches]
+  rope                     26.2 ms  (  1.0%)  [12,576 dispatches]
+  activation               11.2 ms  (  0.4%)  [96 dispatches]
+  copy                      1.2 ms  (  0.0%)  [237 dispatches]
+
+Top 15 Kernels by Total Time:
+   1. void mul_mat_vec_q<(ggml_type)2, 1, false, fa    928.1ms ( 33.7%)  VGPR= 24  LDS=    0  x30,059
+   2. void mul_mat_vec_q<(ggml_type)2, 1, true, fal    798.7ms ( 29.0%)  VGPR= 32  LDS=    0  x6,192
+   3. void mul_mat_q<(ggml_type)2, 64, false>(char     639.5ms ( 23.2%)  VGPR=232 *  LDS=    0  x656
+   4. void flash_attn_tile<256, 256, 1, 2, false>(c     52.9ms (  1.9%)  VGPR= 80  LDS= 6144  x5,160
+   5. void rms_norm_f32<1024, true, true>(float con     48.3ms (  1.8%)  VGPR= 16  LDS=    0  x12,576
+   6. quantize_q8_1(float const*, void*, long, long     45.9ms (  1.7%)  VGPR= 16  LDS=    0  x36,251
+   7. void rms_norm_f32<1024, true, false>(float co     45.7ms (  1.7%)  VGPR= 16  LDS=    0  x12,707
+   8. void rms_norm_f32<256, true, false>(float con     26.0ms (  0.9%)  VGPR= 16  LDS=    0  x12,576
+   9. void flash_attn_tile<256, 256, 16, 2, false>(     25.6ms (  0.9%)  VGPR=168 *  LDS=37888  x80
+  10. void rope_neox<true, false, float, float>(flo     20.3ms (  0.7%)  VGPR= 24  LDS=    0  x10,480
+  11. void k_set_rows<float, long, __half>(float co     18.6ms (  0.7%)  VGPR= 16  LDS=    0  x12,576
+  12. void flash_attn_tile<512, 512, 1, 8, false>(c     17.8ms (  0.6%)  VGPR= 64  LDS=18432  x1,032
+  13. void flash_attn_tile<512, 512, 4, 8, false>(c     13.2ms (  0.5%)  VGPR=200 *  LDS=59392 !  x16
+  14. void flash_attn_combine_results<256>(float co     13.1ms (  0.5%)  VGPR= 32  LDS=    0  x5,240
+  15. void k_bin_bcast<&(op_mul(float, float)), flo     11.5ms (  0.4%)  VGPR= 24  LDS=    0  x6,288
+
+  * = VGPR > 128 (occupancy limited)
+  ! = LDS > 50KB (near 64KB limit)
+
+------------------------------------------------------------------------------
+MEMORY COPY SUMMARY
+------------------------------------------------------------------------------
+H2D copies: 482
+H2D total time: 487.5 ms
+Avg H2D copy: 1011.3 us
+
+------------------------------------------------------------------------------
+EVIDENCE SUMMARY (what the data shows)
+------------------------------------------------------------------------------
+Kernel launches: 164,345
+H2D copies: 482
+Max VGPR: 232
+Max LDS: 59392 bytes
+Tiny kernels (<10us): 120,398 (73.3%)
+Non-wave-32 aligned dispatches: 12,576
+Matmul time: 85.9%
+
+==============================================================================
+BAYESIAN OPTIMIZATION RECOMMENDATIONS (ranked by posterior expected impact)
+==============================================================================
+
+  #1  hipGraph_capture
+      Batch kernel launches into hipGraph to eliminate host-launch overhead
+      Category: latency | Effort: medium
+      P(helps|data) = 99.1%
+      Expected gain: +18.0% (95% CI: +16.3% to +19.9%)
+      Expected time saved: ~496 ms per forward pass
+      Evidence: HIGH severity (100%) — strong signal
+      Source: hipfire #300 F1: +10-20% on prefill, 288 launches/layer
+
+  #2  persistent_kernels
+      Keep warps resident across multiple tiles to eliminate dispatch overhead
+      Category: latency | Effort: high
+      P(helps|data) = 94.0%
+      Expected gain: +18.0% (95% CI: +15.4% to +21.1%)
+      Expected time saved: ~496 ms per forward pass
+      Evidence: HIGH severity (100%) — strong signal
+      Source: hipfire #300 F3: +10-30% on residual kernel
+
+  #3  VGPR_reduction
+      Reduce VGPR usage to increase occupancy (e.g., __launch_bounds__)
+      Category: occupancy | Effort: low
+      P(helps|data) = 95.8%
+      Expected gain: +11.6% (95% CI: +10.7% to +12.6%)
+      Expected time saved: ~320 ms per forward pass
+      Evidence: HIGH severity (91%) — strong signal
+      Source: hipfire #300 F4: +5-15% from 110->88 VGPR
+
+  #4  memory_copy_batching
+      Batch H2D copies via pinned memory or graph capture
+      Category: memory | Effort: medium
+      P(helps|data) = 98.3%
+      Expected gain: +9.6% (95% CI: +9.1% to +10.2%)
+      Expected time saved: ~264 ms per forward pass
+      Evidence: HIGH severity (100%) — strong signal
+      Source: baseline profile: 482 H2D copies, 487ms total
+
+  #5  kernel_fusion
+      Fuse adjacent tiny kernels (rms_norm, rope, quantize) to reduce launch overhead
+      Category: latency | Effort: high
+      P(helps|data) = 95.0%
+      Expected gain: +7.2% (95% CI: +6.8% to +7.6%)
+      Expected time saved: ~198 ms per forward pass
+      Evidence: HIGH severity (100%) — strong signal
+      Source: hipfire #300 F2: MMQ epilogue fusion +5-15%
+
+  #6  wave32_batch_alignment
+      Use batch sizes that are multiples of 32 for wave-32 alignment
+      Category: compute | Effort: low
+      P(helps|data) = 92.7%
+      Expected gain: +6.0% (95% CI: +5.7% to +6.4%)
+      Expected time saved: ~165 ms per forward pass
+      Evidence: HIGH severity (100%) — strong signal
+      Source: gfx103_optimizations.md: wave-32 preference
+
+  #7  LDS_tile_resize
+      Reduce FA tile sizes to fit more waves per CU via LDS pressure relief
+      Category: occupancy | Effort: medium
+      P(helps|data) = 67.8%
+      Expected gain: +7.0% (95% CI: +6.5% to +7.6%)
+      Expected time saved: ~193 ms per forward pass
+      Evidence: LOW severity (19%) — weak signal
+      Source: hipfire PR #298 Phase 3: LDS tiling is dominant factor
+
+  #8  GEMM_epilogue_fusion
+      Fuse SwiGLU/RMSnorm into GEMM epilogue to reduce kernel count
+      Category: latency | Effort: high
+      P(helps|data) = 60.2%
+      Expected gain: +6.8% (95% CI: +6.3% to +7.4%)
+      Expected time saved: ~188 ms per forward pass
+      Evidence: MEDIUM severity (43%) — moderate signal
+      Source: hipfire #300 F2: epilogue fusion complementary to graph
+
+------------------------------------------------------------------------------
+PRIORITY MATRIX
+------------------------------------------------------------------------------
+  #  Optimization                P(helps)      Gain    Effort  Action
+                                                               ------
+  1  hipGraph_capture              99.1%    +18.0%    medium  INVESTIGATE
+  2  persistent_kernels            94.0%    +18.0%      high  INVESTIGATE
+  3  VGPR_reduction                95.8%    +11.6%       low  IMPLEMENT NOW
+  4  memory_copy_batching          98.3%     +9.6%    medium  INVESTIGATE
+  5  kernel_fusion                 95.0%     +7.2%      high  INVESTIGATE
+  6  wave32_batch_alignment        92.7%     +6.0%       low  IMPLEMENT NOW
+  7  LDS_tile_resize               67.8%     +7.0%    medium  INVESTIGATE
+  8  GEMM_epilogue_fusion          60.2%     +6.8%      high  INVESTIGATE
+
+------------------------------------------------------------------------------
+SUMMARY
+------------------------------------------------------------------------------
+Total expected gain (compound): ~106.1%
+Implement now (2): VGPR_reduction, wave32_batch_alignment
+Investigate (6): hipGraph_capture, persistent_kernels, memory_copy_batching, kernel_fusion, LDS_tile_resize, GEMM_epilogue_fusion

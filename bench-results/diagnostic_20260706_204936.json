@@ -1,0 +1,61 @@
+{
+  "mode": "quick",
+  "timestamp": "2026-07-06T20:49:36",
+  "status": "completed",
+  "occupancy_analysis": {
+    "DKQ=40_DV=40": {
+      "occupancy_pct": 25.0,
+      "limiting_factor": "Compiler Launch Gate"
+    },
+    "DKQ=64_DV=64": {
+      "occupancy_pct": 100.0,
+      "limiting_factor": "Hardware Saturation (Max Waves Reached)"
+    },
+    "DKQ=72_DV=72": {
+      "occupancy_pct": 25.0,
+      "limiting_factor": "Compiler Launch Gate"
+    },
+    "DKQ=80_DV=80": {
+      "occupancy_pct": 25.0,
+      "limiting_factor": "Compiler Launch Gate"
+    },
+    "DKQ=96_DV=96": {
+      "occupancy_pct": 25.0,
+      "limiting_factor": "Compiler Launch Gate"
+    },
+    "hardware": {
+      "simds_per_cu": 4,
+      "max_waves_per_cu": 16,
+      "lds_capacity_bytes": 65536
+    }
+  },
+  "memory_working_set": {
+    "qkv_vram_working_set_mb": 1344.0,
+    "qkv_lds_working_set_kb": 1.5,
+    "scores_matrix_mb": 262144.0,
+    "lds_hit_rate_estimate": 100.0,
+    "l1_hit_rate_estimate": 0.03,
+    "infinity_cache": {
+      "total_kv_cache_mb": 1344.0,
+      "infinity_cache_capacity_mb": 128.0,
+      "exceeds_ic_threshold": true,
+      "ic_hit_rate_pct": 20.0,
+      "stall_factor": 2150.0,
+      "effective_bandwidth_factor": 0.2,
+      "warning": "CRITICAL: Infinity Cache threshold exceeded - severe latency degradation expected"
+    }
+  },
+  "vram_throughput": {
+    "bytes_per_token": 680.0,
+    "vram_throughput_mb_s": 0.4319,
+    "peak_utilization_pct": 8.8e-05
+  },
+  "simulation_self_check": {
+    "simulated_occupancy": 100.0,
+    "measured_occupancy": 12.5,
+    "variance": 87.5,
+    "tolerance": 5.0,
+    "is_valid": false,
+    "recommendation": "FAIL - Simulation needs calibration"
+  }
+}

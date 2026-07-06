@@ -59,18 +59,17 @@ static __global__ void k_turbo_wht_half4(const float * __restrict__ src,
 
     // --- Apply first sign array (4 signs per thread, from packed constant memory) ---
     if (group_size == 128) {
-        float4 s1 = reinterpret_cast<const float4 *>(&TURBO_WHT_SIGNS1[t4])[0];
-        x[t4 + 0] *= s1.x;
-        x[t4 + 1] *= s1.y;
-        x[t4 + 2] *= s1.z;
-        x[t4 + 3] *= s1.w;
+        // Use individual float loads to avoid 16-byte alignment requirement of float4
+        x[t4 + 0] *= TURBO_WHT_SIGNS1[t4 + 0];
+        x[t4 + 1] *= TURBO_WHT_SIGNS1[t4 + 1];
+        x[t4 + 2] *= TURBO_WHT_SIGNS1[t4 + 2];
+        x[t4 + 3] *= TURBO_WHT_SIGNS1[t4 + 3];
     } else {
         // group_size == 64
-        float4 s1 = reinterpret_cast<const float4 *>(&TURBO_WHT_SIGNS1_64[t4])[0];
-        x[t4 + 0] *= s1.x;
-        x[t4 + 1] *= s1.y;
-        x[t4 + 2] *= s1.z;
-        x[t4 + 3] *= s1.w;
+        x[t4 + 0] *= TURBO_WHT_SIGNS1_64[t4 + 0];
+        x[t4 + 1] *= TURBO_WHT_SIGNS1_64[t4 + 1];
+        x[t4 + 2] *= TURBO_WHT_SIGNS1_64[t4 + 2];
+        x[t4 + 3] *= TURBO_WHT_SIGNS1_64[t4 + 3];
     }
     __syncthreads();
 
@@ -167,17 +166,16 @@ static __global__ void k_turbo_wht_half4(const float * __restrict__ src,
     constexpr float inv_sqrt = (group_size == 128) ? 0.08838834764831845f : 0.125f;
     float4 result;
     if (group_size == 128) {
-        float4 s2 = reinterpret_cast<const float4 *>(&TURBO_WHT_SIGNS2[t4])[0];
-        result.x = x[t4 + 0] * inv_sqrt * s2.x;
-        result.y = x[t4 + 1] * inv_sqrt * s2.y;
-        result.z = x[t4 + 2] * inv_sqrt * s2.z;
-        result.w = x[t4 + 3] * inv_sqrt * s2.w;
+        // Use individual float loads to avoid 16-byte alignment requirement of float4
+        result.x = x[t4 + 0] * inv_sqrt * TURBO_WHT_SIGNS2[t4 + 0];
+        result.y = x[t4 + 1] * inv_sqrt * TURBO_WHT_SIGNS2[t4 + 1];
+        result.z = x[t4 + 2] * inv_sqrt * TURBO_WHT_SIGNS2[t4 + 2];
+        result.w = x[t4 + 3] * inv_sqrt * TURBO_WHT_SIGNS2[t4 + 3];
     } else {
-        float4 s2 = reinterpret_cast<const float4 *>(&TURBO_WHT_SIGNS2_64[t4])[0];
-        result.x = x[t4 + 0] * inv_sqrt * s2.x;
-        result.y = x[t4 + 1] * inv_sqrt * s2.y;
-        result.z = x[t4 + 2] * inv_sqrt * s2.z;
-        result.w = x[t4 + 3] * inv_sqrt * s2.w;
+        result.x = x[t4 + 0] * inv_sqrt * TURBO_WHT_SIGNS2_64[t4 + 0];
+        result.y = x[t4 + 1] * inv_sqrt * TURBO_WHT_SIGNS2_64[t4 + 1];
+        result.z = x[t4 + 2] * inv_sqrt * TURBO_WHT_SIGNS2_64[t4 + 2];
+        result.w = x[t4 + 3] * inv_sqrt * TURBO_WHT_SIGNS2_64[t4 + 3];
     }
 
     // InnerQ inverse: apply scale_inv AFTER WHT+signs

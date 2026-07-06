@@ -1,0 +1,153 @@
+{
+  "timestamp": "20260702_035648",
+  "total_kernel_time_ms": 2754.439009,
+  "total_dispatches": 164345,
+  "evidence": {
+    "kernel_launch_count": 164345,
+    "h2d_copy_count": 482,
+    "h2d_total_ms": 487.45396,
+    "max_vgpr": 232,
+    "max_vgpr>128_or_low_occupancy": true,
+    "max_lds_bytes": 59392,
+    "max_lds>50000": true,
+    "tiny_kernel_count": 120398,
+    "tiny_kernel_pct": 73.25930207794579,
+    "non_aligned_wave_dispatches": 12576,
+    "matmul_time_pct": 85.91062438732692,
+    "kernel_launch_count>50000": true,
+    "category_time": {
+      "copy": 1183964,
+      "other": 36451110,
+      "normalization": 130438958,
+      "quantize": 56521815,
+      "matmul": 2366355751,
+      "rope": 26214852,
+      "flash_attention": 126066083,
+      "activation": 11206476
+    },
+    "category_count": {
+      "copy": 237,
+      "other": 20899,
+      "normalization": 44147,
+      "quantize": 36907,
+      "matmul": 36907,
+      "rope": 12576,
+      "flash_attention": 12576,
+      "activation": 96
+    }
+  },
+  "recommendations": [
+    {
+      "rank": 1,
+      "name": "hipGraph_capture",
+      "posterior_probability": 0.9908,
+      "expected_gain": 0.18,
+      "confidence_interval": [
+        0.1632,
+        0.1985
+      ],
+      "category": "latency",
+      "effort": "medium",
+      "evidence": "HIGH severity (100%) \u2014 strong signal",
+      "source": "hipfire #300 F1: +10-20% on prefill, 288 launches/layer"
+    },
+    {
+      "rank": 2,
+      "name": "persistent_kernels",
+      "posterior_probability": 0.9396,
+      "expected_gain": 0.18,
+      "confidence_interval": [
+        0.1539,
+        0.2106
+      ],
+      "category": "latency",
+      "effort": "high",
+      "evidence": "HIGH severity (100%) \u2014 strong signal",
+      "source": "hipfire #300 F3: +10-30% on residual kernel"
+    },
+    {
+      "rank": 3,
+      "name": "VGPR_reduction",
+      "posterior_probability": 0.9583,
+      "expected_gain": 0.1163,
+      "confidence_interval": [
+        0.1075,
+        0.1257
+      ],
+      "category": "occupancy",
+      "effort": "low",
+      "evidence": "HIGH severity (91%) \u2014 strong signal",
+      "source": "hipfire #300 F4: +5-15% from 110->88 VGPR"
+    },
+    {
+      "rank": 4,
+      "name": "memory_copy_batching",
+      "posterior_probability": 0.9828,
+      "expected_gain": 0.096,
+      "confidence_interval": [
+        0.0905,
+        0.1018
+      ],
+      "category": "memory",
+      "effort": "medium",
+      "evidence": "HIGH severity (100%) \u2014 strong signal",
+      "source": "baseline profile: 482 H2D copies, 487ms total"
+    },
+    {
+      "rank": 5,
+      "name": "kernel_fusion",
+      "posterior_probability": 0.95,
+      "expected_gain": 0.072,
+      "confidence_interval": [
+        0.0679,
+        0.0764
+      ],
+      "category": "latency",
+      "effort": "high",
+      "evidence": "HIGH severity (100%) \u2014 strong signal",
+      "source": "hipfire #300 F2: MMQ epilogue fusion +5-15%"
+    },
+    {
+      "rank": 6,
+      "name": "wave32_batch_alignment",
+      "posterior_probability": 0.9268,
+      "expected_gain": 0.06,
+      "confidence_interval": [
+        0.0566,
+        0.0636
+      ],
+      "category": "compute",
+      "effort": "low",
+      "evidence": "HIGH severity (100%) \u2014 strong signal",
+      "source": "gfx103_optimizations.md: wave-32 preference"
+    },
+    {
+      "rank": 7,
+      "name": "LDS_tile_resize",
+      "posterior_probability": 0.6785,
+      "expected_gain": 0.07,
+      "confidence_interval": [
+        0.0647,
+        0.0757
+      ],
+      "category": "occupancy",
+      "effort": "medium",
+      "evidence": "LOW severity (19%) \u2014 weak signal",
+      "source": "hipfire PR #298 Phase 3: LDS tiling is dominant factor"
+    },
+    {
+      "rank": 8,
+      "name": "GEMM_epilogue_fusion",
+      "posterior_probability": 0.6023,
+      "expected_gain": 0.0681,
+      "confidence_interval": [
+        0.063,
+        0.0736
+      ],
+      "category": "latency",
+      "effort": "high",
+      "evidence": "MEDIUM severity (43%) \u2014 moderate signal",
+      "source": "hipfire #300 F2: epilogue fusion complementary to graph"
+    }
+  ]
+}
