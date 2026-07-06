@@ -435,6 +435,96 @@ static __global__ void k_set_rows_turbo3(const float * __restrict__ src0,
     GGML_UNUSED(ne13);
 }
 
+// ─── Turbo2 set_rows kernel ──────────────────────────────────────────────────
+// group_size=128, qk=32 (4 sub-blocks per group). Thread processes one full
+// 128-element group: normalize -> WHT rotate -> quantize each sub-block.
+
+static __global__ void k_set_rows_turbo2(const float * __restrict__ src0,
+                                          const int * __restrict__ src1,
+                                          block_turbo2_0 * __restrict__ dst,
+                                         const int64_t ne_total,
+                                         const int64_t ne10, const int64_t ne11,
+                                         const int64_t ne12, const int64_t ne13,
+                                         const int64_t s01, const int64_t s02,
+                                         const int64_t s03,
+                                         const int64_t s10, const int64_t s11,
+                                         const int64_t s12,
+                                         const int64_t s1, const int64_t s2,
+                                         const int64_t s3,
+                                         const uint3 ne00, const uint3 ne01,
+                                         const uint3 ne02,
+                                         const uint3 ne11_fd, const uint3 ne12_fd) {
+    const int64_t i = int64_t(blockDim.x) * blockIdx.x + threadIdx.x;
+    if (i >= ne_total) return;
+
+    uint32_t tmp = (uint32_t) i;
+    uint2 div_mod;
+
+    div_mod            = fast_div_modulo(tmp, ne00);
+    const int64_t i00  = div_mod.y;
+    tmp                = div_mod.x;
+    div_mod            = fast_div_modulo(tmp, ne01);
+    const int64_t i01  = div_mod.y;
+    tmp                = div_mod.x;
+    div_mod            = fast_div_modulo(tmp, ne02);
+    const int64_t i02  = div_mod.y;
+    const int64_t i03  = div_mod.x;
+
+    const int64_t i12 = fastmodulo((uint32_t) i03, ne12_fd);
+    const int64_t i11 = fastmodulo((uint32_t) i02, ne11_fd);
+    const int64_t i10 = i01;
+
+    ggml_cuda_pdl_lc();
+    ggml_cuda_pdl_sync();
+    const int64_t dst_row = *(src1 + i10*s10 + i11*s11 + i12*s12);
+
+    const float * src0_row = src0 + i01*s01 + i02*s02 + i03*s03;
+    block_turbo2_0 * dst_row_ptr = dst + (dst_row*s1 + i02*s2 + i03*s3) / sizeof(block_turbo2_0);
+
+    // Load full 128-element group into registers
+    float buf[128];
+    const float * grp_src = src0_row + i00 * QK_TURBO2 * (128 / QK_TURBO2); // i00 * qk * blocks_per_group = i00 * 128
+    for (int j = 0; j < 128; j++) {
+        buf[j] = grp_src[j];
+    }
+
+    // Step 1-2: L2 norm + normalize
+    float norm_sq = 0.0f;
+    for (int j = 0; j < 128; j++) norm_sq += buf[j] * buf[j];
+    float grp_norm = sqrtf(norm_sq);
+    float inv_norm  = (grp_norm > 1e-10f) ? 1.0f / grp_norm : 0.0f;
+    for (int j = 0; j < 128; j++) buf[j] *= inv_norm;
+
+    // Step 3: Quantize sub-blocks + reconstruction-corrected norm
+    const int n_blocks = 128 / QK_TURBO2; // = 4
+    float recon_sq = 0.0f;
+    for (int b = 0; b < n_blocks; b++) {
+        const int off = b * QK_TURBO2;
+        block_turbo2_0 blk;
+        quantize_f32_turbo2_0_block(buf + off, &blk);
+
+        // Reconstruction error: extract 2-bit centroid values
+        for (int j = 0; j < QK_TURBO2; j++) {
+            uint8_t idx = (blk.qs[j / 4] >> ((j % 4) * 2)) & 0x3;
+            recon_sq += TURBO_CENTROIDS_2BIT[idx] * TURBO_CENTROIDS_2BIT[idx];
+        }
+
+        dst_row_ptr[i00 * n_blocks + b] = blk;
+    }
+
+    // Step 5: Corrected norm
+    float recon_norm = sqrtf(recon_sq);
+    float corrected_norm = (recon_norm > 1e-10f) ? grp_norm / recon_norm : grp_norm;
+    for (int b = 0; b < n_blocks; b++) {
+        dst_row_ptr[i00 * n_blocks + b].norm = __float2half(corrected_norm);
+    }
+
+    GGML_UNUSED(ne10);
+    GGML_UNUSED(ne11);
+    GGML_UNUSED(ne12);
+    GGML_UNUSED(ne13);
+}
+
 // ─── Turbo4 set_rows kernel ──────────────────────────────────────────────────
 // group_size=128, qk=128 (1 block per group). Simpler: each thread = one group.
 
@@ -524,15 +614,14 @@ void ggml_cuda_op_set_rows(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
     GGML_ASSERT(src0->type == GGML_TYPE_F32);
     GGML_ASSERT(src1->type == GGML_TYPE_I64 || src1->type == GGML_TYPE_I32);
 
-    // TurboQuant types: quantization WITHOUT WHT rotation.
-    // The 128-element element-pair dequantize interface cannot apply inverse
-    // rotation, so values are stored unrotated (centroid lookup + norm scaling).
-    // Non-VEC FA falls back to getrows.
+    // TurboQuant types: value-preserved quantization with reconstruction-corrected norm
+    // (no WHT rotation; decomposed for VEC dequantize compatibility)
     const char * type_name = ggml_type_name(dst->type);
+    bool is_turbo2 = (strstr(type_name, "turbo2") != NULL);
     bool is_turbo3 = (strstr(type_name, "turbo3") != NULL);
     bool is_turbo4 = (strstr(type_name, "turbo4") != NULL);
 
-    if (is_turbo3 || is_turbo4) {
+    if (is_turbo2 || is_turbo3 || is_turbo4) {
         const int64_t ne00 = src0->ne[0];
         const int64_t ne01 = src0->ne[1];
         const int64_t ne02 = src0->ne[2];
@@ -542,7 +631,7 @@ void ggml_cuda_op_set_rows(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
         const int64_t ne12 = dst->ne[2];
         const int64_t ne13 = dst->ne[3];
 
-        const int qk = is_turbo4 ? QK_TURBO4 : QK_TURBO3;
+        const int qk = is_turbo4 ? QK_TURBO4 : QK_TURBO3; // turbo2 and turbo3 both use 32
         const int blocks_per_group = 128 / qk;
         const int64_t ne00_groups = ne00 / (qk * blocks_per_group); // groups per row (1 for D=128)
         const int64_t ne_total = (ne00 * ne01 * ne02 * ne03) / (qk * blocks_per_group);
@@ -556,13 +645,26 @@ void ggml_cuda_op_set_rows(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
         // nb[0] = element size (4 for I32, 8 for I64).  Kernel reads const int* (4B).
         // s10=1 for I32 → sequential int access. s10=2 for I64 → skip high32 of each int64_t.
         const int64_t s10 = src1->nb[0] / sizeof(int);
+
+        // I64 row indices must be verified to fit in int32_t before the cast to const int*
+        if (src1->type == GGML_TYPE_I64) {
+            const int64_t * row_data_i64 = (const int64_t *) src1->data;
+            const int64_t nrows_i64 = ne12 * ne13;
+            for (int64_t i = 0; i < nrows_i64; i++) {
+                GGML_ASSERT(row_data_i64[i] <= (int64_t) INT32_MAX
+                            && "turbo set-rows: I64 row index exceeds 32-bit range");
+            }
+        }
+
         const int64_t s11 = src1->nb[1] / sizeof(int);
         const int64_t s12 = src1->nb[2] / sizeof(int);
         const int64_t s1  = dst->nb[1];
         const int64_t s2  = dst->nb[2];
         const int64_t s3  = dst->nb[3];
 
-        const size_t block_sz_turbo = is_turbo4 ? sizeof(block_turbo4_0) : sizeof(block_turbo3_0);
+        const size_t block_sz_turbo = is_turbo4 ? sizeof(block_turbo4_0) :
+                                       is_turbo2 ? sizeof(block_turbo2_0) :
+                                                   sizeof(block_turbo3_0);
         GGML_ASSERT(s1 % block_sz_turbo == 0);
         GGML_ASSERT(s2 % block_sz_turbo == 0);
         GGML_ASSERT(s3 % block_sz_turbo == 0);
@@ -580,12 +682,21 @@ void ggml_cuda_op_set_rows(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
                     (block_turbo4_0*)dst->data,
                     ne_total, ne10, ne11, ne12, ne13, s01, s02, s03, s10, s11, s12, s1, s2, s3,
                     ne00_fd, ne01_fd, ne02_fd, ne11_fd, ne12_fd);
+                CUDA_CHECK(cudaGetLastError());
+            } else if (is_turbo2) {
+                k_set_rows_turbo2<<<grid_size, block_size, 0, ctx.stream()>>>(
+                    (const float *)src0->data, (const int *)src1->data,
+                    (block_turbo2_0*)dst->data,
+                    ne_total, ne10, ne11, ne12, ne13, s01, s02, s03, s10, s11, s12, s1, s2, s3,
+                    ne00_fd, ne01_fd, ne02_fd, ne11_fd, ne12_fd);
+                CUDA_CHECK(cudaGetLastError());
             } else {
                 k_set_rows_turbo3<<<grid_size, block_size, 0, ctx.stream()>>>(
                     (const float *)src0->data, (const int *)src1->data,
                     (block_turbo3_0*)dst->data,
                     ne_total, ne10, ne11, ne12, ne13, s01, s02, s03, s10, s11, s12, s1, s2, s3,
                     ne00_fd, ne01_fd, ne02_fd, ne11_fd, ne12_fd);
+                CUDA_CHECK(cudaGetLastError());
             }
         }
     } else if (src1->type == GGML_TYPE_I64) {
