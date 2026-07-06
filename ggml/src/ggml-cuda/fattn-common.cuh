@@ -331,7 +331,7 @@ static __device__ __forceinline__ float vec_dot_fattn_vec_KQ_turbo3_0(
                 const uint8_t low2 = (K[ib].qs[iqs / 4] >> ((iqs % 4) * 2)) & 0x3;
                 const uint8_t hi1  = (K[ib].signs[iqs / 8] >> (iqs % 8)) & 0x1;
                 const uint8_t idx  = low2 | (hi1 << 2);
-                k_vals[l] = TURBO_CENTROIDS_3BIT[idx] * __half2float(K[ib].norm);
+                k_vals[l] = __half2float(__hmul(__float2half(TURBO_CENTROIDS_3BIT[idx]), K[ib].norm));
             }
         }
         const float * Q_f = (const float *) Q_v;
@@ -369,7 +369,7 @@ static __device__ __forceinline__ float vec_dot_fattn_vec_KQ_turbo2_0(
                 const int ib  = k_KQ / QK_TURBO2;
                 const int iqs = k_KQ % QK_TURBO2;
                 const uint8_t idx = (K[ib].qs[iqs / 4] >> ((iqs % 4) * 2)) & 0x3;
-                k_vals[l] = TURBO_CENTROIDS_2BIT[idx] * __half2float(K[ib].norm);
+                k_vals[l] = __half2float(__hmul(__float2half(TURBO_CENTROIDS_2BIT[idx]), K[ib].norm));
             }
         }
         const float * Q_f = (const float *) Q_v;
@@ -407,7 +407,7 @@ static __device__ __forceinline__ float vec_dot_fattn_vec_KQ_turbo4_0(
                 const int ib  = k_KQ / QK_TURBO4;
                 const int iqs = k_KQ % QK_TURBO4;
                 const uint8_t idx = (K[ib].qs[iqs / 2] >> ((iqs % 2) * 4)) & 0xF;
-                k_vals[l] = TURBO_CENTROIDS_4BIT[idx] * __half2float(K[ib].norm);
+                k_vals[l] = __half2float(__hmul(__float2half(TURBO_CENTROIDS_4BIT[idx]), K[ib].norm));
             }
         }
         const float * Q_f = (const float *) Q_v;
@@ -715,20 +715,21 @@ static __device__ __forceinline__ void dequantize_V_turbo3_0(const void * __rest
     const int     iqs = i0 % QK_TURBO3;
 
     static_assert(ne == 2 || ne == 4, "bad ne");
-    float vals[ne];
+    const __half norm_h = x[ib].norm;
+    half hvals[ne];
     for (int l = 0; l < ne; l++) {
         const int j = iqs + l;
         const uint8_t low2 = (x[ib].qs[j / 4] >> ((j % 4) * 2)) & 0x3;
         const uint8_t hi1  = (x[ib].signs[j / 8] >> (j % 8)) & 0x1;
         const uint8_t idx  = low2 | (hi1 << 2);
-        vals[l] = TURBO_CENTROIDS_3BIT[idx] * __half2float(x[ib].norm);
+        hvals[l] = __hmul(__float2half(TURBO_CENTROIDS_3BIT[idx]), norm_h);
     }
     if constexpr (std::is_same_v<T, half>) {
         half * hdst = (half *) dst;
-        for (int l = 0; l < ne; l++) hdst[l] = __float2half(vals[l]);
+        for (int l = 0; l < ne; l++) hdst[l] = hvals[l];
     } else {
         float * fdst = (float *) dst;
-        for (int l = 0; l < ne; l++) fdst[l] = vals[l];
+        for (int l = 0; l < ne; l++) fdst[l] = __half2float(hvals[l]);
     }
 }
 
@@ -739,18 +740,19 @@ static __device__ __forceinline__ void dequantize_V_turbo2_0(const void * __rest
     const int     iqs = i0 % QK_TURBO2;
 
     static_assert(ne == 2 || ne == 4, "bad ne");
-    float vals[ne];
+    const __half norm_h = x[ib].norm;
+    half hvals[ne];
     for (int l = 0; l < ne; l++) {
         const int j = iqs + l;
         const uint8_t idx = (x[ib].qs[j / 4] >> ((j % 4) * 2)) & 0x3;
-        vals[l] = TURBO_CENTROIDS_2BIT[idx] * __half2float(x[ib].norm);
+        hvals[l] = __hmul(__float2half(TURBO_CENTROIDS_2BIT[idx]), norm_h);
     }
     if constexpr (std::is_same_v<T, half>) {
         half * hdst = (half *) dst;
-        for (int l = 0; l < ne; l++) hdst[l] = __float2half(vals[l]);
+        for (int l = 0; l < ne; l++) hdst[l] = hvals[l];
     } else {
         float * fdst = (float *) dst;
-        for (int l = 0; l < ne; l++) fdst[l] = vals[l];
+        for (int l = 0; l < ne; l++) fdst[l] = __half2float(hvals[l]);
     }
 }
 
@@ -761,18 +763,19 @@ static __device__ __forceinline__ void dequantize_V_turbo4_0(const void * __rest
     const int     iqs = i0 % QK_TURBO4;
 
     static_assert(ne == 2 || ne == 4, "bad ne");
-    float vals[ne];
+    const __half norm_h = x[ib].norm;
+    half hvals[ne];
     for (int l = 0; l < ne; l++) {
         const int j = iqs + l;
         const uint8_t idx = (x[ib].qs[j / 2] >> ((j % 2) * 4)) & 0xF;
-        vals[l] = TURBO_CENTROIDS_4BIT[idx] * __half2float(x[ib].norm);
+        hvals[l] = __hmul(__float2half(TURBO_CENTROIDS_4BIT[idx]), norm_h);
     }
     if constexpr (std::is_same_v<T, half>) {
         half * hdst = (half *) dst;
-        for (int l = 0; l < ne; l++) hdst[l] = __float2half(vals[l]);
+        for (int l = 0; l < ne; l++) hdst[l] = hvals[l];
     } else {
         float * fdst = (float *) dst;
-        for (int l = 0; l < ne; l++) fdst[l] = vals[l];
+        for (int l = 0; l < ne; l++) fdst[l] = __half2float(hvals[l]);
     }
 }
 

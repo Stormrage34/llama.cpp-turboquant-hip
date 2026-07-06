@@ -327,6 +327,22 @@ static __constant__ float TURBO_CENTROIDS_4BIT[16] = {
      0.068756f,  0.089527f,  0.117195f,  0.173926f
 };
 
+// NOTE: _H variants omitted — __float2half() cannot initialize __constant__ on HIP.
+// Use __float2half(TURBO_CENTROIDS_4BIT[idx]) at call site instead.
+#if 0
+// __float2half cannot initialize __constant__ on HIP — use TURBO_CENTROIDS_4BIT + __float2half at runtime
+static __constant__ const __half TURBO_CENTROIDS_4BIT_H[16] = {
+    __float2half(-0.173926f), __float2half(-0.117195f),
+    __float2half(-0.089527f), __float2half(-0.068756f),
+    __float2half(-0.051262f), __float2half(-0.035597f),
+    __float2half(-0.020989f), __float2half(-0.006938f),
+    __float2half( 0.006938f), __float2half( 0.020989f),
+    __float2half( 0.035597f), __float2half( 0.051262f),
+    __float2half( 0.068756f), __float2half( 0.089527f),
+    __float2half( 0.117195f), __float2half( 0.173926f),
+};
+#endif
+
 // ---- Midpoints for nearest 4-bit centroid lookup ----
 
 static __constant__ float TURBO_MID_4BIT[15] = {
@@ -489,7 +505,7 @@ static __device__ __forceinline__ float turbo2_dequant_element(
 
 static __device__ __forceinline__ void dequantize_turbo3_0(const void * vx, const int64_t ib, const int iqs, float2 & v) {
     const block_turbo3_0 * x = (const block_turbo3_0 *) vx;
-    const float norm = __half2float(x[ib].norm);
+    const __half2 norm_h2 = __half2half2(x[ib].norm);
     uint8_t low0 = (x[ib].qs[iqs / 4] >> ((iqs % 4) * 2)) & 0x3;
     uint8_t hi0  = (x[ib].signs[iqs / 8] >> (iqs % 8)) & 0x1;
     uint8_t idx0 = low0 | (hi0 << 2);
@@ -497,28 +513,34 @@ static __device__ __forceinline__ void dequantize_turbo3_0(const void * vx, cons
     uint8_t low1 = (x[ib].qs[iqs1 / 4] >> ((iqs1 % 4) * 2)) & 0x3;
     uint8_t hi1  = (x[ib].signs[iqs1 / 8] >> (iqs1 % 8)) & 0x1;
     uint8_t idx1 = low1 | (hi1 << 2);
-    v.x = TURBO_CENTROIDS_3BIT[idx0] * norm;
-    v.y = TURBO_CENTROIDS_3BIT[idx1] * norm;
+    const __half2 cent_h2 = make_half2(__float2half(TURBO_CENTROIDS_3BIT[idx0]), __float2half(TURBO_CENTROIDS_3BIT[idx1]));
+    const __half2 prod    = __hmul2(norm_h2, cent_h2);
+    v.x = __half2float(prod.x);
+    v.y = __half2float(prod.y);
 }
 
 static __device__ __forceinline__ void dequantize_turbo4_0(const void * vx, const int64_t ib, const int iqs, float2 & v) {
     const block_turbo4_0 * x = (const block_turbo4_0 *) vx;
-    const float norm = __half2float(x[ib].norm);
+    const __half2 norm_h2 = __half2half2(x[ib].norm);
     uint8_t idx0 = (x[ib].qs[iqs / 2] >> ((iqs % 2) * 4)) & 0xF;
     int iqs1 = iqs + 1;
     uint8_t idx1 = (x[ib].qs[iqs1 / 2] >> ((iqs1 % 2) * 4)) & 0xF;
-    v.x = TURBO_CENTROIDS_4BIT[idx0] * norm;
-    v.y = TURBO_CENTROIDS_4BIT[idx1] * norm;
+    const __half2 cent_h2 = make_half2(__float2half(TURBO_CENTROIDS_4BIT[idx0]), __float2half(TURBO_CENTROIDS_4BIT[idx1]));
+    const __half2 prod    = __hmul2(norm_h2, cent_h2);
+    v.x = __half2float(prod.x);
+    v.y = __half2float(prod.y);
 }
 
 static __device__ __forceinline__ void dequantize_turbo2_0(const void * vx, const int64_t ib, const int iqs, float2 & v) {
     const block_turbo2_0 * x = (const block_turbo2_0 *) vx;
-    const float norm = __half2float(x[ib].norm);
+    const __half2 norm_h2 = __half2half2(x[ib].norm);
     uint8_t idx0 = (x[ib].qs[iqs / 4] >> ((iqs % 4) * 2)) & 0x3;
     int iqs1 = iqs + 1;
     uint8_t idx1 = (x[ib].qs[iqs1 / 4] >> ((iqs1 % 4) * 2)) & 0x3;
-    v.x = TURBO_CENTROIDS_2BIT[idx0] * norm;
-    v.y = TURBO_CENTROIDS_2BIT[idx1] * norm;
+    const __half2 cent_h2 = make_half2(__float2half(TURBO_CENTROIDS_2BIT[idx0]), __float2half(TURBO_CENTROIDS_2BIT[idx1]));
+    const __half2 prod    = __hmul2(norm_h2, cent_h2);
+    v.x = __half2float(prod.x);
+    v.y = __half2float(prod.y);
 }
 
 // ============================================================================
