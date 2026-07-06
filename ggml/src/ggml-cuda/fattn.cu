@@ -493,7 +493,7 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
                     }
                 }
             }
-            if (!gqa_opt_applies && Q->ne[1] == 1 && !is_turbo_K) {
+            if (!gqa_opt_applies && Q->ne[1] == 1 && !is_turbo_K && !is_turbo_V) {
                 return BEST_FATTN_KERNEL_VEC;
             }
         }
