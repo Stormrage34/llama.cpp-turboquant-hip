@@ -139,7 +139,9 @@ static __device__ __forceinline__ void dequantize_planar3_0(const void * vx, con
     const block_planar3_0 * x = (const block_planar3_0 *) vx;
     const float norm = __half2float(x[ib].norm);
 
-    // Dequantize target pair at (iqs, iqs+1) — inverse Givens rotation.
+    // Centroid lookup — no inverse Givens rotation.
+    // The set-rows kernel stores values without forward rotation (same design
+    // as turbo set-rows), so dequant must not inverse-rotate.
     uint8_t low0 = (x[ib].qs[iqs / 4] >> ((iqs % 4) * 2)) & 0x3;
     uint8_t hi0  = (x[ib].signs[iqs / 8] >> (iqs % 8)) & 0x1;
     uint8_t idx0 = low0 | (hi0 << 2);
@@ -149,49 +151,28 @@ static __device__ __forceinline__ void dequantize_planar3_0(const void * vx, con
     uint8_t hi1  = (x[ib].signs[iqs1 / 8] >> (iqs1 % 8)) & 0x1;
     uint8_t idx1 = low1 | (hi1 << 2);
 
-    float kv0 = PLANAR3_CENTROIDS[idx0] * norm;
-    float kv1 = PLANAR3_CENTROIDS[idx1] * norm;
-
-    // Inverse Givens rotation — pair_index = iqs / 2.
-    float c, s;
-    planar3_get_rotation(iqs / 2, c, s);
-    givens_inverse(kv0, kv1, c, s);
-
-    v.x = kv0;
-    v.y = kv1;
+    v.x = PLANAR3_CENTROIDS[idx0] * norm;
+    v.y = PLANAR3_CENTROIDS[idx1] * norm;
 }
 
 static __device__ __forceinline__ void dequantize_iso3_0(const void * vx, const int64_t ib, const int iqs, float2 & v) {
     const block_iso3_0 * x = (const block_iso3_0 *) vx;
     const float norm = __half2float(x[ib].norm);
 
-    // Align to quaternion block boundary (4 elements).  Since the float2
-    // interface processes 2 elements per call (QR_ISO3=1) but the inverse
-    // quaternion rotation needs all 4, we load all 4, apply the full 4x4
-    // rotation, and return the pair at [offset..offset+1].
-    const int base   = (iqs / 4) * 4;
-    const int offset = iqs - base;  // 0 or 2
+    // Centroid lookup — no inverse quaternion rotation.
+    // Same design as planar3_0: set-rows kernel stores without forward rotation,
+    // so dequant must not inverse-rotate.
+    uint8_t low0 = (x[ib].qs[iqs / 4] >> ((iqs % 4) * 2)) & 0x3;
+    uint8_t hi0  = (x[ib].signs[iqs / 8] >> (iqs % 8)) & 0x1;
+    uint8_t idx0 = low0 | (hi0 << 2);
 
-    // Load ALL 4 centroid values from the quaternion block.
-    float kv[4];
-    for (int k = 0; k < 4; k++) {
-        const int j = base + k;
-        const uint8_t low2 = (x[ib].qs[j / 4] >> ((j % 4) * 2)) & 0x3;
-        const uint8_t hi1  = (x[ib].signs[j / 8] >> (j % 8)) & 0x1;
-        const uint8_t idx  = low2 | (hi1 << 2);
-        kv[k] = ISO3_CENTROIDS[idx] * norm;
-    }
+    int iqs1 = iqs + 1;
+    uint8_t low1 = (x[ib].qs[iqs1 / 4] >> ((iqs1 % 4) * 2)) & 0x3;
+    uint8_t hi1  = (x[ib].signs[iqs1 / 8] >> (iqs1 % 8)) & 0x1;
+    uint8_t idx1 = low1 | (hi1 << 2);
 
-    // Full inverse quaternion rotation: conj(q_L) * kv * q_R
-    float q_L[4], q_R[4];
-    iso3_get_rotation(base / 4, q_L, q_R);
-    float conj_L[4], tmp[4], result[4];
-    quat_conj(conj_L, q_L);
-    quat_mul(tmp, conj_L, kv);
-    quat_mul(result, tmp, q_R);
-
-    v.x = result[offset];
-    v.y = result[offset + 1];
+    v.x = ISO3_CENTROIDS[idx0] * norm;
+    v.y = ISO3_CENTROIDS[idx1] * norm;
 }
 
 // ============================================================================
