@@ -276,9 +276,13 @@ static void ggml_cuda_flash_attn_ext_vec(ggml_backend_cuda_context & ctx, ggml_t
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_TURBO2_0, GGML_TYPE_F16)
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_TURBO3_0, GGML_TYPE_F16)
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_TURBO4_0, GGML_TYPE_F16)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_PLANAR3_0, GGML_TYPE_F16)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_ISO3_0,   GGML_TYPE_F16)
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_TURBO2_0, GGML_TYPE_TURBO2_0)
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_TURBO3_0, GGML_TYPE_TURBO3_0)
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_TURBO4_0, GGML_TYPE_TURBO4_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_PLANAR3_0, GGML_TYPE_PLANAR3_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_ISO3_0,   GGML_TYPE_ISO3_0)
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_F16,  GGML_TYPE_TURBO2_0)
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q4_0, GGML_TYPE_TURBO2_0)
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q4_1, GGML_TYPE_TURBO2_0)
@@ -302,6 +306,22 @@ static void ggml_cuda_flash_attn_ext_vec(ggml_backend_cuda_context & ctx, ggml_t
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q5_1, GGML_TYPE_TURBO4_0)
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q8_0, GGML_TYPE_TURBO4_0)
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_BF16, GGML_TYPE_TURBO4_0)
+
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_F16,  GGML_TYPE_PLANAR3_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q4_0, GGML_TYPE_PLANAR3_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q4_1, GGML_TYPE_PLANAR3_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q5_0, GGML_TYPE_PLANAR3_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q5_1, GGML_TYPE_PLANAR3_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q8_0, GGML_TYPE_PLANAR3_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_BF16, GGML_TYPE_PLANAR3_0)
+
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_F16,  GGML_TYPE_ISO3_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q4_0, GGML_TYPE_ISO3_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q4_1, GGML_TYPE_ISO3_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q5_0, GGML_TYPE_ISO3_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q5_1, GGML_TYPE_ISO3_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q8_0, GGML_TYPE_ISO3_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_BF16, GGML_TYPE_ISO3_0)
 
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_F16,  GGML_TYPE_F16)
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q4_0, GGML_TYPE_F16)
@@ -499,10 +519,13 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
     const bool can_use_vector_kernel = Q->ne[0] <= 256 && Q->ne[0] % 64 == 0 && Q->ne[0] != 192 && K->ne[1] % FATTN_KQ_STRIDE == 0;
 
         // Turbo types have VEC template instantiations (lines 276-304).
-        // Non-VEC paths (TILE/WMMA/MMA) cannot decompress turbo blocks —
-        // fall back to getrows (grid-level dequant → F16).
-    const bool is_turbo_K = ggml_is_turbo(K->type);
-    const bool is_turbo_V = ggml_is_turbo(V->type);
+        // Non-VEC paths (TILE/WMMA/MMA) cannot decompress turbo blocks --
+        // fall back to getrows (grid-level dequant -> F16).
+        // Planar/iso types: same constraint -- only VEC can handle their dequant inline.
+    const bool is_turbo_K = ggml_is_turbo(K->type) ||
+        K->type == GGML_TYPE_PLANAR3_0 || K->type == GGML_TYPE_ISO3_0;
+    const bool is_turbo_V = ggml_is_turbo(V->type) ||
+        V->type == GGML_TYPE_PLANAR3_0 || V->type == GGML_TYPE_ISO3_0;
 
     // If Turing tensor cores are available, use them:
     if (turing_mma_available(cc) && Q->ne[0] != 40 && Q->ne[0] != 72) {
@@ -595,6 +618,13 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
             if (Q->ne[1] <= 2) {
                 return BEST_FATTN_KERNEL_VEC;
             }
+        }
+        // For turbo V on non-tensor GPUs, use VEC regardless of batch size.
+        // The VEC kernel has inline dequant for all turbo V types (dequantize_V_turbo*,
+        // dequantize_V_planar3_0, dequantize_V_iso3_0) and avoids the expensive bulk
+        // F16 conversion that TILE/MMA would require.
+        if ((is_turbo_K || is_turbo_V) && !ggml_is_quantized(K->type)) {
+            return BEST_FATTN_KERNEL_VEC;
         }
     }
     // Turbo types must never reach TILE/MMA kernels (they expect F16).

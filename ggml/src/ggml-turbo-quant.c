@@ -552,6 +552,65 @@ void quantize_row_turbo4_0_ref(const float * GGML_RESTRICT x, block_turbo4_0 * G
     }
 }
 
+void quantize_row_turbo4_0_kv_ref(const float * GGML_RESTRICT x, block_turbo4_0 * GGML_RESTRICT y, int64_t k) {
+    // GPU-matched KV cache quantize: no WHT rotation, uses N(0, 1/128) centroids.
+    // Matches the CUDA set-rows path (k_set_rows_turbo4) and the VEC FA dequantize
+    // path (dequantize_V_turbo4_0). Centroids match TURBO_CENTROIDS_4BIT in turbo-quant.cuh.
+    static const float CENTROIDS_KV_4BIT[16] = {
+        -0.173926f, -0.117195f, -0.089527f, -0.068756f,
+        -0.051262f, -0.035597f, -0.020989f, -0.006938f,
+         0.006938f,  0.020989f,  0.035597f,  0.051262f,
+         0.068756f,  0.089527f,  0.117195f,  0.173926f
+    };
+
+    assert(k % QK_TURBO4 == 0);
+    const int nb = k / QK_TURBO4;
+    const int d  = QK_TURBO4;
+
+    for (int block = 0; block < nb; block++) {
+        const float * src = x + block * d;
+
+        // Per-block L2 norm (no group-level normalization — each block is self-contained)
+        float norm_sq = 0.0f;
+        for (int i = 0; i < d; i++) norm_sq += src[i] * src[i];
+        float norm = sqrtf(norm_sq);
+
+        float normalized[TURBO_D];
+        if (norm > 1e-10f) {
+            const float inv = 1.0f / norm;
+            for (int i = 0; i < d; i++) normalized[i] = src[i] * inv;
+        } else {
+            memset(normalized, 0, d * sizeof(float));
+        }
+
+        // Quantize: nearest centroid (exhaustive search for 4-bit)
+        uint8_t indices[TURBO_D];
+        float recon_sq = 0.0f;
+        for (int i = 0; i < d; i++) {
+            uint8_t best = 0;
+            float best_d = fabsf(normalized[i] - CENTROIDS_KV_4BIT[0]);
+            for (int c = 1; c < 16; c++) {
+                float dist = fabsf(normalized[i] - CENTROIDS_KV_4BIT[c]);
+                if (dist < best_d) { best_d = dist; best = c; }
+            }
+            indices[i] = best;
+            recon_sq += CENTROIDS_KV_4BIT[best] * CENTROIDS_KV_4BIT[best];
+        }
+
+        // Reconstruction-corrected norm
+        float recon_norm = sqrtf(recon_sq);
+        float corrected_norm = (recon_norm > 1e-10f) ? norm / recon_norm : norm;
+        y[block].norm = GGML_FP32_TO_FP16(corrected_norm);
+
+        // Pack: 2 elements per byte (nibble)
+        memset(y[block].qs, 0, d / 2);
+        for (int i = 0; i < d; i++) {
+            y[block].qs[i / 2] |= (uint8_t)((indices[i] & 0xF) << ((i % 2) * 4));
+        }
+        y[block].rnorm = GGML_FP32_TO_FP16(0.0f);
+    }
+}
+
 void dequantize_row_turbo4_0(const block_turbo4_0 * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k) {
     turbo_init_rotation();
 

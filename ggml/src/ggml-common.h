@@ -502,6 +502,7 @@ typedef struct {
     float    residual_norm;
     uint8_t  qjl_signs[4];
 } block_rq_prod;
+#define BLOCK_RQ_PROD_DEFINED
 
 #endif // GGML_COMMON_DECL (closes #if defined GGML_COMMON_DECL)
 #endif // GGML_COMMON_DECL (closes #ifndef GGML_COMMON_DECL)

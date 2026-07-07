@@ -86,13 +86,11 @@ __global__ void kernel_cpy_f16_planar3(
     float inv_norm = grp_norm > 1e-10f ? 1.0f / grp_norm : 0.0f;
     for (int j = 0; j < QK_PLANAR3; j++) buf[j] *= inv_norm;
 
-    // Forward Givens rotation per pair
+    // No forward rotation — set-rows stores without rotation (norot path),
+    // so the CPY path must match. The VEC FA inline dequant reads centroids
+    // directly without inverse rotation.
     float rotated[128];
-    for (int p = 0; p < 64; p++) {
-        float c = d_planar_cos[p], s_val = d_planar_sin[p];
-        rotated[p*2]   = c * buf[p*2] - s_val * buf[p*2+1];
-        rotated[p*2+1] = s_val * buf[p*2] + c * buf[p*2+1];
-    }
+    memcpy(rotated, buf, sizeof(buf));
 
     // Quantize + pack (3-bit: 2-bit qs + 1-bit signs)
     for (int j = 0; j < QK_PLANAR3/4; j++) blk->qs[j] = 0;
@@ -134,27 +132,10 @@ __global__ void kernel_cpy_f16_iso3(
     float inv_norm = grp_norm > 1e-10f ? 1.0f / grp_norm : 0.0f;
     for (int j = 0; j < QK_ISO3; j++) buf[j] *= inv_norm;
 
-    // Forward quaternion rotation per 4D block: q_L * v * conj(q_R)
-    // Must match k_set_rows_iso3 forward rotation for correct round-trip.
+    // No forward rotation — matches set-rows norot design.
+    // dequantize_iso3_0 reads centroids directly without inverse rotation.
     float rotated[128];
-    for (int g = 0; g < 32; g++) {
-        float qw_l = d_iso_qw[g], qx_l = d_iso_qx[g], qy_l = d_iso_qy[g], qz_l = d_iso_qz[g];
-        float qw_r = d_iso_qw_r[g], qx_r = d_iso_qx_r[g], qy_r = d_iso_qy_r[g], qz_r = d_iso_qz_r[g];
-        float v0 = buf[g*4], v1 = buf[g*4+1], v2 = buf[g*4+2], v3 = buf[g*4+3];
-
-        // q_L * v
-        float t0 = qw_l*v0 - qx_l*v1 - qy_l*v2 - qz_l*v3;
-        float t1 = qw_l*v1 + qx_l*v0 + qy_l*v3 - qz_l*v2;
-        float t2 = qw_l*v2 - qx_l*v3 + qy_l*v0 + qz_l*v1;
-        float t3 = qw_l*v3 + qx_l*v2 - qy_l*v1 + qz_l*v0;
-
-        // conj(q_R) = (qw_r, -qx_r, -qy_r, -qz_r)
-        // (q_L * v) * conj(q_R) — matches quat_mul(quat_mul(q_L, v), conj(q_R)) in set-rows.cu
-        rotated[g*4]   = t0*qw_r + t3*qx_r - t2*qy_r;
-        rotated[g*4+1] = t1*qw_r + t3*qy_r - t0*qz_r;
-        rotated[g*4+2] = t2*qw_r - t3*qx_r + t0*qy_r;
-        rotated[g*4+3] = t3*qw_r - t2*qx_r - t1*qy_r + t0*qz_r;
-    }
+    memcpy(rotated, buf, sizeof(buf));
 
     // Quantize + pack (3-bit: 2-bit qs + 1-bit signs)
     for (int j = 0; j < QK_ISO3/4; j++) blk->qs[j] = 0;

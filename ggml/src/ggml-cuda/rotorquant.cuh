@@ -406,7 +406,9 @@ static __device__ __forceinline__ float rq_qjl_residual_correction(
 // dequantize_V_<type>: dequantize V from RQ blocks.
 // ============================================================================
 
+#ifndef QK_RQ
 #define QK_RQ 128
+#endif
 
 // ============================================================================
 // 3-bit centroids (Lloyd-Max for N(0, 1/128)) — needed by dequantize_V_RQ functions below.

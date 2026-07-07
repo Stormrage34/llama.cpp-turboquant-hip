@@ -9,6 +9,7 @@
 
 #include "ggml-common.h"
 #include "planar-iso-constants.cuh"
+#include "planar-iso-dequant.cuh"
 #if defined(__HIPCC__)
 #include <hip/hip_fp16.h>
 #else
@@ -129,7 +130,9 @@ __device__ void quantize_f32_iso3_block(const float * x, block_iso3_0 * dst) {
 }
 
 // ── Planar4: F32[128] → block_planar4_0 (Givens + 4-bit nibble) ────
-
+// 4-bit types (block_planar4_0, block_iso4_0, QK_PLANAR4, QK_ISO4)
+// are not yet defined in ggml-common.h. Guard until they are added.
+#if 0
 __device__ void quantize_f32_planar4_block(const float * x, block_planar4_0 * dst) {
     float norm_sq = 0.0f;
     float buf[128];
@@ -204,13 +207,18 @@ __device__ void quantize_f32_iso4_block(const float * x, block_iso4_0 * dst) {
     dst->rnorm = __float2half(0.0f);
 }
 
+#endif // 0 — end 4-bit guard; V-cache 3-bit norot functions below
+
 // ══════════════════════════════════════════════════════════════════════
 // V-cache variants: NO ROTATION (for transposed V cache)
 // ══════════════════════════════════════════════════════════════════════
 
-// Verify iso3/planar3 and iso4/planar4 share the same packed layout (cast in _norot variants).
+// Verify iso3/planar3 share the same packed layout (cast in _norot variants).
 static_assert(sizeof(block_iso3_0) == sizeof(block_planar3_0), "iso3/planar3 block size mismatch");
+// 4-bit types not yet defined — guard until planar4/iso4 are added.
+#if 0
 static_assert(sizeof(block_iso4_0) == sizeof(block_planar4_0), "iso4/planar4 block size mismatch");
+#endif
 
 __device__ void quantize_f32_planar3_block_norot(const float * x, block_planar3_0 * dst) {
     float norm_sq = 0.0f;
@@ -236,6 +244,8 @@ __device__ void quantize_f32_iso3_block_norot(const float * x, block_iso3_0 * ds
     quantize_f32_planar3_block_norot(x, (block_planar3_0 *)dst);
 }
 
+// 4-bit norot variants — guarded until block_planar4_0/block_iso4_0 are defined
+#if 0
 __device__ void quantize_f32_planar4_block_norot(const float * x, block_planar4_0 * dst) {
     float norm_sq = 0.0f;
     float buf[128];
@@ -258,3 +268,4 @@ __device__ void quantize_f32_planar4_block_norot(const float * x, block_planar4_
 __device__ void quantize_f32_iso4_block_norot(const float * x, block_iso4_0 * dst) {
     quantize_f32_planar4_block_norot(x, (block_planar4_0 *)dst);
 }
+#endif // 0 — 4-bit types not yet defined

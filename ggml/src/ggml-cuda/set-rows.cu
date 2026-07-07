@@ -1,6 +1,8 @@
 #include "set-rows.cuh"
 #include "cpy-utils.cuh"
 #include "turbo-quant.cuh"
+#include "set-rows-planar-iso.cuh"
+#include "rotorquant.cuh"
 
 typedef void (*set_rows_kernel_t)(const char * src, char * dst);
 
@@ -316,6 +318,48 @@ static void set_rows_cuda(ggml_backend_cuda_context & ctx, const ggml_tensor * s
     } else if (dst->type == GGML_TYPE_IQ4_NL) {
         set_rows_cuda_quant<idx_t, block_iq4_nl, QK4_NL, quantize_f32_iq4_nl_block>(
             src0_d, src1_d, (block_iq4_nl*)dst->data,
+            ne00, ne01, ne02, ne03,
+            ne10, ne11, ne12, ne13,
+            nb01, nb02, nb03,
+            nb10, nb11, nb12,
+            nb1, nb2, nb3,
+            stream
+        );
+    } else if (dst->type == GGML_TYPE_PLANAR3_0) {
+        ggml_cuda_init_planar_iso_constants();
+        set_rows_cuda_quant<idx_t, block_planar3_0, QK_PLANAR3, quantize_f32_planar3_block_norot>(
+            src0_d, src1_d, (block_planar3_0*)dst->data,
+            ne00, ne01, ne02, ne03,
+            ne10, ne11, ne12, ne13,
+            nb01, nb02, nb03,
+            nb10, nb11, nb12,
+            nb1, nb2, nb3,
+            stream
+        );
+    } else if (dst->type == GGML_TYPE_ISO3_0) {
+        ggml_cuda_init_planar_iso_constants();
+        set_rows_cuda_quant<idx_t, block_iso3_0, QK_ISO3, quantize_f32_iso3_block_norot>(
+            src0_d, src1_d, (block_iso3_0*)dst->data,
+            ne00, ne01, ne02, ne03,
+            ne10, ne11, ne12, ne13,
+            nb01, nb02, nb03,
+            nb10, nb11, nb12,
+            nb1, nb2, nb3,
+            stream
+        );
+    } else if (dst->type == GGML_TYPE_RQ_MSE) {
+        set_rows_cuda_quant<idx_t, block_rq_mse_2, QK_RQ, quantize_f32_rq_mse_2_block>(
+            src0_d, src1_d, (block_rq_mse_2*)dst->data,
+            ne00, ne01, ne02, ne03,
+            ne10, ne11, ne12, ne13,
+            nb01, nb02, nb03,
+            nb10, nb11, nb12,
+            nb1, nb2, nb3,
+            stream
+        );
+    } else if (dst->type == GGML_TYPE_RQ_PROD) {
+        set_rows_cuda_quant<idx_t, block_rq_prod, QK_RQ, quantize_f32_rq_prod_block>(
+            src0_d, src1_d, (block_rq_prod*)dst->data,
             ne00, ne01, ne02, ne03,
             ne10, ne11, ne12, ne13,
             nb01, nb02, nb03,

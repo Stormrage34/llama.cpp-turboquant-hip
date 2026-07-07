@@ -946,7 +946,7 @@ static const struct ggml_type_traits type_traits[GGML_TYPE_COUNT] = {
         .type_size                = sizeof(block_turbo4_0),
         .is_quantized             = true,
         .to_float                 = (ggml_to_float_t) dequantize_row_turbo4_0,
-        .from_float_ref           = (ggml_from_float_t) quantize_row_turbo4_0_ref,
+        .from_float_ref           = (ggml_from_float_t) quantize_row_turbo4_0_kv_ref,
     },
     [GGML_TYPE_PLANAR3_0] = {
         .type_name                = "planar3_0",
