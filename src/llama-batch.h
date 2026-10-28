@@ -150,6 +150,28 @@ struct llama_batch_ext {
     bool set_decision_order(int32_t idx, int32_t order);
 };
 
+// [TAG_RECURRENT_ROLLBACK_SPLITS]
+// The trailing (1 + n_rs_seq) tokens of each sequence must land in the same ubatch so that the
+// rollback snapshots written by a recurrent memory stay valid: after a partially accepted draft the
+// memory restores the state of a prefix, and the token that produced that state has to be part of
+// the same ubatch as the tokens it is rolled back with. n_rs_seq == 0 means the recurrent memory
+// carries no speculative state, so no tail needs to be kept.
+//
+// This is the single definition of that rule. Do not inline the expression at the call sites: a
+// copy that drifts (in particular one that passes 0) is legal and silent for llama_batch_allocr and
+// corrupts the recurrent state instead of failing.
+//
+// Each call site therefore asserts the value it is about to pass against n_rs_seq directly:
+//
+//     GGML_ASSERT(n_keep_tail == (n_rs_seq == 0 ? 0 : n_rs_seq + 1));
+//
+// The assert deliberately does not compare against llama_n_keep_tail() - that would restate the
+// helper and could not fail. It encodes the invariant instead: 0 is the ONLY legal keep-tail when
+// the memory carries no rollback state, and n_rs_seq + 1 is the ONLY legal value when it does.
+static inline uint32_t llama_n_keep_tail(uint32_t n_rs_seq) {
+    return n_rs_seq > 0 ? n_rs_seq + 1 : 0;
+}
+
 // a helper for sanitizing, fulfilling and splitting a batch
 class llama_batch_allocr {
 public:

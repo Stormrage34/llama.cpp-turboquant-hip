@@ -12,8 +12,10 @@
 #include <fstream>
 
 struct cli_timings {
-    double prompt_per_second    = 0.0;
-    double predicted_per_second = 0.0;
+    double  prompt_per_second    = 0.0;
+    double  predicted_per_second = 0.0;
+    int64_t draft_n              = 0; // drafts the server generated for this request (0 = no speculation)
+    int64_t draft_n_accepted     = 0;
 };
 
 struct cli_context_impl;

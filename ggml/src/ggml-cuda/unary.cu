@@ -303,28 +303,55 @@ void ggml_cuda_op_softplus(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
 }
 /* gated ops */
 
+// q8_1 != nullptr: the launch also writes the q8_1 blocks of its own output, so the matvec that
+// reads dst skips its separate quantize_q8_1 launch (see ggml_cuda_prequant_take)
 template <float (*op)(float), typename T>
-static __global__ void unary_gated_op_kernel(const T * x, const T * g, T * dst, const int64_t k, const int64_t n, const int64_t o0, const int64_t o1) {
+static __global__ void unary_gated_op_kernel(const T * x, const T * g, T * dst, const int64_t k, const int64_t n,
+                                             const int64_t o0, const int64_t o1, block_q8_1 * q8_1) {
     ggml_cuda_pdl_lc();
     const int64_t i = int64_t(blockDim.x)*blockIdx.x + threadIdx.x;
 
-    if (i >= k) {
-        return;
+    float v = 0.0f;
+    if (i < k) {
+        // perform base op and multiply with gate (either offset in same tensor or a separate one)
+        const int64_t j0 = (i / n) * o0 + (i % n);
+        const int64_t j1 = o0 == o1 ? j0 : (i / n) * o1 + (i % n);
+
+        ggml_cuda_pdl_sync();
+        v = op(ggml_cuda_cast<float>(x[j0])) * ggml_cuda_cast<float>(g[j1]);
+        dst[i] = ggml_cuda_cast<T>(v);
     }
 
-    // perform base op and multiply with gate (either offset in same tensor or a separate one)
-    const int64_t j0 = (i / n) * o0 + (i % n);
-    const int64_t j1 = o0 == o1 ? j0 : (i / n) * o1 + (i % n);
+    // phase 2: the 32 lanes of a warp just produced 32 consecutive elements of dst, i.e. exactly one
+    // q8_1 block (CUDA_GLU_BLOCK_SIZE is a multiple of QK8_1). Every lane of the launch block takes
+    // part in the reduction, so no lane is masked out: elements past k stay 0.0f and their group is
+    // not stored. Same reduction width and same rounding expression as quantize_q8_1, so the bytes
+    // are identical to a separate quantise launch over the same f32 values.
+    if (q8_1 != nullptr) {
+        const int64_t base = int64_t(blockDim.x)*blockIdx.x;
+        const int64_t grp  = base/QK8_1 + threadIdx.x/QK8_1;
+        const int     lane = threadIdx.x % QK8_1;
 
-    ggml_cuda_pdl_sync();
-    dst[i] = ggml_cuda_cast<T>(op(ggml_cuda_cast<float>(x[j0])) * ggml_cuda_cast<float>(g[j1]));
+        const float  amax = warp_reduce_max<QK8_1>(fabsf(v));
+        const float  sum  = warp_reduce_sum<QK8_1>(v);
+        const float  d    = amax / 127.0f;
+        const int8_t q    = amax == 0.0f ? 0 : roundf(v / d);
+
+        if (base + (threadIdx.x/QK8_1)*QK8_1 < k) {
+            q8_1[grp].qs[lane] = q;
+            if (lane == 0) {
+                q8_1[grp].ds = make_half2(d, sum);
+            }
+        }
+    }
 }
 
 template <float (*op)(float), typename T>
-static void unary_gated_cuda(const T * x, const T * g, T * dst, const int64_t k, const int64_t n, const int64_t o0, const int64_t o1, cudaStream_t stream) {
+static void unary_gated_cuda(const T * x, const T * g, T * dst, const int64_t k, const int64_t n, const int64_t o0,
+                             const int64_t o1, cudaStream_t stream, block_q8_1 * q8_1 = nullptr) {
     const int64_t num_blocks = (k + CUDA_GLU_BLOCK_SIZE - 1) / CUDA_GLU_BLOCK_SIZE;
     const ggml_cuda_kernel_launch_params launch_params = ggml_cuda_kernel_launch_params((dim3)num_blocks, CUDA_GLU_BLOCK_SIZE, 0, stream);
-    ggml_cuda_kernel_launch(unary_gated_op_kernel<op, T>, launch_params, x, g, dst, k, n, o0, o1);
+    ggml_cuda_kernel_launch(unary_gated_op_kernel<op, T>, launch_params, x, g, dst, k, n, o0, o1, q8_1);
 }
 
 template <float (*op)(float)>
@@ -357,6 +384,13 @@ void ggml_cuda_op_unary_gated(ggml_backend_cuda_context & ctx, ggml_tensor * dst
 
     const int32_t swapped = ((const int32_t *) dst->op_params)[1];
 
+    // the matvec that reads this output would otherwise launch its own quantize_q8_1; the slot only
+    // exists when dst is the f32 run that matvec quantises (see ggml_cuda_try_fuse)
+    block_q8_1 * q8_1 = nullptr;
+    if (ggml_cuda_prequant_flat_ok(dst)) {
+        q8_1 = ggml_cuda_prequant_take(&ctx, dst, ggml_cuda_prequant_size(ggml_nelements(dst)));
+    }
+
     if (src0->type == GGML_TYPE_F16) {
         half * src0_p = (half *) src0_d;
         half * src1_p = (half *) src1_d;
@@ -386,7 +420,7 @@ void ggml_cuda_op_unary_gated(ggml_backend_cuda_context & ctx, ggml_tensor * dst
             src1_p += swapped ? 0 : nc;
         }
 
-        unary_gated_cuda<op>(src0_p, src1_p, (float *)dst_d, ggml_nelements(dst), nc, src0_o / sizeof(float), src1_o / sizeof(float), stream);
+        unary_gated_cuda<op>(src0_p, src1_p, (float *)dst_d, ggml_nelements(dst), nc, src0_o / sizeof(float), src1_o / sizeof(float), stream, q8_1);
     }
 }
 
@@ -730,6 +764,13 @@ static void ggml_cuda_op_unary_mul_impl(ggml_backend_cuda_context & ctx, ggml_te
     const int64_t unary_stride = unary_src->nb[1];
     const int64_t other_stride = other_src->nb[1];
 
+    // the matvec that reads this output would otherwise launch its own quantize_q8_1; the slot only
+    // exists when mul_node is the f32 run that matvec quantises (see ggml_cuda_try_fuse)
+    block_q8_1 * q8_1 = nullptr;
+    if (ggml_cuda_prequant_flat_ok(mul_node)) {
+        q8_1 = ggml_cuda_prequant_take(&ctx, mul_node, ggml_cuda_prequant_size(ggml_nelements(mul_node)));
+    }
+
     if (unary_src->type == GGML_TYPE_F16) {
         unary_gated_cuda<op>((const half *) unary_src->data, (const half *) other_src->data,
                              (half *) mul_node->data, k, nc,
@@ -741,7 +782,7 @@ static void ggml_cuda_op_unary_mul_impl(ggml_backend_cuda_context & ctx, ggml_te
     } else {
         unary_gated_cuda<op>((const float *) unary_src->data, (const float *) other_src->data,
                              (float *) mul_node->data, k, nc,
-                             unary_stride / sizeof(float), other_stride / sizeof(float), stream);
+                             unary_stride / sizeof(float), other_stride / sizeof(float), stream, q8_1);
     }
 }
 

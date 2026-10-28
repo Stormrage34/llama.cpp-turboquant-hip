@@ -749,6 +749,17 @@ static __device__ __forceinline__ int ggml_cuda_dp4a(const int a, const int b, i
 #endif // defined(GGML_USE_HIP)
 }
 
+// scale of an MMQ dp4a result. The integer product is exact in fp32 (|sc| <= 255, |sumi| < 2^24),
+// so converting the operands first is bit-identical, and v_mul_lo_u32 is quarter rate on RDNA2
+// while a float multiply is full rate. MMVQ keeps the integer form.
+static __device__ __forceinline__ float ggml_cuda_mmq_scale_sumi(int sc, int sumi) {
+#if defined(GGML_USE_HIP)
+    return (float) sc * (float) sumi;
+#else
+    return sc * sumi;
+#endif
+}
+
 static __device__ __forceinline__ void ggml_cuda_mad(float & acc, const float v, const float u) {
     acc += v*u;
 }
@@ -1454,6 +1465,28 @@ struct ggml_backend_cuda_context {
 
     int curr_stream_no = 0;
 
+    // mul_mat_vec_f dual launches: outputs already written by an earlier launch in the current graph
+    // execution, so the executor skips these nodes when it reaches them (see ggml_cuda_try_fuse)
+    std::vector<const ggml_tensor *> dual_mm_outputs;
+
+    // q8_1 blocks written by the fused wide RMS_NORM + MUL, keyed by the f32 tensor they quantise.
+    // The matvecs that read that tensor then skip their own quantize_q8_1 launch (see mmvq.cu).
+    // This is a context-owned arena on purpose: a ggml tensor would enter ggml-alloc's free list
+    // and could be handed the address of another tensor that is still live.
+    struct ggml_cuda_prequant_entry {
+        const ggml_tensor * src1   = nullptr;
+        uint64_t            stamp  = 0;
+        size_t              off    = 0;
+        size_t              nbytes = 0;
+        // stamp of the execution in which a producer launch actually filled the slot. Until that
+        // happens the slot must not be handed to a consumer: it would hold another execution's bytes.
+        uint64_t            written_stamp = 0;
+    };
+    std::vector<ggml_cuda_prequant_entry> prequant;
+    uint64_t   prequant_stamp = 0;
+    char *     prequant_buf   = nullptr;
+    size_t     prequant_arena = 0;
+
 #ifdef USE_CUDA_GRAPH
     // Map from first_node_ptr to cuda_graph - allows multiple graphs per context
     // when the computation is split across CPU/GPU (e.g., with --n-cpu-moe)
@@ -1562,6 +1595,166 @@ struct ggml_backend_cuda_context {
     }
 };
 
+// size of the q8_1 blocks for one row of ne0 f32 elements, padded as the quantizer expects
+static inline size_t ggml_cuda_prequant_size(int64_t ne0) {
+    return (size_t) ne0 * sizeof(block_q8_1) / QK8_1;
+}
+
+// a single contiguous f32 row with no padding: only then are its q8_1 blocks exactly the blocks
+// quantize_row_q8_1 would write for it (no zero-filled tail, no stride between blocks)
+static inline bool ggml_cuda_prequant_row_ok(const ggml_tensor * t) {
+    return t->type == GGML_TYPE_F32
+        && t->ne[1] == 1 && t->ne[2] == 1 && t->ne[3] == 1
+        && t->ne[0] % QK8_1 == 0
+        && GGML_PAD(t->ne[0], MATRIX_ROW_PADDING) == t->ne[0]
+        && ggml_is_contiguous(t);
+}
+
+// the f32 bytes of t are one tight, unpadded run (ggml_is_contiguous rules out gaps between rows),
+// so a matvec that views them as a single row of ggml_nelements(t) elements quantises exactly the
+// blocks a producer of these bytes writes. The gated norm output of qwen35 is such a tensor: a
+// [128, 48] multiply whose reshape to [6144, 1] is what the matvec reads. That the consumer's own
+// row padding is also absent is settled at lookup time: the slot is only found when the consumer
+// asks for exactly the same number of bytes.
+static inline bool ggml_cuda_prequant_flat_ok(const ggml_tensor * t) {
+    if (t->type != GGML_TYPE_F32 || !ggml_is_contiguous(t)) {
+        return false;
+    }
+    const int64_t n = ggml_nelements(t);
+    return n % QK8_1 == 0 && GGML_PAD(n, MATRIX_ROW_PADDING) == n;
+}
+
+// the fused norm writes the q8_1 blocks of its own output, but only when that output is a single
+// contiguous row: the fused bytes are then the same bytes quantize_row_q8_1_cuda would produce
+// (no padding, no zero-filled tail, one warp per 32-element block)
+static inline bool ggml_cuda_prequant_eligible(const ggml_tensor * mul) {
+    return mul->view_src == nullptr && ggml_cuda_prequant_row_ok(mul);
+}
+
+// the node whose bytes t covers. A contiguous reshape is a plain prefix view of its source, so a
+// matvec that reads the view reads exactly the bytes the producer of the source wrote.
+static inline const ggml_tensor * ggml_cuda_prequant_owner(const ggml_tensor * t) {
+    while (t->view_src != nullptr && t->data == t->view_src->data) {
+        t = t->view_src;
+    }
+    return t;
+}
+
+// returns the slot for src1 only if its producer ran in the current graph execution
+static inline void * ggml_cuda_prequant_find(ggml_backend_cuda_context * ctx, const ggml_tensor * src1, size_t nbytes) {
+    if (ctx->prequant_buf == nullptr) {
+        return nullptr;
+    }
+    const ggml_tensor * src1_owner = ggml_cuda_prequant_owner(src1);
+    for (const ggml_backend_cuda_context::ggml_cuda_prequant_entry & e : ctx->prequant) {
+        if (e.nbytes == nbytes && e.written_stamp == ctx->prequant_stamp &&
+            (e.src1 == src1 || e.src1 == src1_owner)) {
+            return ctx->prequant_buf + e.off;
+        }
+    }
+    return nullptr;
+}
+
+// claims the slot for src1 for the current execution; nullptr means "quantise as usual".
+// claimed_written == false reserves the memory without publishing it: a producer that is about to
+// write the blocks calls ggml_cuda_prequant_take() to publish them, so a consumer can never read a
+// slot that no launch filled in this execution.
+static inline void * ggml_cuda_prequant_add_impl(ggml_backend_cuda_context * ctx, const ggml_tensor * src1,
+                                                 size_t nbytes, bool claimed_written) {
+    static bool logged_alloc = false;
+    static bool logged_full  = false;
+
+    if (ctx->prequant_buf == nullptr) {
+        // deliberately not ctx.pool(): the pool hands out graph-lifetime blocks and cannot be
+        // allocated while a graph is being captured
+        if (cudaMalloc((void **) &ctx->prequant_buf, 32u << 20) != cudaSuccess) {
+            if (!logged_alloc) {
+                logged_alloc = true;
+                GGML_LOG_WARN("%s: cannot allocate the q8_1 prequant arena, fused norms will not quantise\n", __func__);
+            }
+            ctx->prequant_buf = nullptr;
+            return nullptr;
+        }
+        ctx->prequant_arena = 32u << 20;
+    }
+
+    size_t used = 0;
+    for (ggml_backend_cuda_context::ggml_cuda_prequant_entry & e : ctx->prequant) {
+        if (e.src1 == src1) {
+            if (e.nbytes != nbytes) {
+                return nullptr;
+            }
+            e.stamp = ctx->prequant_stamp;
+            if (claimed_written) {
+                e.written_stamp = ctx->prequant_stamp;
+            }
+            return ctx->prequant_buf + e.off;
+        }
+        used = MAX(used, e.off + e.nbytes);
+    }
+
+    if (nbytes > ctx->prequant_arena - used) {
+        if (!logged_full) {
+            logged_full = true;
+            GGML_LOG_WARN("%s: q8_1 prequant arena full (%zu of %zu bytes used, %zu wanted), "
+                          "falling back to per-matvec quantize_q8_1\n", __func__, used, ctx->prequant_arena, nbytes);
+        }
+        return nullptr;
+    }
+
+    ggml_backend_cuda_context::ggml_cuda_prequant_entry e;
+    e.src1   = src1;
+    e.stamp  = ctx->prequant_stamp;
+    e.off    = used;
+    e.nbytes = nbytes;
+    e.written_stamp = claimed_written ? ctx->prequant_stamp : 0;
+    ctx->prequant.push_back(e);
+
+    return ctx->prequant_buf + used;
+}
+
+static inline void * ggml_cuda_prequant_add(ggml_backend_cuda_context * ctx, const ggml_tensor * src1, size_t nbytes) {
+    return ggml_cuda_prequant_add_impl(ctx, src1, nbytes, /*claimed_written=*/ true);
+}
+
+// reserves a slot for a producer that will fill it from its own launch (see ggml_cuda_prequant_take)
+static inline void * ggml_cuda_prequant_claim(ggml_backend_cuda_context * ctx, const ggml_tensor * src1,
+                                              size_t nbytes) {
+    return ggml_cuda_prequant_add_impl(ctx, src1, nbytes, /*claimed_written=*/ false);
+}
+
+// called by the launch that writes the blocks of t: publishes the slot claimed for it
+static inline block_q8_1 * ggml_cuda_prequant_take(ggml_backend_cuda_context * ctx, const ggml_tensor * t,
+                                                   size_t nbytes) {
+    if (ctx->prequant_buf == nullptr) {
+        return nullptr;
+    }
+    for (ggml_backend_cuda_context::ggml_cuda_prequant_entry & e : ctx->prequant) {
+        if (e.src1 == t && e.nbytes == nbytes) {
+            e.stamp         = ctx->prequant_stamp;
+            e.written_stamp = ctx->prequant_stamp;
+            return (block_q8_1 *) (ctx->prequant_buf + e.off);
+        }
+    }
+    return nullptr;
+}
+
+// one warp per 32-element block, the same lane -> element mapping, reduction width and rounding as
+// quantize_q8_1: the bytes are identical to what the standalone quantise launch would write
+static __device__ __forceinline__ void ggml_cuda_prequant_block(
+        block_q8_1 * q8_1, const float * x, int64_t ib, int lane) {
+    const float  xi   = x[ib*QK8_1 + lane];
+    const float  amax = warp_reduce_max<QK8_1>(fabsf(xi));
+    const float  sum  = warp_reduce_sum<QK8_1>(xi);
+    const float  d    = amax / 127.0f;
+    const int8_t q    = amax == 0.0f ? 0 : roundf(xi / d);
+    q8_1[ib].qs[lane] = q;
+    if (lane == 0) {
+        q8_1[ib].ds = make_half2(d, sum);
+    }
+}
+
+
 struct ggml_cuda_mm_fusion_args_host {
     const ggml_tensor * x_bias = nullptr;
     const ggml_tensor * gate = nullptr;
@@ -1573,6 +1766,8 @@ struct ggml_cuda_mm_fusion_args_host {
     const ggml_tensor * shared_up = nullptr;
     const ggml_tensor * shared_gate = nullptr;
     ggml_tensor * shared_dst = nullptr;
+    const ggml_tensor * x2   = nullptr;   // second weight, same type/shape/nb[1] as x
+    ggml_tensor *       dst2 = nullptr;   // second output, same shape as dst
 };
 struct ggml_cuda_mm_fusion_args_device {
     const void * x_bias = nullptr;
@@ -1586,6 +1781,8 @@ struct ggml_cuda_mm_fusion_args_device {
     const void * shared_gate = nullptr;
     float * shared_dst = nullptr;
     uint32_t shared_stride_col_dst = 0;
+    const void * x2   = nullptr;
+    float *      dst2 = nullptr;
 };
 
 struct ggml_cuda_kernel_launch_params {

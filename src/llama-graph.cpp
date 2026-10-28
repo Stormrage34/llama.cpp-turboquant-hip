@@ -3963,16 +3963,38 @@ ggml_tensor * llm_graph_context::build_rs(
         ggml_tensor * s,
             int32_t   state_size,
             int32_t   n_seqs,
-        const llm_graph_get_rows_fn & get_state_rows) const {
+        const llm_graph_get_rows_fn & get_state_rows,
+                      bool   allow_direct) const {
     const auto * kv_state = inp->mctx;
 
-    // a custom getter reads the states of the ubatch straight from the cache, so the gather skips the first
-    // state: it still holds the n_rs - n_seqs extra states and copies no state of a single sequence ubatch
-    ggml_tensor * state_copy = get_state_rows ? inp->s_copy_tail : inp->s_copy;
+    const uint32_t n_rs    = kv_state->get_n_rs();
+    const uint32_t rs_head = kv_state->get_head();
+    const int32_t  rs_zero = kv_state->get_rs_z();
 
-    return build_rs(s, state_copy, inp->s_copy_main, state_size, n_seqs,
-                    kv_state->get_n_rs(), kv_state->get_head(), kv_state->get_size(), kv_state->get_rs_z(),
-                    get_state_rows);
+    // With a single cache cell a single-sequence batch maps onto the row it writes back: the gather
+    // is the identity. There is no cell to swap (find_slot cannot move a lone cell), so `s_copy(0)`
+    // is either the cell itself or the only zero row, which is the cell, cleared by the scale below.
+    // The returned tensor therefore aliases the cache: the caller must only read it.
+    const bool direct =
+        allow_direct && get_state_rows == nullptr &&
+        ubatch.n_seq_tokens == 1 && n_seqs == 1 && cparams.n_rs_seq == 0 &&
+        n_rs == 1 && kv_state->get_size() == 1 &&
+        s->ne[0] == state_size && s->ne[1] == 1;
+
+    if (!direct) {
+        ggml_tensor * state_copy = get_state_rows ? inp->s_copy_tail : inp->s_copy;
+
+        return build_rs(s, state_copy, inp->s_copy_main, state_size, n_seqs,
+                        n_rs, rs_head, kv_state->get_size(), rs_zero, get_state_rows);
+    }
+
+    GGML_ASSERT(rs_head == 0 && (rs_zero == -1 || rs_zero == 0));
+
+    // same zeroing as the gather path: with one cell the zero row is the row read below
+    ggml_tensor * state_zero = ggml_view_1d(ctx0, s, state_size*(rs_zero >= 0), rs_zero*s->nb[1]*(rs_zero >= 0));
+    ggml_build_forward_expand(gf, ggml_scale_inplace(ctx0, state_zero, 0));
+
+    return s;
 }
 
 ggml_tensor * llm_graph_context::build_rwkv_token_shift_load(

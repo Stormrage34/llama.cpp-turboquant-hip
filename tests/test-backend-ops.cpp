@@ -1216,6 +1216,7 @@ static bool backend_lacks_skipped_ids(ggml_backend_t backend, ggml_cgraph * gf) 
     }
     return false;
 }
+static int g_perf_min_time_ms = 1000;
 
 struct test_case {
     virtual ~test_case() {}
@@ -1315,6 +1316,14 @@ struct test_case {
     virtual bool run_whole_graph() { return false; }
     virtual std::vector<ggml_tensor *> fusion_test_nodes() { return {}; }
     virtual bool use_weight_context() { return false; }
+
+    // Backend-specific byte-level checks that the float comparison cannot express (e.g. the exact
+    // bytes of a quantised intermediate). Called after the graph has been computed on backend1.
+    virtual bool verify_bytes(ggml_backend_t backend1, ggml_tensor * out) {
+        GGML_UNUSED(backend1);
+        GGML_UNUSED(out);
+        return true;
+    }
 
     ggml_cgraph * gf = nullptr;
     ggml_cgraph * gb = nullptr;
@@ -1587,10 +1596,11 @@ struct test_case {
         const bool cmp_ok = ggml_backend_compare_graph_backend(backend1, backend2, gf, callback, &ud,
                                                                run_whole_graph() ? fused_nodes_to_verify.data() : nullptr,
                                                                fused_nodes_to_verify.size());
+        const bool bytes_ok = verify_bytes(backend1, out);
 
         // Create test result
-        bool        test_passed = ud.ok && cmp_ok;
-        std::string error_msg   = test_passed ? "" : (!cmp_ok ? "compare failed" : "test failed");
+        bool        test_passed = ud.ok && cmp_ok && bytes_ok;
+        std::string error_msg   = test_passed ? "" : (!cmp_ok ? "compare failed" : (!bytes_ok ? "byte check failed" : "test failed"));
         test_result result(ggml_backend_name(backend1), current_op_name, vars(), "test", supported, test_passed,
                            error_msg);
 
@@ -1598,6 +1608,7 @@ struct test_case {
 
         return test_passed ? test_status_t::OK : test_status_t::FAIL;
     }
+
 
     bool eval_perf(ggml_backend_t backend, const char * op_names_filter, printer * output_printer) {
         mode = MODE_PERF;
@@ -1730,7 +1741,7 @@ struct test_case {
 
             // re-draw any data-dependent inputs (expert ids) outside the timed region
             reinit_perf_iter(ctx.get());
-        } while (total_time_us < 1000*1000); // run for at least 1 second
+        } while (total_time_us < (int64_t)g_perf_min_time_ms * 1000); // run for at least g_perf_min_time_ms
 
         // Create test result
         double avg_time_us      = (double) total_time_us / total_runs;
@@ -4064,6 +4075,333 @@ struct test_rms_norm_mul_add : public test_case {
 
     bool grad_precise() override {
         return true;
+    }
+};
+
+// The fused wide RMS_NORM + MUL also writes the q8_1 quantisation of its output, so the matvecs
+// that read that tensor skip their own quantize_q8_1 launch.
+//
+// Those bytes are consumed by vec_dot_*_q8_1 as d8*sum_i(q_i): a single wrong bit moves the logits
+// without a bound, and a tolerance check on the matvec output would still pass. This case therefore
+// memcmps the whole block buffer against what the standalone quantize_q8_1 kernel produces for the
+// same f32 row.
+struct test_rms_norm_mul_prequant : public test_case {
+    const int64_t ne0;      // wide norm width, e.g. 5120
+    const int64_t m;        // matvec weight rows reading the norm output
+
+    std::string op_desc(ggml_tensor * t) override {
+        GGML_UNUSED(t);
+        return "RMS_NORM_MUL_PREQUANT";
+    }
+
+    std::string vars() override {
+        return VARS_TO_STR2(ne0, m);
+    }
+
+    test_rms_norm_mul_prequant(int64_t ne0 = 5120, int64_t m = 64) : ne0(ne0), m(m) {}
+
+    // the fusion only happens when the whole graph is computed in one call, not node by node
+    bool run_whole_graph() override { return true; }
+
+    // the matvec result itself is compared like a test_mul_mat with a quantised weight
+    double max_nmse_err() override {
+        return 5e-4;
+    }
+
+    ggml_tensor * build_graph(ggml_context * ctx) override {
+        ggml_tensor * a = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, ne0);
+        ggml_tensor * b = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, ne0);
+        ggml_tensor * w = ggml_new_tensor_2d(ctx, GGML_TYPE_Q4_K, ne0, m);
+        ggml_set_name(a, "a");
+        ggml_set_name(b, "b");
+        ggml_set_name(w, "w");
+
+        ggml_tensor * wide_norm = ggml_mul(ctx, ggml_rms_norm(ctx, a, 1e-6f), b);
+        ggml_set_name(wide_norm, "wide_norm");
+        ggml_tensor * out = ggml_mul_mat(ctx, w, wide_norm);
+        ggml_set_name(out, "out");
+
+        return out;
+    }
+
+    bool verify_bytes(ggml_backend_t backend1, ggml_tensor * out) override {
+        ggml_backend_reg_t reg = ggml_backend_dev_backend_reg(ggml_backend_get_device(backend1));
+
+        typedef size_t (*prequant_fn_t)(ggml_backend_t, const ggml_tensor *, void *, size_t);
+        prequant_fn_t probe = (prequant_fn_t) ggml_backend_reg_get_proc_address(reg, "ggml_cuda_prequant_probe");
+        prequant_fn_t ref   = (prequant_fn_t) ggml_backend_reg_get_proc_address(reg, "ggml_cuda_prequant_reference");
+        if (probe == nullptr || ref == nullptr) {
+            // backend without the fused q8_1 path, nothing to check here
+            return true;
+        }
+
+        const ggml_tensor * norm = out->src[1];
+        GGML_ASSERT(norm->type == GGML_TYPE_F32 && norm->ne[1] == 1 && norm->ne[2] == 1 && norm->ne[3] == 1);
+
+        // nblocks * sizeof(block_q8_1)
+        const size_t nblocks = (size_t) norm->ne[0] / ggml_blck_size(GGML_TYPE_Q8_1);
+        const size_t nbytes  = nblocks * ggml_type_size(GGML_TYPE_Q8_1);
+
+        std::vector<uint8_t> fused(nbytes, 0);
+        if (probe(backend1, norm, fused.data(), nbytes) != nbytes) {
+            printf("[%s] the fused norm wrote no q8_1 blocks for %s (nbytes=%zu) ",
+                   op_desc(out), norm->name, nbytes);
+            return false;
+        }
+
+        std::vector<uint8_t> expected(nbytes, 0);
+        if (ref(backend1, norm, expected.data(), nbytes) != nbytes) {
+            printf("[%s] quantize_q8_1 reference failed for %s ", op_desc(out), norm->name);
+            return false;
+        }
+
+        if (memcmp(fused.data(), expected.data(), nbytes) != 0) {
+            size_t i = 0;
+            while (i < nbytes && fused[i] == expected[i]) {
+                ++i;
+            }
+            printf("[%s] q8_1 bytes differ from quantize_q8_1 at byte %zu of %zu: %02x != %02x ",
+                   op_desc(out), i, nbytes, fused[i], expected[i]);
+            return false;
+        }
+
+        return true;
+    }
+};
+
+// The residual ADD that feeds a wide RMS norm is fused into the norm launch. The ADD output is
+// also read by the residual stream, so the fused kernel must still store the sum: this graph
+// reads it twice, once through the norm and once through a second matvec, and the CPU reference
+// sees both. A stale or unwritten sum therefore fails here instead of passing silently.
+struct test_rms_norm_preadd_mul : public test_case {
+    const int64_t ne0;
+    const int64_t m;
+    const float eps;
+
+    std::string op_desc(ggml_tensor * t) override {
+        GGML_UNUSED(t);
+        return "RMS_NORM_PREADD_MUL";
+    }
+
+    std::string vars() override {
+        return VARS_TO_STR3(ne0, m, eps);
+    }
+
+    test_rms_norm_preadd_mul(int64_t ne0 = 5120, int64_t m = 64, float eps = 1e-6f)
+        : ne0(ne0), m(m), eps(eps) {}
+
+    // the fusion only happens when the whole graph is computed in one call, not node by node
+    bool run_whole_graph() override { return true; }
+
+    // the matvec results are compared like a test_mul_mat with a quantised weight
+    double max_nmse_err() override {
+        return 5e-4;
+    }
+
+    ggml_tensor * build_graph(ggml_context * ctx) override {
+        ggml_tensor * a  = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, ne0);
+        ggml_tensor * b  = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, ne0);
+        ggml_tensor * c  = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, ne0);
+        ggml_tensor * w  = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, ne0);
+        ggml_tensor * w1 = ggml_new_tensor_2d(ctx, GGML_TYPE_Q4_K, ne0, m);
+        ggml_tensor * w2 = ggml_new_tensor_2d(ctx, GGML_TYPE_Q4_K, ne0, m);
+        ggml_set_name(a, "a");
+        ggml_set_name(b, "b");
+        ggml_set_name(c, "c");
+        ggml_set_name(w, "w");
+        ggml_set_name(w1, "w1");
+        ggml_set_name(w2, "w2");
+
+        ggml_tensor * sum  = ggml_add(ctx, a, b);
+        ggml_set_name(sum, "sum");
+        ggml_tensor * wide = ggml_mul(ctx, ggml_rms_norm(ctx, sum, eps), w);
+        ggml_set_name(wide, "wide");
+        ggml_tensor * y1   = ggml_mul_mat(ctx, w1, wide);
+        ggml_tensor * res  = ggml_add(ctx, sum, c);   // second consumer of the ADD output
+        ggml_set_name(res, "res");
+        ggml_tensor * y2   = ggml_mul_mat(ctx, w2, res);
+        ggml_tensor * out  = ggml_add(ctx, y1, y2);
+        ggml_set_name(out, "out");
+
+        return out;
+    }
+};
+
+// memcmps the q8_1 blocks a fused producer stored for `src1` against what the standalone
+// quantize_q8_1 kernel writes for the same f32 bytes. `src1` is the tensor the consumer matvec
+// reads, which may be a plain reshape view of the tensor the producer wrote.
+static bool verify_prequant_bytes(ggml_backend_t backend1, const char * op, const ggml_tensor * src1) {
+    ggml_backend_reg_t reg = ggml_backend_dev_backend_reg(ggml_backend_get_device(backend1));
+
+    typedef size_t (*prequant_fn_t)(ggml_backend_t, const ggml_tensor *, void *, size_t);
+    prequant_fn_t probe = (prequant_fn_t) ggml_backend_reg_get_proc_address(reg, "ggml_cuda_prequant_probe");
+    prequant_fn_t ref   = (prequant_fn_t) ggml_backend_reg_get_proc_address(reg, "ggml_cuda_prequant_reference");
+    if (probe == nullptr || ref == nullptr) {
+        // backend without the fused q8_1 path, nothing to check here
+        return true;
+    }
+
+    GGML_ASSERT(src1->type == GGML_TYPE_F32 && ggml_is_contiguous(src1));
+
+    // nblocks * sizeof(block_q8_1)
+    const size_t nblocks = (size_t) ggml_nelements(src1) / ggml_blck_size(GGML_TYPE_Q8_1);
+    const size_t nbytes  = nblocks * ggml_type_size(GGML_TYPE_Q8_1);
+
+    std::vector<uint8_t> fused(nbytes, 0);
+    if (probe(backend1, src1, fused.data(), nbytes) != nbytes) {
+        printf("[%s] the fused launch wrote no q8_1 blocks for %s (nbytes=%zu) ", op, src1->name, nbytes);
+        return false;
+    }
+
+    std::vector<uint8_t> expected(nbytes, 0);
+    if (ref(backend1, src1, expected.data(), nbytes) != nbytes) {
+        printf("[%s] quantize_q8_1 reference failed for %s ", op, src1->name);
+        return false;
+    }
+
+    if (memcmp(fused.data(), expected.data(), nbytes) != 0) {
+        size_t i = 0;
+        while (i < nbytes && fused[i] == expected[i]) {
+            ++i;
+        }
+        printf("[%s] q8_1 bytes differ from quantize_q8_1 at byte %zu of %zu: %02x != %02x ",
+               op, i, nbytes, fused[i], expected[i]);
+        return false;
+    }
+
+    return true;
+}
+
+// The fused UNARY(SILU) + MUL launch also writes the q8_1 blocks of its own output. That is the
+// gated norm of qwen35: h = rms_norm(x) * w is multiplied by silu(z), and the ssm_out matvec reads
+// the flat [n_head*n_embd_head] reshape of that product.
+//
+// The arena slot is only claimed when the product has a single consumer, so the graph keeps the
+// producer's f32 output alive through a second reader (scaled and fed to a second matvec): a
+// producer that stopped writing f32, or a stale/unwritten arena, fails against the CPU reference.
+// The q8_1 bytes are memcmp'd against the standalone quantiser in verify_bytes.
+struct test_unary_mul_prequant : public test_case {
+    const int64_t ne_in;    // width of the matvec that feeds the silu
+    const int64_t n_embd;   // per-head width of the gated norm (ne0 of the product)
+    const int64_t n_head;   // heads
+    const int64_t m;        // matvec weight rows reading the product
+
+    std::string op_desc(ggml_tensor * t) override {
+        GGML_UNUSED(t);
+        return "UNARY_MUL_PREQUANT";
+    }
+
+    std::string vars() override {
+        return VARS_TO_STR4(ne_in, n_embd, n_head, m);
+    }
+
+    test_unary_mul_prequant(int64_t ne_in = 512, int64_t n_embd = 128, int64_t n_head = 48, int64_t m = 64)
+        : ne_in(ne_in), n_embd(n_embd), n_head(n_head), m(m) {}
+
+    // the fusion only happens when the whole graph is computed in one call, not node by node
+    bool run_whole_graph() override { return true; }
+
+    double max_nmse_err() override {
+        return 5e-4;
+    }
+
+    ggml_tensor * build_graph(ggml_context * ctx) override {
+        const int64_t ne0 = n_embd * n_head;
+
+        ggml_tensor * a  = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, ne_in);
+        ggml_tensor * w  = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, n_embd, n_head);
+        ggml_tensor * wz = ggml_new_tensor_2d(ctx, GGML_TYPE_Q4_K, ne_in, ne0);
+        ggml_tensor * w1 = ggml_new_tensor_2d(ctx, GGML_TYPE_Q4_K, ne0, m);
+        ggml_tensor * w2 = ggml_new_tensor_2d(ctx, GGML_TYPE_Q4_K, ne0, m);
+        ggml_set_name(a, "a");
+        ggml_set_name(w, "w");
+        ggml_set_name(wz, "wz");
+        ggml_set_name(w1, "w1");
+        ggml_set_name(w2, "w2");
+
+        ggml_tensor * z  = ggml_mul_mat(ctx, wz, a);            // [ne0, 1]
+        ggml_tensor * zr = ggml_reshape_2d(ctx, z, n_embd, n_head);
+        ggml_tensor * y  = ggml_mul(ctx, ggml_silu(ctx, zr), w); // [n_embd, n_head] <- the producer
+        ggml_set_name(y, "y");
+        ggml_tensor * yr = ggml_reshape_2d(ctx, y, ne0, 1);      // what the matvec reads
+        ggml_set_name(yr, "yr");
+
+        ggml_tensor * out1 = ggml_mul_mat(ctx, w1, yr);          // reads the q8_1 blocks
+        ggml_tensor * yf   = ggml_scale(ctx, yr, 1.0f);          // reads the f32 bytes
+        ggml_set_name(yf, "yf");
+        ggml_tensor * out2 = ggml_mul_mat(ctx, w2, yf);
+        ggml_tensor * out  = ggml_add(ctx, out1, out2);
+        ggml_set_name(out, "out");
+
+        return out;
+    }
+
+    bool verify_bytes(ggml_backend_t backend1, ggml_tensor * out) override {
+        return verify_prequant_bytes(backend1, op_desc(out).c_str(), out->src[0]->src[1]);
+    }
+};
+
+// The standalone GLU kernel (gate and up quantised differently, so the two matvecs cannot fuse into
+// one launch) also writes the q8_1 blocks of its output. The graph reads the flat output through a
+// matvec and through a scaled copy, so a missing f32 store or a stale arena fails the CPU compare.
+struct test_glu_prequant : public test_case {
+    const int64_t ne_in;    // width of the gate/up matvecs
+    const int64_t ne0;      // GLU output width, i.e. the ffn_down matvec width
+    const int64_t m;        // ffn_down weight rows
+
+    std::string op_desc(ggml_tensor * t) override {
+        GGML_UNUSED(t);
+        return "GLU_PREQUANT";
+    }
+
+    std::string vars() override {
+        return VARS_TO_STR3(ne_in, ne0, m);
+    }
+
+    test_glu_prequant(int64_t ne_in = 512, int64_t ne0 = 1024, int64_t m = 64) : ne_in(ne_in), ne0(ne0), m(m) {}
+
+    // the fusion only happens when the whole graph is computed in one call, not node by node
+    bool run_whole_graph() override { return true; }
+
+    double max_nmse_err() override {
+        return 5e-4;
+    }
+
+    ggml_tensor * build_graph(ggml_context * ctx) override {
+        ggml_tensor * a  = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, ne_in);
+        // different types: ggml_cuda_should_fuse_mul_mat refuses to fuse the two matvecs, which is
+        // what leaves the GLU as a launch of its own
+        ggml_tensor * wg = ggml_new_tensor_2d(ctx, GGML_TYPE_Q4_K, ne_in, ne0);
+        ggml_tensor * wu = ggml_new_tensor_2d(ctx, GGML_TYPE_Q6_K, ne_in, ne0);
+        ggml_tensor * w1 = ggml_new_tensor_2d(ctx, GGML_TYPE_Q4_K, ne0, m);
+        ggml_tensor * w2 = ggml_new_tensor_2d(ctx, GGML_TYPE_Q4_K, ne0, m);
+        ggml_set_name(a, "a");
+        ggml_set_name(wg, "wg");
+        ggml_set_name(wu, "wu");
+        ggml_set_name(w1, "w1");
+        ggml_set_name(w2, "w2");
+
+        ggml_tensor * gate = ggml_mul_mat(ctx, wg, a);
+        ggml_tensor * up   = ggml_mul_mat(ctx, wu, a);
+        ggml_tensor * glu  = ggml_glu_split(ctx, gate, up, GGML_GLU_OP_SWIGLU); // <- the producer
+        ggml_set_name(glu, "glu");
+        // a view keeps glu's single consumer (the reshape), so the slot may be claimed; both readers
+        // below go through the view, like the qwen35 ffn_down matvec reads the reshape
+        ggml_tensor * gv   = ggml_reshape_2d(ctx, glu, ne0, 1);
+        ggml_set_name(gv, "gv");
+
+        ggml_tensor * out1 = ggml_mul_mat(ctx, w1, gv);         // reads the q8_1 blocks
+        ggml_tensor * gf   = ggml_scale(ctx, gv, 1.0f);         // reads the f32 bytes
+        ggml_set_name(gf, "gf");
+        ggml_tensor * out2 = ggml_mul_mat(ctx, w2, gf);
+        ggml_tensor * out  = ggml_add(ctx, out1, out2);
+        ggml_set_name(out, "out");
+
+        return out;
+    }
+
+    bool verify_bytes(ggml_backend_t backend1, ggml_tensor * out) override {
+        return verify_prequant_bytes(backend1, op_desc(out).c_str(), out->src[0]->src[1]);
     }
 };
 
@@ -8726,6 +9064,36 @@ struct test_flash_attn_ext : public test_case {
     }
 };
 
+// gfx1030 multi-sequence decode: deterministic mask that fully masks the last
+// 256-key tile of sequence 1, so scan_mask allocates a short k_max for it.
+struct test_flash_attn_ext_gfx1030_multiseq : public test_flash_attn_ext {
+    using test_flash_attn_ext::test_flash_attn_ext;
+    void initialize_tensors(ggml_context * ctx) override {
+        test_flash_attn_ext::initialize_tensors(ctx);
+        for (ggml_tensor * t = ggml_get_first_tensor(ctx); t != NULL; t = ggml_get_next_tensor(ctx, t)) {
+            if (strcmp(t->name, "m") != 0) continue;
+            const int64_t kv = t->ne[0];
+            const int64_t nb = t->ne[1];
+            const int64_t nseq = t->ne[3];
+            if (nseq < 2) continue;
+            std::vector<float> data(ggml_nelements(t));
+            // read fp16 -> float
+            std::vector<ggml_fp16_t> tmp(ggml_nelements(t));
+            ggml_backend_tensor_get(t, tmp.data(), 0, ggml_nbytes(t));
+            for (size_t i = 0; i < data.size(); ++i) data[i] = ggml_fp16_to_fp32(tmp[i]);
+            for (int64_t s = 1; s < nseq; ++s) {
+                for (int64_t q = 0; q < nb; ++q) {
+                    for (int64_t k = 256; k < kv; ++k) {
+                        data[(size_t)s * nb * kv + (size_t)q * kv + (size_t)k] = -INFINITY;
+                    }
+                }
+            }
+            ggml_fp32_to_fp16_row(data.data(), tmp.data(), tmp.size());
+            ggml_backend_tensor_set(t, tmp.data(), 0, ggml_nbytes(t));
+        }
+    }
+};
+
 // large Q values, so the online softmax has to rescale the partial results
 struct test_flash_attn_ext_large_logits : public test_flash_attn_ext {
     static constexpr int q_range = 20;
@@ -10921,6 +11289,20 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
     test_cases.emplace_back(new test_rms_norm_mul_rope({128, 4, 7, 2}));
     test_cases.emplace_back(new test_rms_norm_mul_rope({128, 4, 7, 2}, 1e-6f, false, true));
 
+    // wide-norm outputs whose q8_1 blocks the fused norm writes itself (e.g. qwen3.8 hidden 5120)
+    test_cases.emplace_back(new test_rms_norm_mul_prequant(5120, 64));
+    test_cases.emplace_back(new test_rms_norm_mul_prequant(512, 8));
+    test_cases.emplace_back(new test_rms_norm_preadd_mul(5120, 64));
+    test_cases.emplace_back(new test_rms_norm_preadd_mul(512, 8));
+    test_cases.emplace_back(new test_rms_norm_preadd_mul(5120, 64, 1e-5f));
+    // gated elementwise launches that write the q8_1 blocks of their own output (qwen3.5 gated norm
+    // at 128 x 48, and the ffn gate/up product when the two matvecs cannot fuse)
+    test_cases.emplace_back(new test_unary_mul_prequant(512, 128, 48, 64));
+    test_cases.emplace_back(new test_unary_mul_prequant(256, 64, 8, 32));
+    test_cases.emplace_back(new test_unary_mul_prequant(512, 512, 1, 64));
+    test_cases.emplace_back(new test_glu_prequant(512, 1024, 64));
+    test_cases.emplace_back(new test_glu_prequant(256, 512, 32));
+
     for (auto multi_add : {false, true}) {
         for (auto set_rows : {false, true}) {
             for (auto broadcast : {false, true}) {
@@ -12140,6 +12522,13 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
     test_cases.emplace_back(new test_flash_attn_ext(128, 64, 4, {1, 1}, 64, 2, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q2_0, GGML_TYPE_F16));
 
     // q8_0 KV cases: decode and prompt batches, KV pad, permuted KV, feature flags, and long context
+    // Partial batch at the fault shape of the RDNA2 tile-loader bug (upstream "kv=113 no-flat-scratch"):
+    // 113 is not a multiple of the 32-column nbatch_fa, so the last K/V tile is short and the loader's
+    // out-of-bounds branch is the one that executes. nr23[0] == 1 keeps gqa_ratio at 1, which makes
+    // ncols2 == 1, which is the only configuration that instantiates the oob_check path at all; nb == 3
+    // simultaneously leaves the 4-column query tile partial (ncols1 == 4 > nb), and 3 queries keep the
+    // case on the tile kernel instead of VEC (VEC needs Q->ne[1] <= 2 for quantized K/V).
+    test_cases.emplace_back(new test_flash_attn_ext(256, 256, 2, { 1, 1},   113,   3, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q5_0));
     test_cases.emplace_back(new test_flash_attn_ext(256, 256, 2, {16, 1},   113,   1, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q8_0));
     test_cases.emplace_back(new test_flash_attn_ext(256, 256, 2, {16, 1},  1024,   1, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q8_0));
     test_cases.emplace_back(new test_flash_attn_ext(256, 256, 2, {16, 1},  1024,   1, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q8_0, {0, 2, 1, 3}));
@@ -12219,6 +12608,41 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
     }
 
     test_cases.emplace_back(new test_flash_attn_ext(256, 256, 4, {6, 1},   512, 512, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_F16, GGML_TYPE_F16));
+    // gfx1030 GQA-6 decode path: Q8_0 K, Q8_0/Q5_0 V, single query token.
+    test_cases.emplace_back(new test_flash_attn_ext(256, 256, 4, {6, 1},  4096,   1, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q8_0));
+    // gfx1030 GQA multi-row verify path: 2, 3 and 4 query rows on one row tile. A verify pass
+    // submits 2-4 rows; the ratio-8 instance is the MoE operating point and ratio 6 is dense.
+    // Shapes that matter: kv not a multiple of the 256-key tile, both V dequant paths, and two
+    // sequences so the per-sequence KV_max scan is combined with a multi-row tile. The mask is
+    // one row per token with independent random values, so a kernel that reuses row 0's mask
+    // for the whole tile fails here.
+    test_cases.emplace_back(new test_flash_attn_ext(256, 256, 4, {6, 1},  4096,   2, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q8_0));
+    test_cases.emplace_back(new test_flash_attn_ext(256, 256, 4, {6, 1},  5003,   3, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q5_0));
+    test_cases.emplace_back(new test_flash_attn_ext(256, 256, 4, {6, 1},  4096,   4, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q8_0));
+    test_cases.emplace_back(new test_flash_attn_ext(256, 256, 4, {6, 1},  4096,   2, false, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q5_0));
+    test_cases.emplace_back(new test_flash_attn_ext_gfx1030_multiseq(256, 256, 4, {6, 2}, 4096, 3, true, false, 0, 0,
+                                                    GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q8_0));
+    test_cases.emplace_back(new test_flash_attn_ext(256, 256, 2, {8, 1},  4096,   2, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q8_0));
+    test_cases.emplace_back(new test_flash_attn_ext(256, 256, 2, {8, 1},  5003,   3, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q5_0));
+    test_cases.emplace_back(new test_flash_attn_ext(256, 256, 2, {8, 1},  4096,   4, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q5_0));
+    test_cases.emplace_back(new test_flash_attn_ext(256, 256, 2, {8, 1},  4096,   2, false, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q8_0));
+    test_cases.emplace_back(new test_flash_attn_ext_gfx1030_multiseq(256, 256, 2, {8, 2}, 4096, 3, true, false, 0, 0,
+                                                    GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q8_0));
+    test_cases.emplace_back(new test_flash_attn_ext(256, 256, 4, {6, 1},  4096,   1, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q5_0));
+    test_cases.emplace_back(new test_flash_attn_ext(256, 256, 4, {6, 1},  5003,   1, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q5_0));
+    test_cases.emplace_back(new test_flash_attn_ext(256, 256, 4, {6, 1}, 32768,   1, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q5_0));
+    // gfx1030 GQA-8 decode path (MoE geometry, 16 Q heads / 2 KV heads). Admitting ratio 8
+    // is only safe if it is exercised at the shapes the kernel branches on: the single
+    // sequence case, more KV heads than one workgroup's z tile, a non-multiple-of-TILE KV
+    // length, a long KV, and Q5_0 V (the type with its own dequant path).
+    test_cases.emplace_back(new test_flash_attn_ext(256, 256, 2, {8, 1},  4096,   1, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q8_0));
+    test_cases.emplace_back(new test_flash_attn_ext(256, 256, 2, {8, 1},  4096,   1, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q5_0));
+    test_cases.emplace_back(new test_flash_attn_ext(256, 256, 2, {8, 1},  5003,   1, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q5_0));
+    test_cases.emplace_back(new test_flash_attn_ext(256, 256, 2, {8, 1}, 32768,   1, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q5_0));
+    test_cases.emplace_back(new test_flash_attn_ext(256, 256, 8, {8, 1},  4096,   1, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q8_0));
+    // gfx1030 GQA-8 multi-sequence decode: scan_mask path with per-sequence KV_max.
+    test_cases.emplace_back(new test_flash_attn_ext_gfx1030_multiseq(256, 256, 2, {8, 2},  4096,   1, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q8_0));
+    test_cases.emplace_back(new test_flash_attn_ext_gfx1030_multiseq(256, 256, 2, {8, 2},  4096,   1, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q5_0));
     test_cases.emplace_back(new test_flash_attn_ext(256, 256, 4, {6, 1},  4096,  64, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_F16, GGML_TYPE_F16));
     test_cases.emplace_back(new test_flash_attn_ext(256, 256, 4, {6, 1},  4096,  16, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_F16, GGML_TYPE_F16));
     test_cases.emplace_back(new test_flash_attn_ext(256, 256, 4, {2, 1},  4096, 512, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_F16, GGML_TYPE_F16));
@@ -12698,6 +13122,11 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_perf() {
                 test_cases.emplace_back(new test_mul_mat(type_a, type_b, 4096, bs, 14336, {1,  1}, {1, 1}));
             }
         }
+    }
+
+    // gfx1030 measurement plan: large-k decode matvec cases (m=4096, n=1).
+    for (ggml_type type_a : {GGML_TYPE_IQ3_S, GGML_TYPE_IQ4_XS, GGML_TYPE_IQ2_S, GGML_TYPE_IQ3_XXS, GGML_TYPE_Q4_K, GGML_TYPE_F16}) {
+        test_cases.emplace_back(new test_mul_mat(type_a, GGML_TYPE_F32, 4096, 1, 131072, {1, 1}, {1, 1}));
     }
 
     // Q4_K multi-column mat-vec
@@ -13466,6 +13895,7 @@ static void usage(char ** argv) {
     printf("                              full test case strings, and/or regexes matched against the op name\n");
     printf("  -b <backend>                run tests on the given backend (e.g. CPU, MTL0, CUDA0)\n");
     printf("  -p <params regex>           filter test cases by a regex matched against their params\n");
+    printf("  --min-time <ms>             minimum wall-clock time per perf case in ms (default: 1000)\n");
     printf("  --output <console|sql|csv>  output format (default: console)\n");
     printf("  --list-ops                  list all available GGML operations\n");
     printf("  --show-coverage             show test coverage\n");
@@ -13515,6 +13945,16 @@ int main(int argc, char ** argv) {
         } else if (strcmp(argv[i], "-p") == 0) {
             if (i + 1 < argc) {
                 params_filter = argv[++i];
+            } else {
+                usage(argv);
+                return 1;
+            }
+        } else if (strcmp(argv[i], "--min-time") == 0) {
+            if (i + 1 < argc) {
+                g_perf_min_time_ms = atoi(argv[++i]);
+                if (g_perf_min_time_ms < 50) {
+                    g_perf_min_time_ms = 50;
+                }
             } else {
                 usage(argv);
                 return 1;

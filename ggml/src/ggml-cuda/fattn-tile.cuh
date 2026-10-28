@@ -404,10 +404,25 @@ static __device__ __forceinline__ void flash_attn_tile_load_tile(
                 for (int j0 = j0_start; j0 < j0_stop; j0 += stride_j) {
                     const int j = j0*cpy_ne + (stride_j == warp_size ? threadIdx.x : threadIdx.x % stride_j)*cpy_ne;
 
+                    // RDNA2 (gfx1030) has no architected flat scratch: selecting between a global
+                    // pointer and a pointer to a local zero array can form a flat pointer into
+                    // private memory and fault at a near-null address for unaligned KV lengths
+                    // (Qwen3.8's 2051-cell gathered decode, test-backend-ops kv=113). Branch on the
+                    // bounds there. Same values; every other target keeps the pointer-select so its
+                    // codegen is unchanged.
+#if defined(RDNA2)
+                    if (!oob_check || i < i_sup) {
+                        ggml_cuda_memcpy_1<cpy_nb>(tile_KV + i*(J/2 + J_padding) + j, KV + i*stride_KV + j);
+                    } else {
+                        const __align__(16) half2 zero[cpy_ne] = {{0.0f, 0.0f}};
+                        ggml_cuda_memcpy_1<cpy_nb>(tile_KV + i*(J/2 + J_padding) + j, zero);
+                    }
+#else
                     const __align__(16) half2 zero[cpy_ne] = {{0.0f, 0.0f}};
                     ggml_cuda_memcpy_1<cpy_nb>(
                         tile_KV + i*(J/2 + J_padding) + j,
                         !oob_check || i < i_sup ? KV + i*stride_KV + j : zero);
+#endif // defined(RDNA2)
                 }
             }
         }
@@ -454,10 +469,21 @@ static __device__ __forceinline__ void flash_attn_tile_load_tile(
                 for (int j0 = j0_start; j0 < j0_stop; j0 += stride_j) {
                     const int j = j0*(cpy_ne/2) + (stride_j == warp_size ? threadIdx.x : threadIdx.x % stride_j)*(cpy_ne/2);
 
-                    const half2 zero[cpy_ne/2] = {{0.0f, 0.0f}};
+                    // See the half2 path above: branch on the bounds on RDNA2 only; every other target
+                    // keeps the pointer-select (identical values, unchanged codegen).
                     __align__(16) half2 tmp_h2[cpy_ne/2];
+#if defined(RDNA2)
+                    if (!oob_check || i < i_sup) {
+                        ggml_cuda_memcpy_1<sizeof(tmp_h2)>(tmp_h2, KV + i*stride_KV + j);
+                    } else {
+                        const __align__(16) half2 zero[cpy_ne/2] = {{0.0f, 0.0f}};
+                        ggml_cuda_memcpy_1<sizeof(tmp_h2)>(tmp_h2, zero);
+                    }
+#else
+                    const __align__(16) half2 zero[cpy_ne/2] = {{0.0f, 0.0f}};
                     ggml_cuda_memcpy_1<sizeof(tmp_h2)>(
                         tmp_h2, !oob_check || i < i_sup ? KV + i*stride_KV + j : zero);
+#endif // defined(RDNA2)
 
                     __align__(16) float2 tmp_f2[cpy_ne/2];
 #pragma unroll

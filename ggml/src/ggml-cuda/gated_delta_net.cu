@@ -6,7 +6,7 @@
 
 constexpr int gdn_cols_per_warp = 4;
 
-template <int S_v, bool KDA, bool keep_rs_t, int cols_per_warp = gdn_cols_per_warp>
+template <int S_v, bool KDA, bool keep_rs_t, int cols_per_warp = gdn_cols_per_warp, bool use_chunked = false>
 __global__ void __launch_bounds__((ggml_cuda_get_physical_warp_size() < S_v ? ggml_cuda_get_physical_warp_size() : S_v) * 4, 2)
 gated_delta_net_cuda(const float * q,
                                      const float * k,
@@ -81,7 +81,16 @@ gated_delta_net_cuda(const float * q,
         const float * beta_t = beta + gb_offset;
         const float * g_t    = g    + gb_offset * (KDA ? S_v : 1);
 
-        const float beta_val = *beta_t;
+        // beta and g are the same for every lane of the block (their offset has no column term), so
+        // prefill publishes them from lane 0 instead of having each lane load them and run expf.
+        // The values are identical, so the recurrence below keeps its lane order and its bytes.
+        // Decode (n_tokens == 1) stays on the stock path: use_chunked is false there.
+        float beta_val;
+        if constexpr (use_chunked) {
+            beta_val = __shfl_sync(0xFFFFFFFFu, lane == 0 ? *beta_t : 0.0f, 0, warp_size);
+        } else {
+            beta_val = *beta_t;
+        }
 
         // Cache k and q in registers
         float k_reg[rows_per_lane];
@@ -94,7 +103,12 @@ gated_delta_net_cuda(const float * q,
         }
 
         if constexpr (!KDA) {
-            const float g_val = expf(*g_t);
+            float g_val;
+            if constexpr (use_chunked) {
+                g_val = __shfl_sync(0xFFFFFFFFu, lane == 0 ? expf(*g_t) : 0.0f, 0, warp_size);
+            } else {
+                g_val = expf(*g_t);
+            }
 
             // kv[col] = (S^T @ k)[col] = sum_i S[i][col] * k[i]
             float kv_shard = 0.0f;
@@ -178,8 +192,22 @@ gated_delta_net_cuda(const float * q,
     }
 }
 
-template <bool KDA, bool keep_rs_t>
-static void launch_gated_delta_net(
+// prefill-only broadcast path. The fork this comes from calls it "chunked"; it does not change the
+// recurrence, only how the per-token scalars reach the lanes. Decode keeps the stock path.
+static bool ggml_cuda_gdn_use_chunked(const int64_t n_tokens) {
+#if defined(GGML_USE_HIP)
+    if (n_tokens <= 1) {
+        return false;
+    }
+    return GGML_CUDA_CC_IS_RDNA2(ggml_cuda_info().devices[ggml_cuda_get_device()].cc);
+#else
+    GGML_UNUSED(n_tokens);
+    return false;
+#endif
+}
+
+template <bool KDA, bool keep_rs_t, bool use_chunked>
+static void launch_gated_delta_net_impl(
         const float * q_d, const float * k_d, const float * v_d,
         const float * g_d, const float * b_d, const float * s_d,
         float * dst_d, float * state_d,
@@ -189,7 +217,6 @@ static void launch_gated_delta_net(
         int64_t sb1,   int64_t sb2, int64_t sb3,
         int64_t neqk1, int64_t rq3,
         float scale, int64_t state_slot_stride, int K, cudaStream_t stream) {
-    //TODO: Add chunked kernel for even faster pre-fill
     const int warp_size = ggml_cuda_info().devices[ggml_cuda_get_device()].warp_size;
     // four columns per warp (see the kernel); shrink the CTA when the wider CTA would leave
     // SMs without a CTA, so small head counts keep the device filled
@@ -209,26 +236,26 @@ static void launch_gated_delta_net(
     const ggml_cuda_kernel_launch_params launch_params = ggml_cuda_kernel_launch_params(grid_dims, block_dims, 0, stream);
     switch (S_v) {
         case 16:
-            ggml_cuda_kernel_launch(gated_delta_net_cuda<16, KDA, keep_rs_t>, launch_params,
+            ggml_cuda_kernel_launch(gated_delta_net_cuda<16, KDA, keep_rs_t, gdn_cols_per_warp, use_chunked>, launch_params,
                 q_d, k_d, v_d, g_d, b_d, s_d, dst_d, state_d, H,
                 n_tokens, n_seqs, sq1, sq2, sq3, sv1, sv2, sv3,
                 sb1, sb2, sb3, neqk1_magic, rq3_magic, scale, state_slot_stride, K);
             break;
         case 32:
-            ggml_cuda_kernel_launch(gated_delta_net_cuda<32, KDA, keep_rs_t>, launch_params,
+            ggml_cuda_kernel_launch(gated_delta_net_cuda<32, KDA, keep_rs_t, gdn_cols_per_warp, use_chunked>, launch_params,
                 q_d, k_d, v_d, g_d, b_d, s_d, dst_d, state_d, H,
                 n_tokens, n_seqs, sq1, sq2, sq3, sv1, sv2, sv3,
                 sb1, sb2, sb3, neqk1_magic, rq3_magic, scale, state_slot_stride, K);
             break;
         case 64: {
-            ggml_cuda_kernel_launch(gated_delta_net_cuda<64, KDA, keep_rs_t>, launch_params,
+            ggml_cuda_kernel_launch(gated_delta_net_cuda<64, KDA, keep_rs_t, gdn_cols_per_warp, use_chunked>, launch_params,
                 q_d, k_d, v_d, g_d, b_d, s_d, dst_d, state_d, H,
                 n_tokens, n_seqs, sq1, sq2, sq3, sv1, sv2, sv3,
                 sb1, sb2, sb3, neqk1_magic, rq3_magic, scale, state_slot_stride, K);
             break;
         }
         case 128: {
-            ggml_cuda_kernel_launch(gated_delta_net_cuda<128, KDA, keep_rs_t>, launch_params,
+            ggml_cuda_kernel_launch(gated_delta_net_cuda<128, KDA, keep_rs_t, gdn_cols_per_warp, use_chunked>, launch_params,
                 q_d, k_d, v_d, g_d, b_d, s_d, dst_d, state_d, H,
                 n_tokens, n_seqs, sq1, sq2, sq3, sv1, sv2, sv3,
                 sb1, sb2, sb3, neqk1_magic, rq3_magic, scale, state_slot_stride, K);
@@ -236,6 +263,30 @@ static void launch_gated_delta_net(
         }
         default:
             GGML_ABORT("fatal error");
+    }
+}
+
+template <bool KDA, bool keep_rs_t>
+static void launch_gated_delta_net(
+        const float * q_d, const float * k_d, const float * v_d,
+        const float * g_d, const float * b_d, const float * s_d,
+        float * dst_d, float * state_d,
+        int64_t S_v,   int64_t H, int64_t n_tokens, int64_t n_seqs,
+        int64_t sq1,   int64_t sq2, int64_t sq3,
+        int64_t sv1,   int64_t sv2, int64_t sv3,
+        int64_t sb1,   int64_t sb2, int64_t sb3,
+        int64_t neqk1, int64_t rq3,
+        float scale, int64_t state_slot_stride, int K, cudaStream_t stream) {
+    if (ggml_cuda_gdn_use_chunked(n_tokens)) {
+        launch_gated_delta_net_impl<KDA, keep_rs_t, true>(
+            q_d, k_d, v_d, g_d, b_d, s_d, dst_d, state_d, S_v, H, n_tokens, n_seqs,
+            sq1, sq2, sq3, sv1, sv2, sv3, sb1, sb2, sb3,
+            neqk1, rq3, scale, state_slot_stride, K, stream);
+    } else {
+        launch_gated_delta_net_impl<KDA, keep_rs_t, false>(
+            q_d, k_d, v_d, g_d, b_d, s_d, dst_d, state_d, S_v, H, n_tokens, n_seqs,
+            sq1, sq2, sq3, sv1, sv2, sv3, sb1, sb2, sb3,
+            neqk1, rq3, scale, state_slot_stride, K, stream);
     }
 }
 

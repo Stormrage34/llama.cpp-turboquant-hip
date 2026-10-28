@@ -376,6 +376,10 @@ bool cli_context::generate_completion(generated_content & content_out, cli_timin
             const auto & t = chunk.at("timings");
             timings.prompt_per_second    = t.value("prompt_per_second",    0.0);
             timings.predicted_per_second = t.value("predicted_per_second", 0.0);
+            // speculative decoding: the server reports the draft budget and how much of it was
+            // accepted, which is the acceptance rate a spec-decode A/B has to hold constant.
+            timings.draft_n              = t.value("draft_n",           (int64_t) 0);
+            timings.draft_n_accepted     = t.value("draft_n_accepted",  (int64_t) 0);
         }
         if (!chunk.contains("choices") || !chunk.at("choices").is_array() || chunk.at("choices").empty()) {
             return;
@@ -658,6 +662,15 @@ int cli_context::run() {
                 timings.prompt_per_second,
                 timings.predicted_per_second
             ));
+            if (timings.draft_n > 0) {
+                // alpha: the rate a spec-decode A/B has to hold constant to be a kernel comparison
+                ui::show_info(string_format(
+                    "\n[ Draft: %lld generated, %lld accepted, alpha = %.4f ]",
+                    (long long) timings.draft_n,
+                    (long long) timings.draft_n_accepted,
+                    (double) timings.draft_n_accepted / (double) timings.draft_n
+                ));
+            }
         }
 
         if (params.single_turn) {

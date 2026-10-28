@@ -4,6 +4,8 @@
 #include "mmid.cuh"
 
 #include <cstdint>
+#include <cstdlib>
+
 
 static void ggml_cuda_mul_mat_q_switch_type(ggml_backend_cuda_context & ctx, const mmq_args & args, cudaStream_t stream, const ggml_prec prec_src1) {
     switch (args.type_x) {
@@ -112,6 +114,52 @@ static ggml_prec ggml_cuda_mmq_get_prec_env() {
     return GGML_PREC_UNDEFINED;
 }
 
+// Routed (MUL_MAT_ID) tile selection for gfx1030.
+//
+// The MoE branch maps each expert's routed rows into a compact column range, but the kernel
+// still evaluates a full J-wide tile for every expert and only masks the unused columns on
+// write-back. Sizing J by the average rows per expert instead of by the token count therefore
+// removes wasted lanes. Admission is fail-closed on an exact device tuple: only gfx1030 is
+// validated, and the rest of the RDNA2 family differs in CU count, LDS size and (for gfx1036)
+// has no Infinity Cache.
+static bool ggml_cuda_mmq_routed_gfx1030_admitted(const int cc) {
+    return cc == GGML_CUDA_CC_RDNA2;
+}
+
+static bool ggml_cuda_mmq_routed_gfx1030_enabled() {
+    static const bool enabled = []() {
+        const char * env = getenv("GGML_HIP_MMQ_ROUTED_GFX1030");
+        return env == nullptr || atoi(env) != 0; // default on; set to 0 to keep the previous selection
+    }();
+    return enabled;
+}
+
+static bool ggml_cuda_mmq_routed_gfx1030_type(const ggml_type type) {
+    switch (type) {
+        case GGML_TYPE_IQ3_S:
+        case GGML_TYPE_Q4_K:
+        case GGML_TYPE_Q5_K:
+        case GGML_TYPE_Q6_K:
+        case GGML_TYPE_Q8_0:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// Only tile widths the RDNA2 config table already has for this path are eligible. The table is
+// compiled for the whole family and must not be extended just for this selection.
+static bool ggml_cuda_mmq_routed_gfx1030_J(const int J) {
+    return J == 16 || J == 32 || J == 48 || J == 64;
+}
+
+static bool ggml_cuda_mmq_routed_gfx1030(const ggml_type type, const int cc, const int64_t n_experts, const bool fallback) {
+    return !fallback && n_experts >= 8 && n_experts <= 1024
+        && ggml_cuda_mmq_routed_gfx1030_enabled()
+        && ggml_cuda_mmq_routed_gfx1030_admitted(cc)
+        && ggml_cuda_mmq_routed_gfx1030_type(type);
+}
+
 // src1 is quantized to Q8_1 unless the FP4 types can use 4-bit activations, in which case they
 // default to the native W4A4 instructions on Blackwell.
 static ggml_prec ggml_cuda_mmq_get_prec_src1(const ggml_tensor * src0, const ggml_tensor * dst, const int cc) {
@@ -171,8 +219,9 @@ void ggml_cuda_mul_mat_q(
 
     const int64_t ne10_padded = GGML_PAD(ne10, MATRIX_ROW_PADDING);
 
-    const int64_t s01 = src0->nb[1] / ts_src0;
+    const int64_t s01 = src0->nb[1] / ts_src0; // in type blocks, not elements
     const int64_t s1  =  dst->nb[1] / ts_dst;
+
     const int64_t s02 = src0->nb[2] / ts_src0;
     const int64_t s2  =  dst->nb[2] / ts_dst;
     const int64_t s03 = src0->nb[3] / ts_src0;
@@ -186,6 +235,11 @@ void ggml_cuda_mul_mat_q(
     const size_t y_block_size       = use_native_fp4 ? sizeof(block_fp4_mmq) : sizeof(block_q8_1_mmq);
     const size_t y_values_per_block = use_native_fp4 ? QK_FP4_MMQ            : QK8_1_MMQ;
 
+    // gfx1030: a routed expert matmul sizes its tile by rows per expert. ncols_dst is
+    // ne12*n_expert_used and nchannels_y is ne02, so this is exactly the rows-per-expert
+    // the compacted column range holds. Dense matmuls never enter this branch.
+    const bool routed = ids != nullptr && ggml_cuda_mmq_routed_gfx1030(src0->type, cc, ne02, fallback);
+
     int J_best        = 0;
     int nthreads_best = 0;
     {
@@ -196,7 +250,7 @@ void ggml_cuda_mul_mat_q(
 
             // Each expert only sees ne12*n_expert_used/ne02 tokens on average.
             // On RDNA3 and RDNA4 it is faster to pick the tile size against this value instead of ne12.
-            if (GGML_CUDA_CC_IS_RDNA3(cc) || GGML_CUDA_CC_IS_RDNA4(cc)) {
+            if (GGML_CUDA_CC_IS_RDNA3(cc) || GGML_CUDA_CC_IS_RDNA4(cc) || routed) {
                 ncols_opt = (ne12*n_expert_used + ne02 - 1) / ne02;
             }
         }
@@ -204,6 +258,11 @@ void ggml_cuda_mul_mat_q(
         int ntiles_J_best = INT_MAX;
 
         for (int J = 8; J <= 128 && ntiles_J_best > 1; J += 8) {
+            // Routed mode only considers the widths admitted above, so J_best stays in
+            // {16, 32, 48, 64} by construction.
+            if (routed && !ggml_cuda_mmq_routed_gfx1030_J(J)) {
+                continue;
+            }
             const ggml_cuda_mmq_config config = ggml_cuda_mmq_get_config(src0->type, J, fallback, cc, prec_src1);
             if (config.type == GGML_TYPE_COUNT) {
                 continue;
@@ -213,12 +272,26 @@ void ggml_cuda_mul_mat_q(
                 continue;
             }
 
+            // The compacted column range is incompatible with stream-k's work split.
+            if (routed && config.stream_k) {
+                continue;
+            }
+
             const int ntiles_x = (ncols_opt + config.J - 1) / config.J;
 
             if (ntiles_x < ntiles_J_best) {
                 J_best = J;
                 nthreads_best = config.nthreads;
                 ntiles_J_best = ntiles_x;
+            }
+        }
+
+        if (routed) {
+            static bool logged = false;
+            if (!logged) {
+                logged = true;
+                GGML_LOG_DEBUG("%s: routed J=%d for %lld rows/expert across %lld experts\n",
+                               __func__, J_best, (long long) ncols_opt, (long long) ne02);
             }
         }
     }

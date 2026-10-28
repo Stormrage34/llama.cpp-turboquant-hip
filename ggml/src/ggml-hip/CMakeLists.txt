@@ -70,6 +70,18 @@ list(APPEND GGML_SOURCES_ROCM ${SRCS})
 file(GLOB   SRCS "../ggml-cuda/template-instances/mmf*.cu")
 list(APPEND GGML_SOURCES_ROCM ${SRCS})
 
+if (CMAKE_HIP_ARCHITECTURES MATCHES "gfx1030" OR GPU_TARGETS MATCHES "gfx1030" OR AMDGPU_TARGETS MATCHES "gfx1030")
+    # This TU is already part of GGML_SOURCES_ROCM via the ../ggml-cuda/*.cu glob;
+    # only per-file options are needed here. -mno-wavefrontsize64 is the valid
+    # Clang spelling (--wavefront-size=32 and -mwavefrontsize64=false are not).
+    set_property(SOURCE "../ggml-cuda/mmq-hipfire-dispatch.cu" PROPERTY COMPILE_OPTIONS
+        "-mno-wavefrontsize64"
+        "-Wno-pass-failed")
+    set_property(SOURCE "../ggml-cuda/fattn-gqa-gfx1030.cu" PROPERTY COMPILE_OPTIONS
+        "-mno-wavefrontsize64"
+        "-Wno-pass-failed")
+endif()
+
 ggml_cuda_fattn_vec_instances(${CMAKE_CURRENT_SOURCE_DIR}/../ggml-cuda SRCS)
 list(APPEND GGML_SOURCES_ROCM ${SRCS})
 

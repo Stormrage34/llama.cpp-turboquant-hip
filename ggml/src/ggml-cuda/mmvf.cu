@@ -16,9 +16,18 @@ static __global__ void mul_mat_vec_f(
     const float   * GGML_CUDA_RESTRICT y   = y_ptr;
     const int32_t * GGML_CUDA_RESTRICT ids = ids_ptr;
     float         * GGML_CUDA_RESTRICT dst = dst_ptr;
-    const int row         = blockIdx.x;
+    const int  row         = blockIdx.x;
+    // dual-matvec fusion: one extra grid row computes the second weight with the same activation
+    // row; it carries no channel offset (the matcher requires 2-D operands)
+    const bool dual2       = fusion.x2 != nullptr && (int) blockIdx.y == (int) gridDim.y - 1;
+    const int  channel_dst = dual2 ? 0 : blockIdx.y;
+
+    if (dual2) {
+        x   = static_cast<const T *>(fusion.x2);
+        dst = fusion.dst2;
+    }
+
     // for MUL_MAT_ID - blockIdx.y = n_expert_used, blockIdx.z = ncols_dst (tokens)
-    const int channel_dst = blockIdx.y;
     const int tid         = threadIdx.x;
 
     int token_idx;
@@ -453,7 +462,7 @@ void launch_mul_mat_vec_f_cuda(
     const bool has_fusion = fusion.gate != nullptr || fusion.x_bias != nullptr || fusion.gate_bias != nullptr;
 
     const int nbytes_shared = warp_size*sizeof(float) + (has_fusion ? warp_size*sizeof(float) : 0);
-    const dim3 block_nums(nrows, nchannels_dst, nsamples_or_ntokens);
+    const dim3 block_nums(nrows, nchannels_dst + (fusion.x2 != nullptr ? 1 : 0), nsamples_or_ntokens);
     const dim3 block_dims(block_size_best, 1, 1);
     switch (block_size_best) {
         case   32: {
@@ -677,6 +686,19 @@ void ggml_cuda_mul_mat_vec_f(ggml_backend_cuda_context & ctx, const ggml_tensor 
             GGML_ASSERT(fusion->gate_bias->ne[0] == dst->ne[0]);
             GGML_ASSERT(!ids || fusion->gate_bias->ne[1] == src0->ne[2]);
             fusion_local.gate_bias = fusion->gate_bias->data;
+        }
+        if (fusion->x2) {
+            GGML_ASSERT(!ids && fusion->dst2 != nullptr);
+            GGML_ASSERT(fusion->x2->type == src0->type);
+            GGML_ASSERT(fusion->x2->ne[0] == ne00 && fusion->x2->ne[1] == ne01);
+            GGML_ASSERT(fusion->x2->ne[2] == 1 && fusion->x2->ne[3] == 1);
+            GGML_ASSERT(fusion->x2->nb[1] == nb01);
+            GGML_ASSERT(fusion->dst2->type == GGML_TYPE_F32 && ggml_is_contiguous(fusion->dst2));
+            GGML_ASSERT(fusion->dst2->ne[0] == ne0 && fusion->dst2->ne[1] == 1 && fusion->dst2->nb[1] == nb1);
+            GGML_ASSERT((const char *) fusion->dst2->data + ggml_nbytes(fusion->dst2) <= (const char *) dst->data ||
+                        (const char *) dst->data + ggml_nbytes(dst) <= (const char *) fusion->dst2->data);
+            fusion_local.x2   = fusion->x2->data;
+            fusion_local.dst2 = (float *) fusion->dst2->data;
         }
         fusion_local.glu_op = fusion->glu_op;
         fusion_local.glu_limit = fusion->glu_limit;

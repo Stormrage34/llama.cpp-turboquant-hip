@@ -518,7 +518,117 @@ enum best_fattn_kernel {
     BEST_FATTN_KERNEL_TILE    = 200,
     BEST_FATTN_KERNEL_VEC     = 100,
     BEST_FATTN_KERNEL_MMA_F16 = 400,
+    BEST_FATTN_KERNEL_GQA_GFX1030 = 300,
 };
+
+#ifdef GGML_USE_HIP
+// GQA decode kernel: one K/V read per KV head serves all Q heads of the group, unlike the VEC
+// kernel which reads and dequantises K/V once per Q head.
+//
+// The kernel's only arch-specific primitive is __builtin_amdgcn_sdot4 (dp4a), which exists on the
+// whole gfx1030-gfx1036 family, so the family range would be the ISA floor. Admission is nonetheless
+// an explicit device tuple, because the routed path is validated on one device: gfx1030. The rest of
+// the family differs in CU count, in LDS size, and gfx1036 is an APU with no Infinity Cache, so an
+// untested device gets the generic VEC/TILE path instead. Fail closed: a cc that is not in the set
+// below is simply not admitted.
+static constexpr int FFATTN_GQA_GFX1030_HEAD_DIM = 256; // Qwen3.8-27B / 35B-A3B geometry
+
+// The admitted GQA ratios live next to the kernel that instantiates them
+// (ggml_cuda_fattn_gqa_gfx1030_ratio_supported in fattn-gqa-gfx1030.cu), so this file does
+// not keep a second copy of the list that could silently disagree with reality.
+
+bool ggml_cuda_fattn_gqa_gfx1030_admitted(const int cc) {
+    switch (cc) {
+        case GGML_CUDA_CC_RDNA2: // gfx1030: RX 6800/6800 XT/6900 XT/6950 XT -- validated here
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool ggml_cuda_fattn_gqa_gfx1030_enabled_impl() {
+    static const bool enabled = []() {
+        const char * env = getenv("GGML_HIP_GQA_GFX1030");
+        return env == nullptr || atoi(env) != 0;
+    }();
+    return enabled;
+}
+
+const char * ggml_cuda_fattn_gqa_gfx1030_env() {
+    const char * env = getenv("GGML_HIP_GQA_GFX1030");
+    return env == nullptr ? "unset" : env;
+}
+
+bool ggml_cuda_fattn_gqa_gfx1030_enabled() {
+    return ggml_cuda_fattn_gqa_gfx1030_enabled_impl();
+}
+
+const char * ggml_cuda_fattn_gqa_gfx1030_ratios() {
+    return "6, 8";
+}
+
+int ggml_cuda_fattn_gqa_gfx1030_head_dim() {
+    return FFATTN_GQA_GFX1030_HEAD_DIM;
+}
+
+static bool ggml_cuda_fattn_gqa_gfx1030_supported(const int cc, const ggml_tensor * dst) {
+    if (!ggml_cuda_fattn_gqa_gfx1030_enabled_impl()) {
+        return false;
+    }
+    if (!ggml_cuda_fattn_gqa_gfx1030_admitted(cc)) {
+        return false;
+    }
+
+    const ggml_tensor * Q    = dst->src[0];
+    const ggml_tensor * K    = dst->src[1];
+    const ggml_tensor * V    = dst->src[2];
+    const ggml_tensor * mask = dst->src[3];
+
+    if (Q == nullptr || K == nullptr || V == nullptr) {
+        return false;
+    }
+    if (Q->type != GGML_TYPE_F32) {
+        return false;
+    }
+    if (Q->ne[0] != FFATTN_GQA_GFX1030_HEAD_DIM || V->ne[0] != FFATTN_GQA_GFX1030_HEAD_DIM) {
+        return false;
+    }
+    if (!ggml_cuda_fattn_gqa_gfx1030_rows_supported(Q->ne[1])) {
+        return false; // 1 = decode, 2-4 = speculative verify; wider batches keep TILE/VEC
+    }
+    if (K->ne[2] == 0 || Q->ne[2] % K->ne[2] != 0) {
+        return false;
+    }
+    if (!ggml_cuda_fattn_gqa_gfx1030_ratio_supported(Q->ne[2] / K->ne[2])) {
+        return false; // only ratios with a compiled instance; everything else keeps VEC
+    }
+    if (V->ne[2] != K->ne[2] || V->ne[3] != K->ne[3]) {
+        return false;
+    }
+    if (K->type != GGML_TYPE_Q8_0) {
+        return false;
+    }
+    if (V->type != GGML_TYPE_Q8_0 && V->type != GGML_TYPE_Q5_0) {
+        return false;
+    }
+    if (dst->src[4] != nullptr) {
+        return false; // sinks unsupported
+    }
+
+    float max_bias      = 0.0f;
+    float logit_softcap = 0.0f;
+    memcpy(&max_bias,      (const float *) dst->op_params + 1, sizeof(float));
+    memcpy(&logit_softcap, (const float *) dst->op_params + 2, sizeof(float));
+    if (max_bias != 0.0f || logit_softcap != 0.0f) {
+        return false;
+    }
+    if (mask != nullptr && mask->type != GGML_TYPE_F16) {
+        return false;
+    }
+
+    return true;
+}
+#endif // GGML_USE_HIP
 
 // K/V types for which there is a vector kernel template instance, other kernels convert these to f16:
 static bool ggml_cuda_fattn_kv_type_supported(const ggml_type type) {
@@ -571,6 +681,42 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
     }
 
     const int cc = ggml_cuda_info().devices[device].cc;
+
+#ifdef GGML_USE_HIP
+    if (ggml_cuda_fattn_gqa_gfx1030_supported(cc, dst)) {
+        // One line on first use, at INFO rather than DEBUG: it records which kernel replaced VEC, and
+        // for which shape, once per process -- never per token. How visible that is depends on the
+        // host tool: llama-bench installs a callback that drops everything below ERROR unless -v is
+        // given, and llama-cli suppresses backend logs while generation streams, so this line is
+        // reachable in a normal *verbose* run rather than in a bare one.
+        static bool logged = false;
+        if (!logged) {
+            logged = true;
+            const ggml_tensor * Q = dst->src[0];
+            const ggml_tensor * K = dst->src[1];
+            const ggml_tensor * V = dst->src[2];
+            GGML_LOG_INFO("%s: GQA decode route selected on gfx1030 (cc = 0x%x): Q rows %lld, "
+                    "Q heads %lld, KV heads %lld, head_dim %lld, K %s, V %s\n",
+                    __func__, cc & 0xffff,
+                    (long long) Q->ne[1], (long long) Q->ne[2], (long long) K->ne[2], (long long) Q->ne[0],
+                    ggml_type_name(K->type), ggml_type_name(V->type));
+        }
+        return BEST_FATTN_KERNEL_GQA_GFX1030;
+    }
+    {
+        // One-time decline line, for the devices the narrow admission excludes: those used to be
+        // routed by the family predicate and now fall back to VEC/TILE. Devices of other arches fall
+        // back by design and are not reported, and a device that *is* admitted but whose tensor shape
+        // does not match is a normal per-graph decision, not a decline - logging it here would claim
+        // a misconfiguration on every prefill.
+        static bool logged_decline = false;
+        if (!logged_decline && GGML_CUDA_CC_IS_RDNA2(cc) && !ggml_cuda_fattn_gqa_gfx1030_admitted(cc)) {
+            logged_decline = true;
+            GGML_LOG_INFO("%s: GQA decode route declined on cc = 0x%x: not the validated device "
+                    "(gfx1030); using the generic VEC/TILE attention path\n", __func__, cc & 0xffff);
+        }
+    }
+#endif
 
     switch (K->ne[0]) {
         case  40:
@@ -744,6 +890,9 @@ size_t ggml_cuda_flash_attn_ext_get_alloc_size(int device, const ggml_tensor * d
             need_f16_K = K->type == GGML_TYPE_F32 || f16_fallback;
             need_f16_V = V->type == GGML_TYPE_F32 || f16_fallback;
         } break;
+        case BEST_FATTN_KERNEL_GQA_GFX1030:
+            // reads Q8_0 K and Q8_0/Q5_0 V directly
+            break;
         case BEST_FATTN_KERNEL_NONE:
             break;
     }
@@ -768,6 +917,13 @@ void ggml_cuda_flash_attn_ext(ggml_backend_cuda_context & ctx, ggml_tensor * dst
         case BEST_FATTN_KERNEL_MMA_F16:
             ggml_cuda_flash_attn_ext_mma_f16(ctx, dst);
             break;
+        case BEST_FATTN_KERNEL_GQA_GFX1030:
+#ifdef GGML_USE_HIP
+            ggml_cuda_flash_attn_ext_gqa_gfx1030(ctx, dst);
+            break;
+#else
+            GGML_ABORT("gfx1030 GQA kernel requires the HIP backend");
+#endif
     }
 }
 

@@ -99,6 +99,18 @@ int main(int argc, char ** argv) {
     int n_drafted = 0;
     int n_accept  = 0;
 
+    // local diagnostic (uncommitted): dump the exact sampled token ids so two runs
+    // can be compared token-for-token. enabled with LLAMA_DUMP_IDS=<path>.
+    FILE * f_ids = nullptr;
+    int    n_ids = 0;
+    if (const char * ids_path = getenv("LLAMA_DUMP_IDS")) {
+        f_ids = fopen(ids_path, "w");
+        if (f_ids == nullptr) {
+            LOG_ERR("%s: failed to open %s\n", __func__, ids_path);
+            return 1;
+        }
+    }
+
     // used to determine end of generation
     bool has_eos = false;
 
@@ -119,8 +131,9 @@ int main(int argc, char ** argv) {
     struct common_speculative * spec = common_speculative_init(params.speculative, 1);
 
     if (spec == nullptr) {
-        LOG_ERR("%s", "failed to initialize speculative decoding\n");
-        return 1;
+        // local change (uncommitted): no speculative type requested - continue with plain
+        // auto-regressive decoding so the same binary can serve as its own baseline
+        LOG_WRN("%s", "no speculative type enabled - running plain auto-regressive decode\n");
     }
 
     // eval the prompt on the target and feed it to the speculative implementation(s)
@@ -185,15 +198,17 @@ int main(int argc, char ** argv) {
             n_draft_max = std::max(n_draft_max, 0);
 
             // generate a new draft
-            common_speculative_get_draft_params(spec, seq_id) = {
-                /* .drafting   = */ true,
-                /* .n_max      = */ n_draft_max,
-                /* .pos0       = */ n_past,
-                /* .id_last    = */ id_last,
-                /* .prompt     = */ &prompt_tgt,
-                /* .result     = */ &draft, // output
-            };
-            common_speculative_draft(spec);
+            if (spec != nullptr) {
+                common_speculative_get_draft_params(spec, seq_id) = {
+                    /* .drafting   = */ true,
+                    /* .n_max      = */ n_draft_max,
+                    /* .pos0       = */ n_past,
+                    /* .id_last    = */ id_last,
+                    /* .prompt     = */ &prompt_tgt,
+                    /* .result     = */ &draft, // output
+                };
+                common_speculative_draft(spec);
+            }
 
             // save a checkpoint of the target context before evaluating the draft
             // this allows us to restore the state if partial draft acceptance occurs
@@ -288,7 +303,10 @@ int main(int argc, char ** argv) {
             continue;
         }
 
-        common_speculative_accept(spec, seq_id, ids.size() - 1);
+        if (spec != nullptr) {
+            // note: common_speculative_accept() does not tolerate a null speculator
+            common_speculative_accept(spec, seq_id, ids.size() - 1);
+        }
 
         // full acceptance: consume the draft and commit accepted tokens
         n_past    += ids.size() - 1;
@@ -309,6 +327,11 @@ int main(int argc, char ** argv) {
             if (llama_vocab_is_eog(vocab, id_last)) {
                 has_eos = true;
                 break;
+            }
+
+            if (f_ids) {
+                fprintf(f_ids, "%d\n", id_last);
+                n_ids++;
             }
 
             const std::string token_str = common_token_to_piece(ctx_tgt, id_last);
@@ -341,6 +364,12 @@ int main(int argc, char ** argv) {
     }
 
     auto t_dec_end = ggml_time_us();
+
+    if (f_ids) {
+        fclose(f_ids);
+        f_ids = nullptr;
+        LOG_INF("%s: dumped %d token ids\n", __func__, n_ids);
+    }
 
     const int n_input = inp.size();
 

@@ -273,8 +273,18 @@ static constexpr __device__ ggml_cuda_mmq_config ggml_cuda_mmq_get_config(ggml_t
     return ggml_cuda_mmq_get_config_rdna3_5(type, J, fallback);
 #elif defined(RDNA3)
     return ggml_cuda_mmq_get_config_rdna3(type, J, fallback);
+#elif defined(RDNA2)
+    return ggml_cuda_mmq_get_config_rdna2(type, J, fallback);
+#else
+    // Explicit RDNA2 arm above; this one is the "no config for this arch" case. The host pass of
+    // the HIP toolchain does not define the per-arch macros, so it lands here too - only a device
+    // pass reaching this point means an arch was compiled without an MMQ config. Fail the build
+    // instead of silently handing it the RDNA2 (dp4a) config, which is what RDNA1 used to get.
+#if defined(__HIP_DEVICE_COMPILE__)
+#error "unhandled HIP device arch: add an MMQ config instead of falling back to the RDNA2 (dp4a) one"
 #else
     return ggml_cuda_mmq_get_config_rdna2(type, J, fallback);
+#endif
 #endif // CDNA
 #else
 #ifdef BLACKWELL_MMA_AVAILABLE

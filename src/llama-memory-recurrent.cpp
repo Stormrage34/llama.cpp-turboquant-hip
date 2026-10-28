@@ -455,10 +455,12 @@ llama_memory_context_ptr llama_memory_recurrent::init_batch(llama_batch_allocr &
             } else {
                 // TODO: non-sequential equal split can be done if using unified KV cache
                 //       for simplicity, we always use sequential equal split for now
-                // [TAG_RECURRENT_ROLLBACK_SPLITS]
-                // the trailing (1 + n_rs_seq) tokens of each seq must stay in the same ubatch
-                //   so that the rollback snapshots remain valid
-                ubatch = balloc.split_equal(n_ubatch, true, n_rs_seq > 0 ? n_rs_seq + 1 : 0);
+                // [TAG_RECURRENT_ROLLBACK_SPLITS] the trailing (1 + n_rs_seq) tokens of each seq
+                //   must stay in the same ubatch so that the rollback snapshots remain valid
+                const uint32_t n_keep_tail = llama_n_keep_tail(n_rs_seq);
+                GGML_ASSERT(n_keep_tail == (n_rs_seq == 0 ? 0 : n_rs_seq + 1));
+
+                ubatch = balloc.split_equal(n_ubatch, true, n_keep_tail);
             }
 
             if (ubatch.n_tokens == 0) {

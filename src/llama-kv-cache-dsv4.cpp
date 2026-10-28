@@ -1412,9 +1412,12 @@ llama_memory_context_ptr llama_kv_cache_dsv4::init_batch(
             if (has_coupled) {
                 ubatch = balloc.split_seq(n_ubatch);
             } else {
-                // [TAG_RECURRENT_ROLLBACK_SPLITS]
-                // the trailing (1 + n_rs_seq) tokens of each seq must stay in the same ubatch
-                ubatch = balloc.split_equal(n_ubatch, raw_per_seq || comp_per_seq, n_rs_seq > 0 ? n_rs_seq + 1 : 0);
+                // [TAG_RECURRENT_ROLLBACK_SPLITS] the trailing (1 + n_rs_seq) tokens of each seq
+                //   must stay in the same ubatch so that the rollback snapshots remain valid
+                const uint32_t n_keep_tail = llama_n_keep_tail(n_rs_seq);
+                GGML_ASSERT(n_keep_tail == (n_rs_seq == 0 ? 0 : n_rs_seq + 1));
+
+                ubatch = balloc.split_equal(n_ubatch, raw_per_seq || comp_per_seq, n_keep_tail);
             }
 
             if (ubatch.n_tokens == 0) {
