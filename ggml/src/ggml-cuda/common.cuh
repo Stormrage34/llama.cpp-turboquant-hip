@@ -24,6 +24,7 @@
 
 #include <array>
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <cerrno>
 #include <cfloat>
@@ -1662,6 +1663,12 @@ static inline void * ggml_cuda_prequant_find(ggml_backend_cuda_context * ctx, co
 // write the blocks calls ggml_cuda_prequant_take() to publish them, so a consumer can never read a
 // slot that no launch filled in this execution.
 
+// Global flag: disable KLONG halving for MTP draft graphs. Set by llama_context::decode
+// when processing an LLM_GRAPH_TYPE_DECODER_MTP graph; cleared afterwards.
+// This allows non-MTP decode to keep the +3.75% tg gain from KLONG while avoiding
+// the 0% MTP acceptance caused by the changed reduction tree.
+extern std::atomic<bool> ggml_cuda_klong_disabled;
+
 static inline size_t ggml_cuda_prequant_arena_size_bytes() {
     static const size_t result = []() {
         constexpr size_t default_mb = 32;
@@ -1675,7 +1682,7 @@ static inline size_t ggml_cuda_prequant_arena_size_bytes() {
         const unsigned long mb = std::strtoul(env, &end, 10);
         // garbage, overflow, zero and absurd values all fall back to the default: a typo must not
         // silently disable the arena (0 MB) or ask the driver for a nonsense allocation
-        if (end == env || errno == ERANGE || mb == 0 || mb > maximum_mb) {
+        if (end == env || *end != '\0' || errno == ERANGE || mb == 0 || mb > maximum_mb) {
             return default_mb << 20;
         }
         return (size_t) mb << 20;
@@ -1693,22 +1700,27 @@ static inline bool ggml_cuda_prequant_debug_enabled() {
 
 static inline void * ggml_cuda_prequant_add_impl(ggml_backend_cuda_context * ctx, const ggml_tensor * src1,
                                                  size_t nbytes, bool claimed_written) {
-    static bool logged_alloc = false;
-    static bool logged_full  = false;
+    static std::atomic<bool> logged_alloc{false};
+    static std::atomic<bool> logged_full{false};
+    static std::atomic<bool> alloc_failed{false};
 
-    if (ctx->prequant_buf == nullptr) {
+    if (ctx->prequant_buf == nullptr && !alloc_failed) {
         // deliberately not ctx.pool(): the pool hands out graph-lifetime blocks and cannot be
         // allocated while a graph is being captured
         const size_t arena_bytes = ggml_cuda_prequant_arena_size_bytes();
         if (cudaMalloc((void **) &ctx->prequant_buf, arena_bytes) != cudaSuccess) {
-            if (!logged_alloc) {
-                logged_alloc = true;
+            alloc_failed = true;
+            if (!logged_alloc.exchange(true)) {
                 GGML_LOG_WARN("%s: cannot allocate the q8_1 prequant arena, fused norms will not quantise\n", __func__);
             }
             ctx->prequant_buf = nullptr;
             return nullptr;
         }
         ctx->prequant_arena = arena_bytes;
+    }
+
+    if (ctx->prequant_buf == nullptr) {
+        return nullptr;
     }
 
     for (ggml_backend_cuda_context::ggml_cuda_prequant_entry & e : ctx->prequant) {
@@ -1743,8 +1755,7 @@ static inline void * ggml_cuda_prequant_add_impl(ggml_backend_cuda_context * ctx
     // another execution's slot to evict: a full arena means this graph's live q8_1 set does not
     // fit. Degrade gracefully, exactly as before the arena existed: no slot, so the fused norm
     // skips quantisation and every consumer runs its own quantize_q8_1 launch.
-    if (!logged_full) {
-        logged_full = true;
+    if (!logged_full.exchange(true)) {
         GGML_LOG_WARN("%s: q8_1 prequant arena full (%zu of %zu bytes used, %zu wanted), "
                       "falling back to per-matvec quantize_q8_1\n", __func__, used, ctx->prequant_arena, nbytes);
     }

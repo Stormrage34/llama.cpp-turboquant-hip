@@ -3,8 +3,11 @@
 #include "unary.cuh"
 #include "vecdotq.cuh"
 
+#include <atomic>
 #include <cstdint>
 #include <type_traits>
+
+std::atomic<bool> ggml_cuda_klong_disabled{false};
 
 #define MMVQ_LB_MIN 1
 
@@ -13,7 +16,7 @@
 #endif
 
 #ifndef GGML_RDNA2_MMVQ_SMALLK
-#define GGML_RDNA2_MMVQ_SMALLK 0
+#define GGML_RDNA2_MMVQ_SMALLK 1
 #endif
 
 #ifndef GGML_RDNA2_MMVQ_KLONG
@@ -21,7 +24,7 @@
 #endif
 
 #ifndef GGML_RDNA2_MMVQ_WIDEN
-#define GGML_RDNA2_MMVQ_WIDEN 0
+#define GGML_RDNA2_MMVQ_WIDEN 1
 #endif
 
 #ifndef GGML_RDNA2_MMVQ_2ROWS
@@ -613,7 +616,7 @@ static constexpr __host__ __device__ int calc_nwarps(ggml_type type, int ncols_d
         return generic;
     }
 
-#if GGML_RDNA2_MMVQ_KLONG
+#if GGML_RDNA2_MMVQ_KLONG && defined(RDNA2)
     // RDNA2 has no table of its own and reports a single warp below. This arm mirrors the GB10
     // halve_iters promotion for the ncols_dst == 1 K loop: the block is widened to twice this
     // table's own baseline width so the loop retires in half the trips. The type list is GB10's
@@ -637,7 +640,7 @@ static constexpr __host__ __device__ int calc_nwarps(ggml_type type, int ncols_d
     }
 #endif
 
-#if GGML_RDNA2_MMVQ_WIDEN
+#if GGML_RDNA2_MMVQ_WIDEN && defined(RDNA2)
     // RDNA2 has no table of its own and reports a single warp below. For single-token, non-routed
     // matvecs whose row count is small (few blocks for the grid) the extra block width buys memory
     // parallelism that one warp per row cannot expose. Mirrors the RDNA3_0 whitelist branch, with
@@ -662,7 +665,7 @@ static constexpr __host__ __device__ int calc_nwarps(ggml_type type, int ncols_d
     }
 #endif
 
-#if GGML_RDNA2_MMVQ_SMALLK
+#if GGML_RDNA2_MMVQ_SMALLK && defined(RDNA2)
     // RDNA2 has no table of its own and falls through to a single warp below. Under the small_k build
     // switch it borrows the GENERIC table's block width for the ncols_dst == 1 path instead; this arm
     // only exists when GGML_RDNA2_MMVQ_SMALLK is compiled on, so the default build is unchanged.
@@ -690,7 +693,7 @@ static constexpr __host__ __device__ bool mmvq_two_rows_ncols1(ggml_type type) {
     }
 }
 
-#if GGML_RDNA2_MMVQ_2ROWS
+#if GGML_RDNA2_MMVQ_2ROWS && defined(RDNA2)
 // A second row per block shares the q8_1 activation-row loads between the two weight rows, which on
 // the K=5120 decode shapes are 2.1-3.5x the weight traffic per row at one row per block. The rows
 // have independent accumulators (tmp[j][i]) and independent reductions, so the per-row result is
@@ -736,7 +739,7 @@ static constexpr __host__ __device__ int calc_rows_per_block(ggml_type type, int
         }
     }
 
-#if GGML_RDNA2_MMVQ_2ROWS
+#if GGML_RDNA2_MMVQ_2ROWS && defined(RDNA2)
     if (table_id == MMVQ_PARAMETERS_RDNA2 && ncols_dst == 1 && !small_k) {
         return mmvq_rdna2_rows_per_block_ncols1(type);
     }
@@ -1321,6 +1324,13 @@ static void mul_mat_vec_q_switch_ncols_dst(
         const bool klong_table = table_id == MMVQ_PARAMETERS_GB10;
 #endif
         if (!klong_table) {
+            return false;
+        }
+
+        // Disable KLONG for MTP draft graphs: the changed reduction tree alters
+        // floating-point accumulation order, which breaks MTP acceptance (0% alpha).
+        // See oracle analysis ses_e7718b38fffe1sZBSCl3cqPiNf.
+        if (ggml_cuda_klong_disabled.load(std::memory_order_relaxed)) {
             return false;
         }
 

@@ -1,5 +1,8 @@
 #include "llama-context.h"
 
+#include <atomic>
+extern std::atomic<bool> ggml_cuda_klong_disabled;
+
 #include "ggml.h"
 #include "llama-arch.h"
 #include "llama-graph.h"
@@ -1526,6 +1529,20 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
         ret = GGML_STATUS_FAILED;
         return nullptr;
     }
+
+    // Disable KLONG for MTP draft graphs (see common.cuh:ggml_cuda_klong_disabled).
+    // KLONG changes the mmvq reduction tree, altering FP accumulation order, which
+    // breaks MTP acceptance (0% alpha). Keep KLONG for non-MTP decode (+3.75% tg).
+    const bool is_mtp = (gtype == LLM_GRAPH_TYPE_DECODER_MTP);
+    struct klong_guard {
+        bool active;
+        klong_guard(bool mtp) : active(mtp) {
+            if (active) ggml_cuda_klong_disabled.store(true, std::memory_order_relaxed);
+        }
+        ~klong_guard() {
+            if (active) ggml_cuda_klong_disabled.store(false, std::memory_order_relaxed);
+        }
+    } _kg(is_mtp);
 
     auto * res = get_gf_res_prev();
     auto * gf  = res->get_gf();

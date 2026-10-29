@@ -6,7 +6,12 @@ llama.cpp: LLM inference in C/C++. Build system is CMake (not Make - the Makefil
 
 - CPU build:
   - `cmake -B build`
-  - `cmake --build build --config Release -j$(nproc)`
+  - `cmake --build build --config Release -j12`
+- HIP/ROCm build (gfx1030 / RX 6900 XT):
+  - `cmake -B build -DGGML_HIP=ON -DAMDGPU_TARGETS=gfx1030 -DCMAKE_BUILD_TYPE=Release -DGGML_HIP_NO_VMM=ON`
+  - `cmake --build build --config Release -j12`
+  - Binaries land in `build/bin/`. Test with `./build/bin/llama-bench`.
+  - Use `-j8` to `-j12`; `-j$(nproc)` (28 on 14700) crashes (OOM + ROCm clang segfault on E-cores).
 - Toolchain presets (build dir becomes `build-<preset>`):
   - `cmake --preset x64-linux-gcc-release`
   - `cmake --build build-x64-linux-gcc-release`
@@ -84,3 +89,14 @@ llama.cpp: LLM inference in C/C++. Build system is CMake (not Make - the Makefil
 ## Local benchmarking rules (this gfx1030 host only)
 
 See `docs/gfx1030-benchmarking.md` for the load-bearing rules.
+
+- Hardware: Intel i7-14700 (20c/28t), 62 GB RAM, RX 6900 XT (gfx1030), ROCm/HIP.
+- Build dir: `build/` (root). `build-hip-gfx1030/` is the original owner build (identical binaries).
+- Models of record:
+  - Dense: `/home/stormrage/Downloads/Swift-1.5-Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf`
+  - MoE: `/home/stormrage/Downloads/Qwen3.8-35B-A3B-Q4_K_M-exps-IQ3_S-im.gguf`
+- Baseline (fork vs upstream): dense +2.8% (30.89 vs 30.05 t/s), MoE +1.15% (95.19 vs 94.11 t/s).
+- Upstream reference build: `/tmp/opencode/llama-upstream/build/bin/llama-bench`.
+- Branch: `main` at `d4a3d5dbb` + 7 uncommitted audit fixes. No push performed.
+- GPU work only while owner's server is idle; never launch/stop/query/health-check `llama-server`.
+- Build with `-j12` (not `-j$(nproc)` — OOM + clang segfault on E-cores).

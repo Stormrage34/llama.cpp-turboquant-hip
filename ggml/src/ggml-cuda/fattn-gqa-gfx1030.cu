@@ -78,10 +78,10 @@ __device__ __forceinline__ void gqa_gfx1030_load_v(
 }
 
 // GROUP warps, one per Q head. `__launch_bounds__` states the workgroup size the block
-// actually runs at; the min-blocks argument is 1 because the register budget allows
-// exactly one block per CU: gfx1030 holds 8 wave32 slots per CU at the 256-VGPR ceiling
-// this kernel already uses, so a 256-thread block fills the CU. Asking for 2+ blocks
-// would cap VGPRs at <=128/thread and spill the accumulators.
+// actually runs at; the min-blocks argument is 2. gfx1030 holds 8 wave32 slots per CU at
+// the 256-VGPR ceiling this kernel already uses, so a 256-thread block fills the CU.
+// Setting min-blocks to 2 lets the compiler target a 2-block occupancy without spilling
+// the accumulators (measured to win on the verify path).
 //
 // Adding rows is paid for in registers, not in LDS: the accumulators become
 // acc[ROWS][ACC] (ROWS*8 floats/lane, the dominant term), the softmax state becomes

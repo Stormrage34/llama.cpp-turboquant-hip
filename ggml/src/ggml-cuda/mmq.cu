@@ -3,6 +3,7 @@
 #include "quantize.cuh"
 #include "mmid.cuh"
 
+#include <atomic>
 #include <cstdint>
 #include <cstdlib>
 
@@ -291,9 +292,8 @@ void ggml_cuda_mul_mat_q(
         }
 
         if (routed) {
-            static bool logged = false;
-            if (!logged) {
-                logged = true;
+            static std::atomic<bool> logged{false};
+            if (!logged.exchange(true)) {
                 GGML_LOG_DEBUG("%s: routed J=%d for %lld rows/expert across %lld experts\n",
                                __func__, J_best, (long long) ncols_opt, (long long) ne02);
             }
