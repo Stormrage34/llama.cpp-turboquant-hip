@@ -85,6 +85,11 @@ gated_delta_net_cuda(const float * q,
         // prefill publishes them from lane 0 instead of having each lane load them and run expf.
         // The values are identical, so the recurrence below keeps its lane order and its bytes.
         // Decode (n_tokens == 1) stays on the stock path: use_chunked is false there.
+        //
+        // The 0xFFFFFFFF mask below is 32-bit on purpose and assumes a wave32 target. This TU is
+        // built with -mno-wavefrontsize64 for gfx1030 (ggml-hip/CMakeLists.txt), so that holds. On
+        // any wave64 target the mask must become __activemask() (or a 64-bit mask): a 32-bit mask
+        // that names inactive lanes is undefined behaviour.
         float beta_val;
         if constexpr (use_chunked) {
             beta_val = __shfl_sync(0xFFFFFFFFu, lane == 0 ? *beta_t : 0.0f, 0, warp_size);
@@ -105,6 +110,7 @@ gated_delta_net_cuda(const float * q,
         if constexpr (!KDA) {
             float g_val;
             if constexpr (use_chunked) {
+                // wave32 mask, see the note on the beta broadcast above
                 g_val = __shfl_sync(0xFFFFFFFFu, lane == 0 ? expf(*g_t) : 0.0f, 0, warp_size);
             } else {
                 g_val = expf(*g_t);

@@ -25,6 +25,7 @@
 #include <array>
 #include <algorithm>
 #include <cassert>
+#include <cerrno>
 #include <cfloat>
 #include <cstdio>
 #include <string>
@@ -1475,13 +1476,14 @@ struct ggml_backend_cuda_context {
     // and could be handed the address of another tensor that is still live.
     struct ggml_cuda_prequant_entry {
         const ggml_tensor * src1   = nullptr;
-        uint64_t            stamp  = 0;
         size_t              off    = 0;
         size_t              nbytes = 0;
         // stamp of the execution in which a producer launch actually filled the slot. Until that
         // happens the slot must not be handed to a consumer: it would hold another execution's bytes.
         uint64_t            written_stamp = 0;
     };
+    // the entry set is cleared at every execution boundary (see ggml-cuda.cu), so it never holds a
+    // previous execution's slots and the arena's high-water mark restarts at 0 each time
     std::vector<ggml_cuda_prequant_entry> prequant;
     uint64_t   prequant_stamp = 0;
     char *     prequant_buf   = nullptr;
@@ -1659,6 +1661,36 @@ static inline void * ggml_cuda_prequant_find(ggml_backend_cuda_context * ctx, co
 // claimed_written == false reserves the memory without publishing it: a producer that is about to
 // write the blocks calls ggml_cuda_prequant_take() to publish them, so a consumer can never read a
 // slot that no launch filled in this execution.
+
+static inline size_t ggml_cuda_prequant_arena_size_bytes() {
+    static const size_t result = []() {
+        constexpr size_t default_mb = 32;
+        constexpr size_t maximum_mb = 4096;
+        const char * env = std::getenv("GGML_CUDA_PREQUANT_ARENA_MB");
+        if (env == nullptr) {
+            return default_mb << 20;
+        }
+        errno = 0;
+        char * end = nullptr;
+        const unsigned long mb = std::strtoul(env, &end, 10);
+        // garbage, overflow, zero and absurd values all fall back to the default: a typo must not
+        // silently disable the arena (0 MB) or ask the driver for a nonsense allocation
+        if (end == env || errno == ERANGE || mb == 0 || mb > maximum_mb) {
+            return default_mb << 20;
+        }
+        return (size_t) mb << 20;
+    }();
+    return result;
+}
+
+static inline bool ggml_cuda_prequant_debug_enabled() {
+    static const bool enabled = []() {
+        const char * env = std::getenv("GGML_CUDA_PREQUANT_DEBUG");
+        return env != nullptr && env[0] == '1';
+    }();
+    return enabled;
+}
+
 static inline void * ggml_cuda_prequant_add_impl(ggml_backend_cuda_context * ctx, const ggml_tensor * src1,
                                                  size_t nbytes, bool claimed_written) {
     static bool logged_alloc = false;
@@ -1667,7 +1699,8 @@ static inline void * ggml_cuda_prequant_add_impl(ggml_backend_cuda_context * ctx
     if (ctx->prequant_buf == nullptr) {
         // deliberately not ctx.pool(): the pool hands out graph-lifetime blocks and cannot be
         // allocated while a graph is being captured
-        if (cudaMalloc((void **) &ctx->prequant_buf, 32u << 20) != cudaSuccess) {
+        const size_t arena_bytes = ggml_cuda_prequant_arena_size_bytes();
+        if (cudaMalloc((void **) &ctx->prequant_buf, arena_bytes) != cudaSuccess) {
             if (!logged_alloc) {
                 logged_alloc = true;
                 GGML_LOG_WARN("%s: cannot allocate the q8_1 prequant arena, fused norms will not quantise\n", __func__);
@@ -1675,42 +1708,51 @@ static inline void * ggml_cuda_prequant_add_impl(ggml_backend_cuda_context * ctx
             ctx->prequant_buf = nullptr;
             return nullptr;
         }
-        ctx->prequant_arena = 32u << 20;
+        ctx->prequant_arena = arena_bytes;
     }
 
-    size_t used = 0;
     for (ggml_backend_cuda_context::ggml_cuda_prequant_entry & e : ctx->prequant) {
         if (e.src1 == src1) {
             if (e.nbytes != nbytes) {
                 return nullptr;
             }
-            e.stamp = ctx->prequant_stamp;
             if (claimed_written) {
                 e.written_stamp = ctx->prequant_stamp;
             }
             return ctx->prequant_buf + e.off;
         }
+    }
+
+    size_t used = 0;
+    for (const ggml_backend_cuda_context::ggml_cuda_prequant_entry & e : ctx->prequant) {
         used = MAX(used, e.off + e.nbytes);
     }
 
-    if (nbytes > ctx->prequant_arena - used) {
-        if (!logged_full) {
-            logged_full = true;
-            GGML_LOG_WARN("%s: q8_1 prequant arena full (%zu of %zu bytes used, %zu wanted), "
-                          "falling back to per-matvec quantize_q8_1\n", __func__, used, ctx->prequant_arena, nbytes);
-        }
-        return nullptr;
+    if (nbytes <= ctx->prequant_arena - used) {
+        ggml_backend_cuda_context::ggml_cuda_prequant_entry e;
+        e.src1   = src1;
+        e.off    = used;
+        e.nbytes = nbytes;
+        e.written_stamp = claimed_written ? ctx->prequant_stamp : 0;
+        ctx->prequant.push_back(e);
+
+        return ctx->prequant_buf + used;
     }
 
-    ggml_backend_cuda_context::ggml_cuda_prequant_entry e;
-    e.src1   = src1;
-    e.stamp  = ctx->prequant_stamp;
-    e.off    = used;
-    e.nbytes = nbytes;
-    e.written_stamp = claimed_written ? ctx->prequant_stamp : 0;
-    ctx->prequant.push_back(e);
-
-    return ctx->prequant_buf + used;
+    // The entry set is rebuilt from empty at every execution (see ggml-cuda.cu), so there is never
+    // another execution's slot to evict: a full arena means this graph's live q8_1 set does not
+    // fit. Degrade gracefully, exactly as before the arena existed: no slot, so the fused norm
+    // skips quantisation and every consumer runs its own quantize_q8_1 launch.
+    if (!logged_full) {
+        logged_full = true;
+        GGML_LOG_WARN("%s: q8_1 prequant arena full (%zu of %zu bytes used, %zu wanted), "
+                      "falling back to per-matvec quantize_q8_1\n", __func__, used, ctx->prequant_arena, nbytes);
+    }
+    if (ggml_cuda_prequant_debug_enabled()) {
+        GGML_LOG_DEBUG("%s: prequant arena full: requested = %zu, used = %zu, arena = %zu\n",
+                       __func__, nbytes, used, ctx->prequant_arena);
+    }
+    return nullptr;
 }
 
 static inline void * ggml_cuda_prequant_add(ggml_backend_cuda_context * ctx, const ggml_tensor * src1, size_t nbytes) {
@@ -1731,7 +1773,6 @@ static inline block_q8_1 * ggml_cuda_prequant_take(ggml_backend_cuda_context * c
     }
     for (ggml_backend_cuda_context::ggml_cuda_prequant_entry & e : ctx->prequant) {
         if (e.src1 == t && e.nbytes == nbytes) {
-            e.stamp         = ctx->prequant_stamp;
             e.written_stamp = ctx->prequant_stamp;
             return (block_q8_1 *) (ctx->prequant_buf + e.off);
         }

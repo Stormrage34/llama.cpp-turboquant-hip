@@ -555,8 +555,11 @@ static bool ggml_cuda_fattn_gqa_gfx1030_enabled_impl() {
 }
 
 const char * ggml_cuda_fattn_gqa_gfx1030_env() {
-    const char * env = getenv("GGML_HIP_GQA_GFX1030");
-    return env == nullptr ? "unset" : env;
+    static const char * env_cached = []() {
+        const char * env = getenv("GGML_HIP_GQA_GFX1030");
+        return env == nullptr ? "unset" : env;
+    }();
+    return env_cached;
 }
 
 bool ggml_cuda_fattn_gqa_gfx1030_enabled() {
@@ -590,7 +593,7 @@ static bool ggml_cuda_fattn_gqa_gfx1030_supported(const int cc, const ggml_tenso
     if (Q->type != GGML_TYPE_F32) {
         return false;
     }
-    if (Q->ne[0] != FFATTN_GQA_GFX1030_HEAD_DIM || V->ne[0] != FFATTN_GQA_GFX1030_HEAD_DIM) {
+    if (Q->ne[0] != FFATTN_GQA_GFX1030_HEAD_DIM || K->ne[0] != FFATTN_GQA_GFX1030_HEAD_DIM || V->ne[0] != FFATTN_GQA_GFX1030_HEAD_DIM) {
         return false;
     }
     if (!ggml_cuda_fattn_gqa_gfx1030_rows_supported(Q->ne[1])) {
@@ -613,6 +616,12 @@ static bool ggml_cuda_fattn_gqa_gfx1030_supported(const int cc, const ggml_tenso
     }
     if (dst->src[4] != nullptr) {
         return false; // sinks unsupported
+    }
+    if (dst->src[5] != nullptr) {
+        // deliberate forward guard: ggml_flash_attn_ext sets only src[0..3] (ggml.c), so this can
+        // never fire today. It stays so that a future src[5] (e.g. a second mask/bias input) cannot
+        // silently reach a kernel that ignores it.
+        return false;
     }
 
     float max_bias      = 0.0f;

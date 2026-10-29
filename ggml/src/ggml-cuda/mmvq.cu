@@ -8,6 +8,32 @@
 
 #define MMVQ_LB_MIN 1
 
+#ifndef GGML_RDNA2_MMVQ_LBMIN
+#define GGML_RDNA2_MMVQ_LBMIN 1
+#endif
+
+#ifndef GGML_RDNA2_MMVQ_SMALLK
+#define GGML_RDNA2_MMVQ_SMALLK 0
+#endif
+
+#ifndef GGML_RDNA2_MMVQ_KLONG
+#define GGML_RDNA2_MMVQ_KLONG 0
+#endif
+
+#ifndef GGML_RDNA2_MMVQ_WIDEN
+#define GGML_RDNA2_MMVQ_WIDEN 0
+#endif
+
+#ifndef GGML_RDNA2_MMVQ_2ROWS
+#define GGML_RDNA2_MMVQ_2ROWS 0
+#endif
+
+#if defined(RDNA2)
+#define MMVQ_LB_MIN_DEVICE GGML_RDNA2_MMVQ_LBMIN
+#else
+#define MMVQ_LB_MIN_DEVICE MMVQ_LB_MIN
+#endif
+
 
 // only enabled on DGX Spark, where it is a gain on every type below. On the higher-bandwidth parts the kernel
 // has little exposed latency left to hide and the extra requests cost more than they save.
@@ -460,7 +486,7 @@ static constexpr __device__ int get_mmvq_mmid_max_batch_for_device() {
 #endif
 }
 
-static constexpr __host__ __device__ int calc_nwarps(ggml_type type, int ncols_dst, mmvq_parameter_table_id table_id, bool small_k = false, bool halve_iters = false) {
+static constexpr __host__ __device__ int calc_nwarps(ggml_type type, int ncols_dst, mmvq_parameter_table_id table_id, bool small_k = false, bool halve_iters = false, bool widen = false) {
     if (table_id == MMVQ_PARAMETERS_GENERIC) {
         switch (ncols_dst) {
             case 1:
@@ -587,6 +613,66 @@ static constexpr __host__ __device__ int calc_nwarps(ggml_type type, int ncols_d
         return generic;
     }
 
+#if GGML_RDNA2_MMVQ_KLONG
+    // RDNA2 has no table of its own and reports a single warp below. This arm mirrors the GB10
+    // halve_iters promotion for the ncols_dst == 1 K loop: the block is widened to twice this
+    // table's own baseline width so the loop retires in half the trips. The type list is GB10's
+    // verbatim; complex vec_dots lose more to the extra reduction than the shorter loop returns.
+    if (table_id == MMVQ_PARAMETERS_RDNA2 && ncols_dst == 1 && !small_k && halve_iters) {
+        const int base = calc_nwarps(type, ncols_dst, MMVQ_PARAMETERS_RDNA2);
+        switch (type) {
+            case GGML_TYPE_Q4_0:
+            case GGML_TYPE_Q4_1:
+            case GGML_TYPE_Q5_0:
+            case GGML_TYPE_Q5_1:
+            case GGML_TYPE_Q8_0:
+            case GGML_TYPE_Q4_K:
+            case GGML_TYPE_Q5_K:
+            case GGML_TYPE_Q6_K:
+            case GGML_TYPE_IQ4_NL:
+                return 2 * base;
+            default:
+                break;
+        }
+    }
+#endif
+
+#if GGML_RDNA2_MMVQ_WIDEN
+    // RDNA2 has no table of its own and reports a single warp below. For single-token, non-routed
+    // matvecs whose row count is small (few blocks for the grid) the extra block width buys memory
+    // parallelism that one warp per row cannot expose. Mirrors the RDNA3_0 whitelist branch, with
+    // the types this campaign actually runs added; still 8 warps, still one row per block.
+    if (table_id == MMVQ_PARAMETERS_RDNA2 && widen && ncols_dst == 1 && !small_k && !halve_iters) {
+        switch (type) {
+            case GGML_TYPE_Q4_0:
+            case GGML_TYPE_Q4_1:
+            case GGML_TYPE_Q5_0:
+            case GGML_TYPE_Q5_1:
+            case GGML_TYPE_Q8_0:
+            case GGML_TYPE_IQ4_NL:
+            case GGML_TYPE_Q4_K:
+            case GGML_TYPE_Q6_K:
+            case GGML_TYPE_IQ3_S:
+            case GGML_TYPE_IQ4_XS:
+            case GGML_TYPE_IQ3_XXS:
+                return 8;
+            default:
+                break;
+        }
+    }
+#endif
+
+#if GGML_RDNA2_MMVQ_SMALLK
+    // RDNA2 has no table of its own and falls through to a single warp below. Under the small_k build
+    // switch it borrows the GENERIC table's block width for the ncols_dst == 1 path instead; this arm
+    // only exists when GGML_RDNA2_MMVQ_SMALLK is compiled on, so the default build is unchanged.
+    // Without it the switch could only ever move rows_per_block, because calc_nwarps would keep
+    // reporting one warp and should_use_small_k would never fire.
+    if (table_id == MMVQ_PARAMETERS_RDNA2 && small_k && ncols_dst == 1) {
+        return calc_nwarps(type, ncols_dst, MMVQ_PARAMETERS_GENERIC);
+    }
+#endif
+
     return 1;
 }
 
@@ -604,8 +690,30 @@ static constexpr __host__ __device__ bool mmvq_two_rows_ncols1(ggml_type type) {
     }
 }
 
+#if GGML_RDNA2_MMVQ_2ROWS
+// A second row per block shares the q8_1 activation-row loads between the two weight rows, which on
+// the K=5120 decode shapes are 2.1-3.5x the weight traffic per row at one row per block. The rows
+// have independent accumulators (tmp[j][i]) and independent reductions, so the per-row result is
+// bit-identical to the one-row launch.
+static constexpr __host__ __device__ int mmvq_rdna2_rows_per_block_ncols1(ggml_type type) {
+    switch (type) {
+        case GGML_TYPE_IQ2_S:
+        case GGML_TYPE_IQ3_XXS:
+        case GGML_TYPE_IQ3_S:
+        case GGML_TYPE_IQ4_XS:
+            return 2;
+        default:
+            return 1;
+    }
+}
+#endif
+
 static constexpr __host__ __device__ int calc_rows_per_block(ggml_type type, int ncols_dst, int table_id, bool small_k = false, int nwarps = 1) {
+#if GGML_RDNA2_MMVQ_SMALLK
+    if (table_id == MMVQ_PARAMETERS_GENERIC || table_id == MMVQ_PARAMETERS_GCN || table_id == MMVQ_PARAMETERS_TURING || table_id == MMVQ_PARAMETERS_GB10 || table_id == MMVQ_PARAMETERS_RDNA2) {
+#else
     if (table_id == MMVQ_PARAMETERS_GENERIC || table_id == MMVQ_PARAMETERS_GCN || table_id == MMVQ_PARAMETERS_TURING || table_id == MMVQ_PARAMETERS_GB10) {
+#endif
         switch (ncols_dst) {
             case 1:
                 if (small_k) {
@@ -628,11 +736,17 @@ static constexpr __host__ __device__ int calc_rows_per_block(ggml_type type, int
         }
     }
 
+#if GGML_RDNA2_MMVQ_2ROWS
+    if (table_id == MMVQ_PARAMETERS_RDNA2 && ncols_dst == 1 && !small_k) {
+        return mmvq_rdna2_rows_per_block_ncols1(type);
+    }
+#endif
+
     return 1;
 }
 
-template <ggml_type type, int ncols_dst, bool has_fusion, bool small_k = false, bool halve_iters = false>
-__launch_bounds__(calc_nwarps(type, ncols_dst, get_device_table_id(), small_k, halve_iters)*ggml_cuda_get_physical_warp_size(), MMVQ_LB_MIN)
+template <ggml_type type, int ncols_dst, bool has_fusion, bool small_k = false, bool halve_iters = false, bool widen = false>
+__launch_bounds__(calc_nwarps(type, ncols_dst, get_device_table_id(), small_k, halve_iters, widen)*ggml_cuda_get_physical_warp_size(), MMVQ_LB_MIN_DEVICE)
 static __global__ void mul_mat_vec_q(
         const void * vx_ptr, const void * vy_ptr, const int32_t * ids_ptr, const ggml_cuda_mm_fusion_args_device fusion, float * dst_ptr,
         const uint32_t ncols_x, const uint3 nchannels_y, const uint32_t stride_row_x, const uint32_t stride_col_y,
@@ -649,7 +763,7 @@ static __global__ void mul_mat_vec_q(
     constexpr int qi  = ggml_cuda_type_traits<type>::qi;
     constexpr int vdr = get_vdr_mmvq(type);
     constexpr mmvq_parameter_table_id table_id = get_device_table_id();
-    constexpr int nwarps = calc_nwarps(type, ncols_dst, table_id, small_k, halve_iters);
+    constexpr int nwarps = calc_nwarps(type, ncols_dst, table_id, small_k, halve_iters, widen);
     constexpr int rows_per_cuda_block = calc_rows_per_block(type, ncols_dst, table_id, small_k, nwarps);
     constexpr int warp_size = ggml_cuda_get_physical_warp_size();
 
@@ -1047,8 +1161,9 @@ static __global__ void mul_mat_vec_q_moe(
 template<ggml_type type>
 static std::pair<dim3, dim3> calc_launch_params(
         const int ncols_dst, const int nrows_x, const int nchannels_dst, const int nsamples_or_ntokens,
-        const int warp_size, const mmvq_parameter_table_id table_id, const bool small_k = false, const bool halve_iters = false) {
-    const int nwarps = calc_nwarps(type, ncols_dst, table_id, small_k, halve_iters);
+        const int warp_size, const mmvq_parameter_table_id table_id, const bool small_k = false, const bool halve_iters = false,
+        const bool widen = false) {
+    const int nwarps = calc_nwarps(type, ncols_dst, table_id, small_k, halve_iters, widen);
     const int rpb = calc_rows_per_block(type, ncols_dst, table_id, small_k, nwarps);
     const int64_t nblocks = (nrows_x + rpb - 1) / rpb;
     const dim3 block_nums(nblocks, nchannels_dst, nsamples_or_ntokens);
@@ -1056,7 +1171,7 @@ static std::pair<dim3, dim3> calc_launch_params(
     return {block_nums, block_dims};
 }
 
-template<ggml_type type, int c_ncols_dst, bool small_k = false, bool halve_iters = false>
+template<ggml_type type, int c_ncols_dst, bool small_k = false, bool halve_iters = false, bool widen = false>
 static void mul_mat_vec_q_switch_fusion(
         const void * vx, const void * vy, const int32_t * ids, const ggml_cuda_mm_fusion_args_device fusion, float * dst,
         const uint32_t ncols_x, const uint3 nchannels_y, const uint32_t stride_row_x, const uint32_t stride_col_y,
@@ -1071,7 +1186,7 @@ static void mul_mat_vec_q_switch_fusion(
     if constexpr (c_ncols_dst == 1) {
         if (has_fusion) {
             const ggml_cuda_kernel_launch_params launch_params = ggml_cuda_kernel_launch_params(block_nums, block_dims, nbytes_shared, stream);
-            ggml_cuda_kernel_launch(mul_mat_vec_q<type, c_ncols_dst, true, small_k, halve_iters>, launch_params,
+            ggml_cuda_kernel_launch(mul_mat_vec_q<type, c_ncols_dst, true, small_k, halve_iters, widen>, launch_params,
                  vx, vy, ids, fusion, dst, ncols_x, nchannels_y, stride_row_x, stride_col_y, stride_col_dst,
                  channel_ratio, stride_channel_x, stride_channel_y, stride_channel_dst,
                  sample_ratio, stride_sample_x, stride_sample_y, stride_sample_dst, ids_stride);
@@ -1082,7 +1197,7 @@ static void mul_mat_vec_q_switch_fusion(
     GGML_ASSERT(!has_fusion && "fusion only supported for ncols_dst=1");
 
     const ggml_cuda_kernel_launch_params launch_params = ggml_cuda_kernel_launch_params(block_nums, block_dims, nbytes_shared, stream);
-    ggml_cuda_kernel_launch(mul_mat_vec_q<type, c_ncols_dst, false, small_k, halve_iters>, launch_params,
+    ggml_cuda_kernel_launch(mul_mat_vec_q<type, c_ncols_dst, false, small_k, halve_iters, widen>, launch_params,
         vx, vy, ids, fusion, dst, ncols_x, nchannels_y, stride_row_x, stride_col_y, stride_col_dst,
         channel_ratio, stride_channel_x, stride_channel_y, stride_channel_dst,
         sample_ratio, stride_sample_x, stride_sample_y, stride_sample_dst, ids_stride);
@@ -1155,7 +1270,14 @@ static void mul_mat_vec_q_switch_ncols_dst(
     const auto should_use_small_k = [&](int c_ncols_dst) {
         // When K is small, increase rows_per_block to match nwarps so each warp has more work to do
         // Trigger when the full thread block covers all K blocks in a single loop iteration and few threads remain idle.
+#if GGML_RDNA2_MMVQ_SMALLK
+        // RDNA2 reports one warp, so evaluate the guard with the small_k arm enabled: that is the block
+        // width the small_k launch would actually get. Inert for every other table, since the arm in
+        // calc_nwarps is the only place that reads small_k here.
+        const int  nwarps = calc_nwarps(type, c_ncols_dst, table_id, /* small_k = */ true);
+#else
         const int  nwarps = calc_nwarps(type, c_ncols_dst, table_id);
+#endif
         bool       use    = nwarps > 1 && blocks_per_row_x < nwarps * blocks_per_iter_1warp;
 
         constexpr std::array<ggml_type, 2> iq_slow_turing = {
@@ -1182,7 +1304,7 @@ static void mul_mat_vec_q_switch_ncols_dst(
             }
         } else if ((ncols_dst == 1 && std::find(iq_slow_other.begin(), iq_slow_other.end(), type) != iq_slow_other.end()) ||
                 (is_nvidia_pascal_older && std::find(slow_pascal.begin(), slow_pascal.end(), type) != slow_pascal.end()) ||
-                GGML_CUDA_CC_IS_RDNA(cc)) {
+                (GGML_CUDA_CC_IS_RDNA(cc) && !(GGML_RDNA2_MMVQ_SMALLK && table_id == MMVQ_PARAMETERS_RDNA2))) {
             use = false;
         }
 
@@ -1191,7 +1313,14 @@ static void mul_mat_vec_q_switch_ncols_dst(
 
     // Whether doubling nwarps pays off on the ncols_dst == 1 path, where K sets the K loop trip count.
     const auto should_halve_iters = [&] {
-        if (table_id != MMVQ_PARAMETERS_GB10) {
+#if GGML_RDNA2_MMVQ_KLONG
+        // GB10 always, RDNA2 only under the KLONG switch. Both evaluate the same trip-count condition
+        // against their own table's baseline block width.
+        const bool klong_table = table_id == MMVQ_PARAMETERS_GB10 || table_id == MMVQ_PARAMETERS_RDNA2;
+#else
+        const bool klong_table = table_id == MMVQ_PARAMETERS_GB10;
+#endif
+        if (!klong_table) {
             return false;
         }
 
@@ -1211,6 +1340,17 @@ static void mul_mat_vec_q_switch_ncols_dst(
         return idle * 8 <= iters_wide * 2;
     };
 
+    // Whether an eight-warp block pays off on a small-row single-token matvec. Row count sets the
+    // grid: a short grid cannot fill the CUs at one warp per row, so the extra warps buy waves even
+    // though the K loop keeps the same number of vec_dots.
+    const auto should_widen = [&] {
+#if GGML_RDNA2_MMVQ_WIDEN
+        return table_id == MMVQ_PARAMETERS_RDNA2 && nrows_x <= 512;
+#else
+        return false;
+#endif
+    };
+
     if (has_ids && ncols_dst > 1) {
         // Multi-token MUL_MAT_ID path - dedicated MoE kernel
         mul_mat_vec_q_moe_launch<type>(
@@ -1227,18 +1367,32 @@ static void mul_mat_vec_q_switch_ncols_dst(
             static constexpr int c_ncols_dst = 1;
 
             // Tag types keep the flags compile-time, so __launch_bounds__ matches what is launched.
-            const auto launch = [&](auto small_k_tag, auto halve_iters_tag) {
+            const auto launch = [&](auto small_k_tag, auto halve_iters_tag, auto widen_tag) {
                 constexpr bool c_small_k = decltype(small_k_tag)::value;
                 // Types the table does not promote would compile a second, identical kernel.
                 constexpr bool c_promoted =
                     calc_nwarps(type, c_ncols_dst, MMVQ_PARAMETERS_GB10, false, true) !=
-                    calc_nwarps(type, c_ncols_dst, MMVQ_PARAMETERS_GB10, false, false);
+                    calc_nwarps(type, c_ncols_dst, MMVQ_PARAMETERS_GB10, false, false)
+#if GGML_RDNA2_MMVQ_KLONG
+                    || calc_nwarps(type, c_ncols_dst, MMVQ_PARAMETERS_RDNA2, false, true) !=
+                       calc_nwarps(type, c_ncols_dst, MMVQ_PARAMETERS_RDNA2, false, false)
+#endif
+                    ;
 
                 constexpr bool c_halve_iters = decltype(halve_iters_tag)::value && c_promoted;
 
+                constexpr bool c_promoted_widen =
+#if GGML_RDNA2_MMVQ_WIDEN
+                    calc_nwarps(type, c_ncols_dst, MMVQ_PARAMETERS_RDNA2, false, false, true) !=
+                    calc_nwarps(type, c_ncols_dst, MMVQ_PARAMETERS_RDNA2, false, false, false);
+#else
+                    false;
+#endif
+                constexpr bool c_widen = decltype(widen_tag)::value && c_promoted_widen;
+
                 const std::pair<dim3, dim3> dims = calc_launch_params<type>(c_ncols_dst, nrows_x, nchannels_dst + (fusion.shared_up != nullptr),
-                                                                              nsamples_dst, warp_size, table_id, c_small_k, c_halve_iters);
-                mul_mat_vec_q_switch_fusion<type, c_ncols_dst, c_small_k, c_halve_iters>(
+                                                                              nsamples_dst, warp_size, table_id, c_small_k, c_halve_iters, c_widen);
+                mul_mat_vec_q_switch_fusion<type, c_ncols_dst, c_small_k, c_halve_iters, c_widen>(
                     vx, vy, ids, fusion, dst, ncols_x, nchannels_y_fd, stride_row_x, stride_col_y, stride_col_dst,
                     channel_ratio_fd, stride_channel_x, stride_channel_y, stride_channel_dst, sample_ratio_fd,
                     stride_sample_x, stride_sample_y, stride_sample_dst, dims.first, dims.second, 0, ids_stride,
@@ -1246,11 +1400,13 @@ static void mul_mat_vec_q_switch_ncols_dst(
             };
 
             if (should_use_small_k(c_ncols_dst)) {
-                launch(std::true_type{},  std::false_type{});
+                launch(std::true_type{},  std::false_type{}, std::false_type{});
             } else if (should_halve_iters()) {
-                launch(std::false_type{}, std::true_type{});
+                launch(std::false_type{}, std::true_type{},  std::false_type{});
+            } else if (should_widen()) {
+                launch(std::false_type{}, std::false_type{}, std::true_type{});
             } else {
-                launch(std::false_type{}, std::false_type{});
+                launch(std::false_type{}, std::false_type{}, std::false_type{});
             }
         } break;
         case 2: {

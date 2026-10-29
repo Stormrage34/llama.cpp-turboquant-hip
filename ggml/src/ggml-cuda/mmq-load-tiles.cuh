@@ -1420,11 +1420,26 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
                 iq3s_grid[qs[2*l+0] | ((qh << (8 - 2*l)) & 0x100)],
                 iq3s_grid[qs[2*l+1] | ((qh << (7 - 2*l)) & 0x100)]);
 
-            const int signs0 = __vcmpne4(((signs_packed_8[l] & 0x03) << 7) | ((signs_packed_8[l] & 0x0C) << 21), 0x00000000);
-            const int signs1 = __vcmpne4(((signs_packed_8[l] & 0x30) << 3) | ((signs_packed_8[l] & 0xC0) << 17), 0x00000000);
+            // Spread the 4 sign bits of one nibble into bit 7 of the 4 bytes of a register.
+            // The other partial products only ever set bits below bit 7 of a byte and cannot
+            // carry into it, so each byte becomes 0x80 (negative) or 0x00 (positive).
+            const uint32_t sign_bits = signs_packed_8[l];
+            const int      sign_lo   = (int) ((((sign_bits & 0x0Fu) * 0x10204080u) & 0x80808080u) >> 7);
+            const int      sign_hi   = (int) ((((sign_bits >> 4) * 0x10204080u) & 0x80808080u) >> 7);
 
-            const int grid_l = __vsub4(grid_pos.x ^ signs0, signs0);
-            const int grid_h = __vsub4(grid_pos.y ^ signs1, signs1);
+            // v_perm_b32 expands the 0x01/0x00 byte selectors into 0x00/0xFF byte masks.
+#if defined(GGML_USE_HIP)
+            const int signs0 = ggml_hip_perm(0x0000FF00, 0x0000FF00, sign_lo);
+            const int signs1 = ggml_hip_perm(0x0000FF00, 0x0000FF00, sign_hi);
+#else
+            const int signs0 = __byte_perm(0x0000FF00, 0x0000FF00, sign_lo);
+            const int signs1 = __byte_perm(0x0000FF00, 0x0000FF00, sign_hi);
+#endif // defined(GGML_USE_HIP)
+
+            // Grid values are odd and in [1, 15], so the bytes of (grid ^ 0xFF) + 1 do not
+            // carry into the next byte: that is the byte-wise negation of the set signs.
+            const int grid_l = (grid_pos.x ^ signs0) + sign_lo;
+            const int grid_h = (grid_pos.y ^ signs1) + sign_hi;
 
 #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
             x_qs[i*sram_stride + 8*kqsx + (2*l+0)] = grid_l;

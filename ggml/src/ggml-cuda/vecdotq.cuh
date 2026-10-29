@@ -2,7 +2,12 @@
 
 #include "common.cuh"
 
+#include <cstddef>
 #include <cstdint>
+
+#ifndef GGML_RDNA2_MMVQ_WIDEVDR
+#define GGML_RDNA2_MMVQ_WIDEVDR 0
+#endif
 
 static __device__ __forceinline__ int get_int_b1(const void * x, const int & i32) {
     const uint8_t * x8 = (const uint8_t *) x;
@@ -112,7 +117,11 @@ static __device__ __forceinline__ uint32_t unpack_ksigns(const uint8_t v) {
 #define VDR_Q2_0_Q8_1_MMVQ 1  // Process one 32-element chunk at a time for parallelism
 #define VDR_Q2_0_Q8_1_MMQ  2  // Q2_0 group 64: 128 bits (4 ints) per block, 2 32-element chunks
 
+#if GGML_RDNA2_MMVQ_WIDEVDR
+#define VDR_Q4_0_Q8_1_MMVQ 4
+#else
 #define VDR_Q4_0_Q8_1_MMVQ 2
+#endif
 #define VDR_Q4_0_Q8_1_MMQ  4
 
 template <int vdr> static __device__ __forceinline__ float vec_dot_q4_0_q8_1_impl(
@@ -240,7 +249,11 @@ template <int vdr> static __device__ __forceinline__ float vec_dot_q5_1_q8_1_imp
     return sumi*d5d8 + m5s8 / (QI5_1 / vdr);
 }
 
+#if GGML_RDNA2_MMVQ_WIDEVDR
+#define VDR_Q8_0_Q8_1_MMVQ 4
+#else
 #define VDR_Q8_0_Q8_1_MMVQ 2
+#endif
 #define VDR_Q8_0_Q8_1_MMQ 8
 
 template <typename T, int vdr> static __device__ __forceinline__ T vec_dot_q8_0_q8_1_impl(
@@ -971,6 +984,12 @@ static __device__ __forceinline__ float vec_dot_q3_K_q8_1(
     return vec_dot_q3_K_q8_1_impl_mmvq(vl, vh, u, scales, d, d8);
 }
 
+// The Q4_K vecdot below reloads the 12 scale/min bytes as a single uint3. That is only
+// legal because the array sits at offset 4 of the block, right after the two ggml_half scales, so
+// the address is 4-byte aligned. Assert it instead of trusting the layout comment in ggml-common.h.
+static_assert(offsetof(block_q4_K, scales) % 4 == 0,
+              "Q4_K scales must stay 4-byte aligned for the uint3 reload in vec_dot_q4_K_q8_1");
+
 static __device__ __forceinline__ float vec_dot_q4_K_q8_1(
     const void * __restrict__ vbq, const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs) {
 
@@ -992,14 +1011,17 @@ static __device__ __forceinline__ float vec_dot_q4_K_q8_1(
     v[0] = q4[0];
     v[1] = q4[4];
 
-    // branchless so nvcc can hoist this out of the ncols_dst loop
-    const uint16_t * scales = (const uint16_t *)bq4_K->scales;
+    // branchless so nvcc can hoist this out of the ncols_dst loop.
+    // The scale array is 12 bytes at offset 4 of the block, so it is dword aligned:
+    // one 12-byte fetch replaces the three 2-byte loads at +0/+4/+8 (j even) and
+    // +2/+6/+10 (j odd). The bytes are unchanged, the lane picks its halves by shift.
+    const uint3 sc3 = *reinterpret_cast<const uint3 *>(bq4_K->scales);
     const int j  = bq8_offset/2;
-    const int jm = j & 1;
+    const uint32_t sh = 16u * (uint32_t) (j & 1);
 
-    const uint32_t s0 = scales[jm + 0];
-    const uint32_t s2 = scales[jm + 2];
-    const uint32_t s4 = scales[jm + 4];
+    const uint32_t s0 = (sc3.x >> sh) & 0xFFFFu;
+    const uint32_t s2 = (sc3.y >> sh) & 0xFFFFu;
+    const uint32_t s4 = (sc3.z >> sh) & 0xFFFFu;
 
     const uint32_t hi = (uint32_t) -(int32_t) (j >= 2);
 
@@ -1403,7 +1425,7 @@ static __device__ __forceinline__ float vec_dot_iq4_nl_q8_1(
 
     int sumi = 0;
 #pragma unroll
-    for (int l = 0; l < VDR_Q4_0_Q8_1_MMVQ; ++l) {
+    for (int l = 0; l < VDR_IQ4_NL_Q8_1_MMVQ; ++l) {
         const int aux_q4 = get_int_b2(bq4->qs, iqs + l);
         const int2 v = get_int_from_table_16(aux_q4, kvalues_iq4nl);
 

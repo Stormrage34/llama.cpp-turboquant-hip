@@ -94,24 +94,27 @@ static void ggml_cuda_mul_mat_q_switch_type(ggml_backend_cuda_context & ctx, con
 
 // overrides the src1 precision requested by the graph, "auto" keeps the requested one
 static ggml_prec ggml_cuda_mmq_get_prec_env() {
-    const char * env_c = getenv("GGML_CUDA_MMQ_PREC");
-    if (env_c == nullptr) {
+    static const ggml_prec result = []() {
+        const char * env_c = getenv("GGML_CUDA_MMQ_PREC");
+        if (env_c == nullptr) {
+            return GGML_PREC_UNDEFINED;
+        }
+        std::string env_cpp = env_c;
+        for (char & c : env_cpp) {
+            c = std::tolower((unsigned char) c);
+        }
+        if (env_cpp == "q4") {
+            return GGML_PREC_Q4;
+        }
+        if (env_cpp == "q8") {
+            return GGML_PREC_Q8;
+        }
+        if (env_cpp != "auto") {
+            GGML_LOG_WARN("%s: Unknown value for GGML_CUDA_MMQ_PREC: '%s'. Available: 'q4', 'q8', 'auto'.\n", __func__, env_cpp.c_str());
+        }
         return GGML_PREC_UNDEFINED;
-    }
-    std::string env_cpp = env_c;
-    for (char & c : env_cpp) {
-        c = std::tolower(c);
-    }
-    if (env_cpp == "q4") {
-        return GGML_PREC_Q4;
-    }
-    if (env_cpp == "q8") {
-        return GGML_PREC_Q8;
-    }
-    if (env_cpp != "auto") {
-        GGML_LOG_WARN("%s: Unknown value for GGML_CUDA_MMQ_PREC: '%s'. Available: 'q4', 'q8', 'auto'.\n", __func__, env_cpp.c_str());
-    }
-    return GGML_PREC_UNDEFINED;
+    }();
+    return result;
 }
 
 // Routed (MUL_MAT_ID) tile selection for gfx1030.
@@ -153,7 +156,8 @@ static bool ggml_cuda_mmq_routed_gfx1030_J(const int J) {
     return J == 16 || J == 32 || J == 48 || J == 64;
 }
 
-static bool ggml_cuda_mmq_routed_gfx1030(const ggml_type type, const int cc, const int64_t n_experts, const bool fallback) {
+static bool ggml_cuda_mmq_routed_gfx1030(
+        const ggml_type type, const int cc, const int64_t n_experts, const bool fallback) {
     return !fallback && n_experts >= 8 && n_experts <= 1024
         && ggml_cuda_mmq_routed_gfx1030_enabled()
         && ggml_cuda_mmq_routed_gfx1030_admitted(cc)

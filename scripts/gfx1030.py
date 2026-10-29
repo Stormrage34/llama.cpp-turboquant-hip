@@ -24,7 +24,10 @@ from common import ROOT, MODEL, FA, CTK, CTV, BENCH_EXCLUSIVE
 # Servers (llama-server) are out of scope for this CLI: never start, stop, or query them.
 PAYLOAD_GB = 11.353
 HIP_BIN = ROOT / "build-hip-gfx1030" / "bin"
-VK_BIN = ROOT / "build" / "bin"
+# The Vulkan binaries no longer live in `build/bin`: that path is now a symlink to the
+# canonical HIP tree (build-hip-gfx1030/bin) so the server can never resolve to a build
+# without the q8_0-q5_0 FA pair. The real Vulkan build is preserved here.
+VK_BIN = ROOT / "build" / "bin.superseded-20261028"
 HIP_BENCH = HIP_BIN / "llama-bench"
 VK_BENCH = VK_BIN / "llama-bench"
 HIP_SO = HIP_BIN / "libggml-hip.so.0"
@@ -736,16 +739,36 @@ def _thermal_check():
             pass
 
 
-def _run_one_bench(binpath, depths, reps, env=None):
+def _llama_bench_args(args, d):
+    """llama-bench argv shared by bench/AB paths — pp/n/ubatch/ncmoe/extra are
+    campaign-critical (-ub 128 is the T5 operating point) and must be settable."""
+    al = ["-m", str(MODEL)] + BENCH_ARGS + [
+        "-p", str(getattr(args, "pp", 0)),
+        "-n", str(getattr(args, "n_gen", 128)),
+        "-r", str(getattr(args, "reps", 8)), "-d", str(d), "-o", "jsonl"]
+    if getattr(args, "ubatch", None):
+        al += ["-ub", str(args.ubatch)]
+    if getattr(args, "ncmoe", None):
+        al += ["-ncmoe", str(args.ncmoe)]
+    if getattr(args, "extra", None):
+        al += shlex.split(args.extra)
+    return al
+
+
+def _git_head():
+    p = _run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], quiet=True)
+    return p.stdout.strip() if p.returncode == 0 else "unknown"
+
+
+def _run_one_bench(binpath, depths, args, env=None):
     rows_out = []
     for d in depths:
-        args = ["-m", str(MODEL)] + BENCH_ARGS + [
-            "-p", "0", "-n", "128", "-r", str(reps), "-d", str(d), "-o", "jsonl"]
+        bargs = _llama_bench_args(args, d)
         sm = ClockSampler()
         sm.start()
-        proc = _bench_exclusive(binpath, args, timeout=7200, env=env)
+        proc = _bench_exclusive(binpath, bargs, timeout=7200, env=env)
         sm.stop = True
-        time.sleep(0.3)
+        sm.join(timeout=1.0)
         parsed = []
         for line in proc.stdout.splitlines():
             line = line.strip()
@@ -786,8 +809,22 @@ def cmd_bench(args):
         _ab_resolution(vals, getattr(args, "min_detectable", None))
         return 0
 
-    if ab:
+    ab_mode = (bool(ab) or bool(getattr(args, "a_bindir", None))
+               or bool(getattr(args, "b_bindir", None))
+               or bool(getattr(args, "a_env", None))
+               or bool(getattr(args, "b_env", None)))
+    if ab_mode:
         return _bench_ab(args, ab, depths, reps)
+
+    if getattr(args, "dry_run", False):
+        for name, binpath in (("HIP", HIP_BENCH), ("VK", VK_BENCH)):
+            if name == "VK" and args.backend not in ("vk", "both"):
+                continue
+            if name == "HIP" and args.backend not in ("hip", "both"):
+                continue
+            args_list = _llama_bench_args(args, depths[0] if depths else 0)
+            print("DRY-RUN %s: %s" % (name, shlex.join([str(BENCH_EXCLUSIVE), str(binpath)] + args_list)))
+        return 0
 
     _thermal_check()
 
@@ -806,7 +843,7 @@ def cmd_bench(args):
     all_rows = {}
     for name, binpath in backends:
         print(f"\n== {name} ==")
-        rows = _run_one_bench(binpath, depths, reps)
+        rows = _run_one_bench(binpath, depths, args)
         all_rows[name] = rows
         for r in rows:
             ts = r["ts"]
@@ -909,41 +946,139 @@ def _ab_resolution(deltas_ms, target=None, base_ms=None, fix_ms=None):
             "underpowered": bool(target and ci > target)}
 
 
+def _parse_env_list(items):
+    env = {}
+    for item in (items or []):
+        for tok in re.split(r"[,\s]+", str(item).strip()):
+            if not tok:
+                continue
+            if "=" in tok:
+                k, v = tok.split("=", 1)
+                env[k] = v
+    return env
+
+
+def _bindir_hashes(bindir):
+    bd = Path(bindir)
+    out = {"bindir": str(bd), "bench": None, "libs": []}
+    bench = bd / "llama-bench"
+    if bench.exists():
+        out["bench"] = {"path": str(bench), "sha256": sha256_file(str(bench)),
+                        "mtime": bench.stat().st_mtime}
+    for p in sorted(bd.glob("libggml*.so*")):
+        if p.is_file() or p.is_symlink():
+            try:
+                out["libs"].append({"name": p.name, "path": str(p), "sha256": sha256_file(str(p))})
+            except OSError:
+                pass
+    return out
+
+
 def _bench_ab(args, ab, depths, reps):
-    parts = ab if isinstance(ab, list) else ab.split()
-    if len(parts) != 2:
-        print("usage: --ab BASE.so FIX.so")
-        return 2
-    base_so, fix_so = Path(parts[0]), Path(parts[1])
-    for p in (base_so, fix_so):
-        if not p.exists():
-            print(f"missing: {p}")
+    parts = ab if isinstance(ab, list) else (ab.split() if ab else [])
+    swap_libs = bool(parts)
+    if swap_libs:
+        if len(parts) != 2:
+            print("usage: --ab BASE.so FIX.so")
             return 2
-    if not HIP_BENCH.exists():
-        print(f"missing binary: {HIP_BENCH}")
-        return 2
+        base_so, fix_so = Path(parts[0]), Path(parts[1])
+        for p in (base_so, fix_so):
+            if not p.exists():
+                print(f"missing: {p}")
+                return 2
+    else:
+        base_so = fix_so = None
+
+    a_dir = Path(getattr(args, "a_bindir", None) or HIP_BIN)
+    b_dir = Path(getattr(args, "b_bindir", None) or HIP_BIN)
+    for bd in (a_dir, b_dir):
+        if not (bd / "llama-bench").exists():
+            print(f"missing binary: {bd / 'llama-bench'}")
+            return 2
+
+    a_env_extra = _parse_env_list(getattr(args, "a_env", None))
+    b_env_extra = _parse_env_list(getattr(args, "b_env", None))
+
+    # when swapping a .so in place, both arms share one bindir/binary
+    same_dir = (a_dir == b_dir)
+    do_swap = swap_libs and same_dir
+
+    if swap_libs and not same_dir:
+        print("note: --ab library swap ignored because --a-bindir/--b-bindir differ; "
+              "using each bindir's own library")
 
     d0 = depths[0] if depths else 0
     pairs = getattr(args, "pairs", 3)
-    backup = Path(tempfile.mkstemp(prefix="gfx1030_libbackup_")[1])
-    shutil.copy2(HIP_SO, backup)
+    gate = getattr(args, "gate", None)
+    # The project's documented A/B gate is five interleaved pairs at a +/-0.40 t/s decode floor
+    # (docs/gfx1030-test-plan.md, "Standing corrections" 4). That is the threshold this script's
+    # --gate is compared against, so warn when a run cannot even meet it. Twenty pairs tighten the
+    # paired 95% CI to about +/-0.15-0.20 t/s; that is a precision note, not the gate.
+    if pairs < 5:
+        print(f"  WARNING: pairs={pairs} is below the documented five-pair A/B gate "
+              f"(+/-0.40 t/s decode floor) — treat as preliminary")
+    elif pairs < 20:
+        print(f"  note: pairs={pairs} meets the five-pair gate (+/-0.40 t/s); "
+              f"20 pairs resolve about +/-0.15-0.20 t/s")
 
-    print(f"--ab {base_so} {fix_so}  pairs={pairs} depth={d0} reps={reps}")
-    records = []
+    print(f"A/B: pairs={pairs} depth={d0} reps={reps}  "
+          f"A={a_dir}  B={b_dir}  swap={do_swap}")
+    if a_env_extra:
+        print(f"  A env: {a_env_extra}")
+    if b_env_extra:
+        print(f"  B env: {b_env_extra}")
+
+    # dry run: print exact commands, no launch
+    if getattr(args, "dry_run", False):
+        args_list = _llama_bench_args(args, d0)
+        for label, bd, extra in (("A", a_dir, a_env_extra), ("B", b_dir, b_env_extra)):
+            env = dict(os.environ)
+            env.update(extra)
+            env["LD_LIBRARY_PATH"] = str(bd.resolve()) + (":" + env.get("LD_LIBRARY_PATH", "")
+                                                if env.get("LD_LIBRARY_PATH") else "")
+            cmd = [str(BENCH_EXCLUSIVE), str(bd / "llama-bench")] + args_list
+            envprefix = " ".join(f"{k}={v}" for k, v in sorted(env.items())
+                                 if k in extra or k == "LD_LIBRARY_PATH")
+            print(f"DRY-RUN {label}: {envprefix} {shlex.join(cmd)}")
+        return 0
+
+    # The swap target must be the arm's own bindir, not the hard-coded HIP_BIN: when
+    # a_dir == b_dir but a_dir != HIP_BIN, writing to HIP_SO would clobber the real
+    # tree and never affect the arm being tested (silent no-op A/B).
+    swap_target = (a_dir / "libggml-hip.so.0") if do_swap else None
+    backup = None
+    if do_swap and swap_target is not None:
+        backup = Path(tempfile.mkstemp(prefix="gfx1030_libbackup_")[1])
+        shutil.copy2(swap_target, backup)
+
     try:
+        records = []   # (pair, arm_label, test_label, ts, clocks, rc)
         for i in range(pairs):
-            order = ("BASE", "FIX") if i % 2 == 0 else ("FIX", "BASE")
-            for label in order:
-                src = base_so if label == "BASE" else fix_so
-                shutil.copy2(src, HIP_SO)
-                args_list = ["-m", str(MODEL)] + BENCH_ARGS + [
-                    "-p", "0", "-n", "128", "-r", str(reps), "-d", str(d0), "-o", "jsonl"]
+            order = ("A", "B") if i % 2 == 0 else ("B", "A")
+            for arm in order:
+                if arm == "A":
+                    bd = a_dir
+                    extra = a_env_extra
+                    libsrc = base_so
+                else:
+                    bd = b_dir
+                    extra = b_env_extra
+                    libsrc = fix_so
+                if do_swap and libsrc is not None and swap_target is not None:
+                    shutil.copy2(libsrc, swap_target)
+                binpath = bd / "llama-bench"
+                args_list = _llama_bench_args(args, d0)
+                env = dict(os.environ)
+                env.update(extra)
+                env["LD_LIBRARY_PATH"] = str(bd.resolve()) + (":" + env.get("LD_LIBRARY_PATH", "")
+                                                    if env.get("LD_LIBRARY_PATH") else "")
                 sm = ClockSampler()
                 sm.start()
-                proc = _bench_exclusive(HIP_BENCH, args_list, timeout=7200)
+                proc = _bench_exclusive(binpath, args_list, timeout=7200, env=env)
                 sm.stop = True
-                time.sleep(0.3)
-                ts = 0.0
+                sm.join(timeout=1.0)
+                # collect every row, keyed by its test label (pp* / tg*)
+                row_ts = {}
                 for line in proc.stdout.splitlines():
                     line = line.strip()
                     if not line.startswith("{"):
@@ -952,42 +1087,105 @@ def _bench_ab(args, ab, depths, reps):
                         j = json.loads(line)
                     except json.JSONDecodeError:
                         continue
-                    if j.get("avg_ts") is not None:
-                        ts = j["avg_ts"]
-                records.append((i + 1, label, ts, dict(sm.sclk), proc.returncode))
-                print(f"  pair {i+1} {label}: {ts:8.3f} t/s  sclk {ClockSampler._fmt(sm.sclk)}")
+                    if j.get("avg_ts") is None:
+                        continue
+                    label_test = j.get("test") or ("tg%d" % j.get("n_gen", 0)
+                                                   if j.get("n_gen") else "pp%d" % j.get("n_prompt", 0))
+                    row_ts[label_test] = j["avg_ts"]
+                if not row_ts:
+                    print(f"  pair {i+1} {arm}: rc={proc.returncode} no jsonl rows — "
+                          f"arm recorded NaN (pair will be dropped, not zeroed)")
+                    row_ts["tg%d" % getattr(args, "n_gen", 128)] = float("nan")
+                for tlabel, ts in row_ts.items():
+                    records.append((i + 1, arm, tlabel, ts, dict(sm.sclk), proc.returncode))
+                    print(f"  pair {i+1} {arm} {tlabel}: {ts:8.3f} t/s  sclk {ClockSampler._fmt(sm.sclk)}")
     finally:
-        shutil.copy2(backup, HIP_SO)
+        if do_swap and backup is not None and swap_target is not None:
+            shutil.copy2(backup, swap_target)
 
-    cmp_proc = subprocess.run(["cmp", str(backup), str(HIP_SO)], capture_output=True, text=True)
-    if cmp_proc.returncode == 0:
-        print("  restored libggml-hip.so.0 verified (cmp OK)")
-    else:
-        print("  WARNING: restored library differs from backup!")
-        print(cmp_proc.stderr)
+    if do_swap and backup is not None:
+        cmp_proc = subprocess.run(["cmp", str(backup), str(swap_target)], capture_output=True, text=True)
+        if cmp_proc.returncode == 0:
+            print("  restored libggml-hip.so.0 verified (cmp OK)")
+        else:
+            print("  WARNING: restored library differs from backup!")
+            print(cmp_proc.stderr)
 
-    print("\n== per-pair deltas ==")
-    print(f"  {'pair':>4s} {'BASE':>9s} {'FIX':>9s} {'delta%':>8s} {'delta ms':>10s}")
-    base_vals, fix_vals, deltas_ms = [], [], []
-    by_pair = collections.defaultdict(dict)
-    for pair, label, ts, clocks, rc in records:
-        by_pair[pair][label] = ts
-    for pair in sorted(by_pair):
-        b = by_pair[pair].get("BASE", 0.0)
-        f = by_pair[pair].get("FIX", 0.0)
-        delta = (100.0 * (f - b) / b) if b else float("nan")
-        dms = (1000.0 / f - 1000.0 / b) if (b and f) else float("nan")
-        base_vals.append(b)
-        fix_vals.append(f)
-        deltas_ms.append(dms)
-        print(f"  {pair:4d} {b:9.3f} {f:9.3f} {delta:+8.2f}% {dms:+10.3f}")
-    if base_vals and fix_vals:
-        mb = sum(base_vals) / len(base_vals)
-        mf = sum(fix_vals) / len(fix_vals)
-        print(f"  mean  {mb:9.3f} {mf:9.3f} {100.0*(mf-mb)/mb:+8.2f}%")
-        _ab_resolution(deltas_ms, getattr(args, "min_detectable", None),
-                       base_ms=1000.0 / mb, fix_ms=1000.0 / mf)
-    backup.unlink(missing_ok=True)
+    # group by test label, report separately
+    test_labels = sorted({r[2] for r in records})
+    results = {
+        "created": datetime.datetime.now().isoformat(timespec="seconds"),
+        "pairs": pairs,
+        "depth": d0,
+        "reps": reps,
+        "gate_tps": gate,
+        "tree": {"git_head": _git_head()},
+        "arms": {
+            "A": {"bindir": str(a_dir), "env": a_env_extra, "provenance": _bindir_hashes(a_dir),
+                  **({"lib": str(base_so), "lib_sha256": sha256_file(str(base_so))}
+                     if do_swap else {})},
+            "B": {"bindir": str(b_dir), "env": b_env_extra, "provenance": _bindir_hashes(b_dir),
+                  **({"lib": str(fix_so), "lib_sha256": sha256_file(str(fix_so))}
+                     if do_swap else {})},
+        },
+        "tests": {},
+    }
+
+    print("\n== per-test paired statistics ==")
+    for tlabel in test_labels:
+        by_pair = collections.defaultdict(dict)
+        for pair, arm, tl, ts, clocks, rc in records:
+            if tl != tlabel:
+                continue
+            by_pair[pair][arm] = ts
+        base_vals, fix_vals, deltas_ms = [], [], []
+        print(f"\n-- {tlabel} --")
+        print(f"  {'pair':>4s} {'A':>9s} {'B':>9s} {'delta%':>8s} {'delta ms':>10s}")
+        for pair in sorted(by_pair):
+            a_ts = by_pair[pair].get("A", float("nan"))
+            b_ts = by_pair[pair].get("B", float("nan"))
+            delta = (100.0 * (b_ts - a_ts) / a_ts) if a_ts else float("nan")
+            dms = (1000.0 / b_ts - 1000.0 / a_ts) if (a_ts and b_ts) else float("nan")
+            base_vals.append(a_ts)
+            fix_vals.append(b_ts)
+            deltas_ms.append(dms)
+            print(f"  {pair:4d} {a_ts:9.3f} {b_ts:9.3f} {delta:+8.2f}% {dms:+10.3f}")
+        # a failed arm is NaN, not 0.0 — drop it from means/stats, never zero it
+        # filter base, fix and deltas_ms in lockstep so the pair count agrees
+        good_idx = [i for i, (a, b) in enumerate(zip(base_vals, fix_vals)) if a == a and b == b]
+        base_vals = [base_vals[i] for i in good_idx]
+        fix_vals = [fix_vals[i] for i in good_idx]
+        deltas_ms = [deltas_ms[i] for i in good_idx]
+        if base_vals and fix_vals:
+            ma = sum(base_vals) / len(base_vals)
+            mb = sum(fix_vals) / len(fix_vals)
+            print(f"  mean  {ma:9.3f} {mb:9.3f} {100.0*(mb-ma)/ma:+8.2f}%")
+            res = _ab_resolution(deltas_ms, getattr(args, "min_detectable", None),
+                                 base_ms=1000.0 / ma, fix_ms=1000.0 / mb)
+            results["tests"][tlabel] = {
+                "pairs": len(base_vals),
+                "mean_A_ts": round(ma, 4),
+                "mean_B_ts": round(mb, 4),
+                "paired": res,
+            }
+            if gate is not None:
+                gain = mb - ma
+                ok = gain >= gate
+                print(f"  GATE {gate:.3f} t/s: {'PASS' if ok else 'FAIL'}  (gain {gain:+.3f} t/s)")
+                results["tests"][tlabel]["gate"] = {"threshold_tps": gate, "gain_tps": round(gain, 4),
+                                                   "pass": bool(ok)}
+
+    # write results JSON
+    out_path = getattr(args, "json_out", None) or getattr(args, "out", None)
+    if not out_path:
+        # outside the repo: A/B scratch output must never land in the tracked tree
+        out_path = "/tmp/opencode/gfx1030/.ab_result.json"
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(out_path).write_text(json.dumps(results, indent=2) + "\n")
+    print(f"\nwrote results JSON: {out_path}")
+
+    if backup is not None:
+        backup.unlink(missing_ok=True)
     return 0
 
 
@@ -1631,7 +1829,7 @@ def _profile_config(args):
     return cfg
 
 
-def _profile_run(backend, cfg, outdir):
+def _profile_run(backend, cfg, outdir, dry_run=False):
     """Trace one bench run through the exclusive guard. Returns (csvs, wall_ms)."""
     prof, path = _profiler()
     if not prof:
@@ -1648,7 +1846,10 @@ def _profile_run(backend, cfg, outdir):
     if cfg["pmc"]:
         cmd += ["--pmc", cfg["pmc"]]
     cmd += ["--output-format", "csv", "-d", str(outdir), "--"] + _lb_command(backend, cfg, graphs=False)
-    print(" ".join(cmd))
+    envprefix = " ".join(f"{k}={v}" for k, v in sorted(env.items()) if k.startswith("GGML_") or k.startswith("HIP_"))
+    print(f"DRY-RUN: {envprefix} {shlex.join(cmd)}" if dry_run else " ".join(cmd))
+    if dry_run:
+        return None, []
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=7200, env=env)
     csvs = sorted(outdir.rglob("*kernel*trace*.csv")) or sorted(outdir.rglob("*.csv"))
     if not csvs:
@@ -1698,7 +1899,7 @@ def _profile_defaults():
                 flash_attn="1", cache_type_k="q8_0", cache_type_v="q5_0", fitt=128, ot=None,
                 dev=None, extra=None, env=[], label=None, out=None, json=None, pmc=None,
                 no_fusion=False, no_wall=False, compare=None, ledger=None, census=None,
-                reuse=None, wall_ms=None)
+                reuse=None, wall_ms=None, dry_run=False)
 
 
 def cmd_trace(args):
@@ -1716,6 +1917,7 @@ def cmd_trace(args):
     ns.no_wall = True
     ns.ledger = args.ledger
     ns.census = args.census
+    ns.dry_run = getattr(args, "dry_run", False)
     return cmd_profile(ns)
 
 
@@ -1729,9 +1931,10 @@ def cmd_profile(args):
         return 2
     wall_ms = getattr(args, "wall_ms", None)
     reuse = getattr(args, "reuse", None)
+    dry_run = getattr(args, "dry_run", False)
     if wall_ms:
         print("graph-enabled wall: %.3f ms/token (%.2f t/s) [from --wall-ms]" % (wall_ms, 1000.0 / wall_ms))
-    elif not args.no_wall and not reuse:
+    elif not args.no_wall and not reuse and not dry_run:
         wall_ms = _profile_wall_ms(args.backend, cfg)
         if wall_ms:
             print("graph-enabled wall: %.3f ms/token (%.2f t/s)" % (wall_ms, 1000.0 / wall_ms))
@@ -1747,7 +1950,9 @@ def cmd_profile(args):
         print("reusing trace: %s" % outdir)
     else:
         outdir = Path(args.out) if args.out else Path(tempfile.mkdtemp(prefix="gfx1030_profile_"))
-        proc, csvs = _profile_run(args.backend, cfg, outdir)
+        proc, csvs = _profile_run(args.backend, cfg, outdir, dry_run=getattr(args, "dry_run", False))
+        if getattr(args, "dry_run", False):
+            return 0
         if csvs is None:
             return 1
 
@@ -3054,12 +3259,36 @@ def main():
     p.add_argument("--backend", choices=["hip", "vk", "both"], default="both")
     p.add_argument("--ab", nargs=2, metavar=("BASE.so", "FIX.so"), help="dual-artifact swap")
     p.add_argument("--pairs", type=int, default=3)
+    p.add_argument("--pp", type=int, default=0,
+                   help="prompt tokens per test (0 = decode-only; use 512 for prefill A/B)")
+    p.add_argument("--n", type=int, default=128, dest="n_gen",
+                   help="generated tokens per test")
+    p.add_argument("--ubatch", type=int, default=None,
+                   help="llama-bench -ub (logical ubatch; -ub 128 is the T5 operating point)")
+    p.add_argument("--ncmoe", type=int, default=None,
+                   help="llama-bench --n-cpu-moe (MoE host-offload operating point)")
+    p.add_argument("--extra", default=None,
+                   help="extra llama-bench args, shell-quoted")
     p.add_argument("--ab-stats", default=None, metavar="D1,D2,...", dest="ab_stats",
                    help="offline: per-pair ms/token deltas -> paired sd, 95%% CI and required n "
                         "(no bench run, no GPU)")
     p.add_argument("--min-detectable", type=float, default=None, metavar="MS", dest="min_detectable",
                    help="delta in ms/token the A/B must resolve; prints required pair count and "
                         "flags UNDERPOWERED when the measured 95%% CI is wider")
+    p.add_argument("--a-bindir", default=None, dest="a_bindir",
+                   help="bin/ dir for arm A (two-build-dir A/B)")
+    p.add_argument("--b-bindir", default=None, dest="b_bindir",
+                   help="bin/ dir for arm B (two-build-dir A/B)")
+    p.add_argument("--a-env", action="append", default=[], dest="a_env",
+                   metavar="K=V", help="environment for arm A (env-only A/B); repeatable")
+    p.add_argument("--b-env", action="append", default=[], dest="b_env",
+                   metavar="K=V", help="environment for arm B (env-only A/B); repeatable")
+    p.add_argument("--gate", type=float, default=None, metavar="T/S",
+                   help="PASS/FAIL throughput gate in t/s for the A/B comparison")
+    p.add_argument("--out", default=None, help="write A/B results JSON to this path")
+    p.add_argument("--json", default=None, dest="json_out", help="alias of --out for results JSON")
+    p.add_argument("--dry-run", action="store_true", dest="dry_run",
+                   help="print the exact command that would run, then exit")
     p.add_argument("--record", action="store_true")
     p.set_defaults(func=cmd_bench)
 
@@ -3089,6 +3318,8 @@ def main():
     p.add_argument("--reuse", default=None, help="re-aggregate an existing trace dir (no bench)")
     p.add_argument("--wall-ms", type=float, default=None, dest="wall_ms",
                    help="graph-enabled ms/token to record (skips the reference run)")
+    p.add_argument("--dry-run", action="store_true", dest="dry_run",
+                   help="print the exact command that would run, then exit")
     p.add_argument("--ledger", default=None, help="also write a census-join ledger")
     p.add_argument("--census", default=None)
     p.add_argument("--compare", nargs=2, metavar=("A.json", "B.json"),
@@ -3097,6 +3328,7 @@ def main():
 
     p = sub.add_parser("trace", help="rocprofv3 kernel trace (alias of profile, ledger-friendly)")
     p.add_argument("--tokens", type=int, default=16)
+    p.add_argument("--dry-run", action="store_true", dest="dry_run")
     p.add_argument("--out", default=None)
     p.add_argument("--pmc", default=None)
     p.add_argument("--ledger", default=None)

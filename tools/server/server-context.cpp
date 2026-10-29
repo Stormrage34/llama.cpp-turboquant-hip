@@ -4882,6 +4882,17 @@ private:
                     }
                 }
 
+                // accepted draft EOG must end the draft loop; post-EOG tokens pollute retained context (CJK audit, docs/gfx1030-cjk-audit.md)
+                // trimmed here, after n_rollback is fixed above, so the checkpoint/replay branch can never be re-entered by this trim:
+                // every acceptance path only grows past an EOG on full acceptance, where n_rollback is already 0
+                for (size_t k = 0; k < accepted.size(); ++k) {
+                    if (llama_vocab_is_eog(vocab, accepted[k])) {
+                        // keep the EOG itself: it becomes slot.sampled below, while the prompt insert stops right before it
+                        accepted.resize(k + 1);
+                        break;
+                    }
+                }
+
                 if (trace > 0) {
                     SLT_INF(slot, "accepted %2zu/%2zu draft tokens\n", accepted.size() - 1, n_draft);
                 }

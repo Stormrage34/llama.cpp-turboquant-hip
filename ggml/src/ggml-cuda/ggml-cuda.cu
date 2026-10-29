@@ -4539,6 +4539,7 @@ static int ggml_cuda_try_fuse(ggml_backend_cuda_context * cuda_ctx, ggml_cgraph 
                 ggml_cuda_mul_mat_vec_f(*cuda_ctx, node->src[0], node->src[1], nullptr, node, &fusion);
                 cuda_ctx->dual_mm_outputs.push_back(partner);
                 cuda_ctx->dual_mm_outputs.push_back(node);
+                return 0;
             }
         }
     }
@@ -4909,6 +4910,11 @@ static void ggml_cuda_graph_evaluate_and_capture(ggml_backend_cuda_context * cud
     // dual matvec outputs are marked per graph execution; drop any leftover from the previous one
     cuda_ctx->dual_mm_outputs.clear();
 
+    // every execution starts from an empty q8_1 arena: the slots are re-added in node order, which
+    // keeps each offset stable for a given graph (the captured kernels bake those addresses in) and
+    // restarts the high-water mark at 0. Only the allocation (prequant_buf) outlives an execution.
+    cuda_ctx->prequant.clear();
+
     // a fused-norm q8_1 slot only counts if its producer ran in this execution, so stamp it here
     cuda_ctx->prequant_stamp += 1;
 
@@ -5253,10 +5259,15 @@ static bool ggml_cuda_graph_set_enabled(ggml_backend_cuda_context * cuda_ctx, co
 }
 #endif // USE_CUDA_GRAPH
 
-// Makes sure the q8_1 arena and the slots of the fused wide norms exist before a graph capture
-// starts: cudaMalloc and the arena bookkeeping are not allowed inside stream capture, and the
-// captured kernels bake in the slot addresses.
+// Makes sure the q8_1 arena exists before a graph capture starts: cudaMalloc is not allowed inside
+// stream capture. The slot table itself is rebuilt from empty at the start of every execution (see
+// the boundary reset above), so the add path re-derives the same offsets during the capture walk;
+// running it once here also surfaces an arena that is too small before capture begins.
 static void ggml_cuda_prequant_reserve(ggml_backend_cuda_context * cuda_ctx, const ggml_cgraph * cgraph) {
+    // Rebuild from empty: reserve runs before capture, and the boundary reset in evaluate_and_capture
+    // has not fired yet for this execution. Starting from the previous execution's high-water mark
+    // would make a full arena look over-full and produce a misleading "arena full" warning.
+    cuda_ctx->prequant.clear();
     for (int i = 0; i + 1 < cgraph->n_nodes; ++i) {
         if (cgraph->nodes[i]->op != GGML_OP_RMS_NORM) {
             continue;

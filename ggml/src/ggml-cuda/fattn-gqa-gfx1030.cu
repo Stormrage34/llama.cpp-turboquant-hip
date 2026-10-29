@@ -90,7 +90,7 @@ __device__ __forceinline__ void gqa_gfx1030_load_v(
 // one staged chunk. That is why there is one wide instance (ROWS = 4) instead of a
 // separate kernel per row count.
 template <int GROUP, int ROWS, ggml_type type_V>
-__launch_bounds__(GROUP*32, 3)
+__launch_bounds__(GROUP*32, 2)
 static __global__ void flash_attn_ext_gqa_gfx1030(
         const char * Q_ptr,
         const char * K_ptr,
@@ -217,7 +217,7 @@ static __global__ void flash_attn_ext_gqa_gfx1030(
     float kq_sum[ROWS];
 #pragma unroll
     for (int r = 0; r < ROWS; ++r) {
-        kq_max[r] = -FLT_MAX/2.0f;
+        kq_max[r] = -INFINITY;
         kq_sum[r] = 0.0f;
 #pragma unroll
         for (int j = 0; j < ACC; ++j) {
@@ -305,9 +305,18 @@ static __global__ void flash_attn_ext_gqa_gfx1030(
                     const int kk = base + lane;
                     const bool valid = lane < CHUNK && kk < tile_end;
                     const half * mrow = maskrow[r];
-                    float score = valid ? sum * scale + (mrow ? __half2float(mrow[kk]) : 0.0f) : -FLT_MAX/2.0f;
+                    float score = valid ? sum * scale + (mrow ? __half2float(mrow[kk]) : 0.0f) : -INFINITY;
 
                     const float chunk_max = warp_reduce_max(score) + FATTN_KQ_MAX_OFFSET;
+                    // A fully out-of-range chunk (the tail of a partial tile when TILE % CHUNK != 0)
+                    // makes every score -INFINITY, so chunk_max is -INFINITY too and
+                    // expf(kq_max - new_max) would be expf(-INF - -INF) = NaN, which then poisons
+                    // kq_sum and the split metadata written below. Skip such a chunk: it holds no
+                    // keys, so it contributes nothing to the softmax. The first chunk of a tile
+                    // always has a valid key, so kq_max still becomes finite.
+                    if (chunk_max == -INFINITY) {
+                        continue;
+                    }
                     const float new_max   = fmaxf(kq_max[r], chunk_max);
                     const float corr      = expf(kq_max[r] - new_max);
                     const float w         = expf(score - new_max);
