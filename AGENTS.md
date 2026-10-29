@@ -85,6 +85,7 @@ llama.cpp: LLM inference in C/C++. Build system is CMake (not Make - the Makefil
 - Parsing: `docs/development/parsing.md`, `docs/autoparser.md`
 - CI: `ci/README.md`
 - Code review skill: `skills/code-review/SKILL.md`
+- RDNA 2 optimization: `docs/rdna2-optimization-guide.md` (mandatory reading for any optimization agent targeting gfx1030)
 
 ## Local benchmarking rules (this gfx1030 host only)
 
