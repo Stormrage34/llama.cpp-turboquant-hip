@@ -95,6 +95,38 @@ The `llama.cpp` project is build on top of the [ggml](https://github.com/ggml-or
 | [WebGPU](docs/build.md#webgpu) | All |
 | [ZenDNN](docs/build.md#zendnn) | AMD CPU |
 
+## RDNA 2 (gfx1030) fork
+
+This tree is a fork of `llama.cpp` tuned for a single AMD Radeon RX 6900 XT (gfx1030, RDNA 2) on
+ROCm/HIP. The changes are confined to the HIP backend under `ggml/src/ggml-cuda/` plus a handful of
+correctness fixes; CPU, other backends and the public C API are untouched.
+
+It is not a general-purpose upstream branch — several of the gains trade generality for this one
+card, and one of them (KLONG) is deliberately left off because it is numerically wrong for at least
+one quantization type.
+
+Build (root `build/` directory, no more than `-j12` on this host):
+
+```bash
+cmake -B build -DGGML_HIP=ON -DAMDGPU_TARGETS=gfx1030 \
+      -DCMAKE_BUILD_TYPE=Release -DGGML_HIP_NO_VMM=ON
+cmake --build build --config Release -j12
+```
+
+On the owner's host `build/bin` is a symlink into the older `build-hip-gfx1030/bin` tree — remove it
+before a fresh configure, otherwise the build writes through the link.
+
+Measured against upstream on this host, `-p 1000 -n 1000 -d 5000`:
+
+| Model | prefill | decode |
+|---|---|---|
+| Qwen3.8-35B-A3B (MoE, IQ3_S + Q4_K_M) | +13.98 % | +6.03 % |
+| Qwen3.8-27B (dense, IQ3_S) + MTP | +3.52 % | +5.25 % |
+
+What changed, with the evidence and the known gaps:
+[gfx1030 fork changes](docs/gfx1030-changes-summary.md). Measurement rules for this host:
+[gfx1030 benchmarking](docs/gfx1030-benchmarking.md).
+
 ## Documentation
 
 #### Tools
@@ -115,6 +147,7 @@ The `llama.cpp` project is build on top of the [ggml](https://github.com/ggml-or
 - [XCFramework](docs/xcframework.md)
 - [Completions](docs/completions.md)
 - [Models](docs/models.md)
+- [gfx1030 (RDNA 2) fork changes](docs/gfx1030-changes-summary.md)
 - [Release process](docs/release.md)
 
 ## Contributing

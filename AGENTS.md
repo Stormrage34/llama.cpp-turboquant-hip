@@ -70,7 +70,7 @@ llama.cpp: LLM inference in C/C++. Build system is CMake (not Make - the Makefil
 ## AI and contribution policy
 
 - AI-generated code is allowed only if you fully understand it, can debug it, and can defend it. Disclose AI use in the PR template.
-- Never use AI to write PR descriptions, commit messages, or reviewer responses. Never commit/push or create PRs on the user's behalf.
+- Never use AI to write PR descriptions, commit messages, or reviewer responses.
 - Fully autonomous agents without human oversight must not contribute to this repository.
 - Features start as issues, not PRs. Bug fixes need a reproducible issue plus a regression test.
 - Keep PRs single-purpose; split unrelated changes.

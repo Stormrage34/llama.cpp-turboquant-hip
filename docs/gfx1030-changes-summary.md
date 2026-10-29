@@ -33,20 +33,20 @@
 ## 1. TL;DR
 
 Two commits make up this batch: `d4a3d5dbb` (*"gfx1030: kernel optimizations and correctness fixes
-for RX 6900 XT"*) is landed, and everything marked **staged** below sits in the working tree awaiting
-the owner's commit.
+for RX 6900 XT"*) and `4e51d3474` (*"gfx1030: RDNA2 kernel optimizations, audit fixes, and FA quant
+additions"*). Both are landed on `main`; the table says which change came from which.
 
-| # | Change | Effect | Status |
+| # | Change | Effect | Commit |
 |---|---|---|---|
-| 1 | IQ3_S sign path: multiply-spread + `v_perm_b32` + fused xor-add | −55.4 % shifts+logic, −14.9 % instructions, pp +2.72 % | prefill site landed, decode port staged |
-| 2 | FA K/V quant coverage extended (`GGML_CUDA_FA_QUANTS`) | pp512 +2.15 %, no f16 K/V cast per token | `q5_0-q5_0` landed, `q4_0-q5_0`/`q5_0-q4_0` staged |
-| 3 | KLONG off by default, plus a per-graph runtime guard | MTP restored to 47.0 t/s; Q6_K bug avoided | default landed, guard staged |
-| 4 | Seven audit fixes (W1–W4, I2, I5, I6) | correctness/tooling, no perf claim | mixed, see §5 |
-| 5 | EOG guards in spec decoding (`common/sampling.cpp`, `server-context.cpp`) | stops post-EOG token pollution | landed |
-| 6 | MMVQ compile-time switches: `SMALLK=1`, `WIDEN=1`, `LBMIN=1`, `2ROWS=0` | measured-optimal per switch | staged |
-| 7 | `common.cuh` audit: atomic latches, arena latch, `strtoul` validation | removes data races, bounds a bad env var | staged |
-| 8 | Build dir migrated to root `build/` | binaries md5-identical to `build-hip-gfx1030/` | landed |
-| 9 | `AGENTS.md`: build, hardware, models of record, baselines | onboarding | staged |
+| 1 | IQ3_S sign path: multiply-spread + `v_perm_b32` + fused xor-add | −55.4 % shifts+logic, −14.9 % instructions, pp +2.72 % | prefill site `d4a3d5dbb`, decode port `4e51d3474` |
+| 2 | FA K/V quant coverage extended (`GGML_CUDA_FA_QUANTS`) | pp512 +2.15 %, no f16 K/V cast per token | `q5_0-q5_0` `d4a3d5dbb`; `q4_0-q5_0`, `q5_0-q4_0` `4e51d3474` |
+| 3 | KLONG off by default, plus a per-graph runtime guard | MTP restored to 47.0 t/s; Q6_K bug avoided | default `d4a3d5dbb`, guard `4e51d3474` |
+| 4 | Seven audit fixes (W1–W4, I2, I5, I6) | correctness/tooling, no perf claim | split, see §5 |
+| 5 | EOG guards in spec decoding (`common/sampling.cpp`, `server-context.cpp`) | stops post-EOG token pollution | `d4a3d5dbb` |
+| 6 | MMVQ compile-time switches: `SMALLK=1`, `WIDEN=1`, `LBMIN=1`, `2ROWS=0` | measured-optimal per switch | `4e51d3474` |
+| 7 | `common.cuh` audit: atomic latches, arena latch, `strtoul` validation | removes data races, bounds a bad env var | `4e51d3474` |
+| 8 | Build dir migrated to root `build/` | `build/bin` is a symlink to the owner build; same binaries | `4e51d3474` (AGENTS.md) |
+| 9 | `AGENTS.md`: build, hardware, models of record, baselines | onboarding | `4e51d3474`, `3a1718d8d` |
 
 Fork vs upstream, end to end `[measured: docs/gfx1030-directive.md, scripts/bench-fork-vs-upstream.sh]`:
 
@@ -65,7 +65,7 @@ decode percentages as directionally solid but not as precise figures.
 
 ## 2. Context: what was already landed before this batch
 
-The fork was not empty before `d4a3d5dbb`. Two earlier wins explain most of the fork-vs-upstream
+The fork was not empty before `d4a3d5dbb`. Four earlier changes explain most of the fork-vs-upstream
 prefill number above, and they are easy to mistake for the changes in §4:
 
 - **q8_1 prequant arena** (`common.cuh`, `ggml-cuda.cu`, `unary.cu`, `mmvq.cu`) — fused RMS_NORM+MUL
@@ -77,13 +77,15 @@ prefill number above, and they are easy to mistake for the changes in §4:
 - **gfx1030 GQA decode attention** (`fattn-gqa-gfx1030.cu`, admitted on gfx1030 only) — one K/V read
   per KV head instead of per Q head: 4.4–5× over the generic path at 32k context
   `[measured: docs/gfx1030-checkpoint.md]`.
-- **Residual ADD fused into RMS_NORM** (`norm.cu`, `do_preadd`) — one launch removed per layer.
-- **RDNA2 MMQ config table** (`mmq-config-rdna2.cuh`, `mmq.cuh`) — gfx1030 no longer silently inherits
-  another arch's tiling.
+- **Residual ADD fused into RMS_NORM** (`norm.cu`, `do_preadd`) — the norm reads the residual and
+  writes the sum in one pass, removing one launch per step (census 1536.2 → 1535.2)
+  `[measured: docs/gfx1030-checkpoint.md]`.
+- **RDNA2 MMQ config table** (`mmq.cu`, `mmq.cuh`, `mmq-config-rdna2.cuh`) — gfx1030 gets its own
+  MMQ config, and other HIP arches no longer silently fall back to that dp4a config: the device pass
+  errors instead `[code]`.
 
 Those are documented in `docs/gfx1030-directive.md` and `docs/gfx1030-checkpoint.md`; this file does
 not re-derive them.
-
 
 ---
 
@@ -100,11 +102,19 @@ cmake --build build --config Release -j12      # NOT -j$(nproc)
 Binaries land in `build/bin/`. Use `-j8`..`-j12`: at `-j28` this host OOMs and ROCm clang
 segfaults on E-cores `[measured: AGENTS.md]`.
 
-`build-hip-gfx1030/` is the previous owner build directory; its binaries are **md5-identical** to
-`build/bin/` `[measured: md5sum]`. Nothing depends on the old path.
+> **⚠ `build/bin` is a symlink on this host.** It currently points at
+> `../build-hip-gfx1030/bin`, which is the original owner build tree — so "the two build
+> directories have identical binaries" is true by construction, not because two independent builds
+> agreed. `scripts/gfx1030.py` still resolves `HIP_BIN` to `build-hip-gfx1030/bin` for the same
+> reason. Consequence: a fresh `cmake -B build` writes its output *through* the symlink unless you
+> remove it first. The superseded Vulkan binaries live in `build/bin.superseded-20261028`.
+>
+> `build/` also accumulates `.bc` / `.hipi` files from ISA-census builds compiled with
+> `--save-temps`; they are build artifacts and must not be committed.
 
 Native gfx1030 code paths are guarded with `defined(RDNA2)` at compile time and with the runtime
-`GGML_CUDA_CC_IS_RDNA2(cc)` check, so a multi-arch build does not enable them on other cards.
+`GGML_CUDA_CC_IS_RDNA2(cc)` check (used to admit the gfx1030 GQA attention kernel in `fattn.cu`),
+so a multi-arch build does not enable them on other cards `[code]`.
 
 ---
 
@@ -197,8 +207,8 @@ the measured-optimal values as defaults `[measured: docs/gfx1030-optimization-pl
 | `GGML_RDNA2_MMVQ_2ROWS` | `0` | two weight rows per block, sharing activation loads |
 
 All of them are additionally gated on `defined(RDNA2)`; every arm is a no-op on other targets
-`[code]`. The arms themselves are compile-time, so changing one requires a rebuild — there is no
-runtime switch for the four width knobs.
+`[code]`. The arms are compile-time, so changing one requires a rebuild — there is no runtime knob
+for them. The only runtime control in `mmvq.cu` is the MTP KLONG guard in §4.4.
 
 ### 4.4 KLONG — disabled by default, guarded per graph
 
@@ -272,26 +282,50 @@ now grow past an EOG except on full acceptance, where `n_rollback` is already 0 
   The check now requires `*end == '\0'` in addition to the existing `end == env`, `ERANGE`, zero and
   absurd-value rejects. A typo'd value falls back to the 32 MB default instead of being honoured
   `[code]`.
+- **W4, prequant reserve ordering.** The arena separates *claiming* a slot from *publishing* it:
+  `ggml_cuda_prequant_claim()` reserves space with `claimed_written = false`, and only the launch
+  that actually writes the blocks publishes the slot, via `ggml_cuda_prequant_take()`, by stamping
+  `written_stamp`. `ggml_cuda_prequant_find()` hands out a slot only when
+  `written_stamp == prequant_stamp`, i.e. when its producer ran in *this* graph execution, so a
+  consumer can never read a slot holding a previous execution's bytes `[code]`. W4 is the ordering
+  fix that makes the reservation happen before the slot can be looked up; the pre-fix shape is not
+  preserved in the tree, so this describes the invariant, not the old bug.
 
-### 5.3 FlashAttention launch bounds — `fattn-gqa-gfx1030.cu`
+### 5.3 FlashAttention: NaN guard and launch bounds — `fattn-gqa-gfx1030.cu`
 
-The gfx1030 GQA kernel's `__launch_bounds__` min-blocks argument moved from 1 to 2, with the
-comment corrected to match: the register budget at this geometry allows the compiler to target
-2-block occupancy without spilling the accumulators, and that measured faster on the verify path
-`[measured: docs/gfx1030-optimization-plan.md]`. Note this is a *compiler hint*, not a promise of
-two resident blocks — see `docs/gfx1030-isa-report.md` for why two blocks are architecturally
-impossible for the MMQ prefill kernel at J=64.
+**W3, NaN guard.** A fully out-of-range chunk (every score `-INFINITY`, which happens when every
+key in the chunk is masked) makes `chunk_max == -INFINITY` too, and `expf(-INF - -INF)` is `NaN`,
+which then poisons the running accumulator. The kernel now skips a chunk only when
+`chunk_max == -INFINITY` — a *partial* mask, where at least one key is valid, still goes through the
+normal path so its contribution is not silently dropped `[code]`.
+
+**Launch bounds.** The kernel's `__launch_bounds__` min-blocks argument moved from 1 to 2, with the
+comment corrected to match: at this register budget the compiler can target 2-block occupancy
+without spilling the accumulators, and that measured faster on the verify path
+`[measured: docs/gfx1030-optimization-plan.md]`. This is a *compiler hint*, not a promise of two
+resident blocks — see `docs/gfx1030-isa-report.md` for why two blocks are architecturally impossible
+for the MMQ prefill kernel at J=64.
 
 ### 5.4 Tooling fixes in `scripts/gfx1030.py` (audit items W1, W2, I6)
 
-- **W1** — the A/B "swap" arm launched with the arms in the wrong order, so the interleaved pair
-  was not actually swapped.
-- **W2** — a failed arm produced `NaN`/`ZeroDivisionError` in the statistics instead of being
-  reported as a failed arm.
-- **I6** — `--dry-run` printed the wrong command because it did not use `_llama_bench_args`.
+- **W1** — with `--ab BASE.so FIX.so`, the library swap target was hard-coded to
+  `HIP_BIN/libggml-hip.so.0` instead of the arm's own bindir. When `--a-bindir`/`--b-bindir` pointed
+  elsewhere, the copy clobbered the real tree and never affected the arm under test: a *silent
+  no-op* A/B that still reported a delta. The target is now `<arm bindir>/libggml-hip.so.0`, and the
+  swap is explicitly skipped when the two arms use different bindirs `[code]`.
+- **W2** — a failed arm recorded `ts = 0.0`. Feeding that into the mean made the summary divide by
+  zero and threw `ZeroDivisionError` instead of reporting a failed arm. A row with no jsonl output is
+  now recorded as `NaN`, and the paired statistics drop it (`deltas_ms` is filtered with `x == x`)
+  so a broken arm shows up as a missing pair rather than a fake number `[code]`.
+- **I6** — `--dry-run` printed a command that did not match what would actually run, because it
+  built its own argument list instead of calling `_llama_bench_args()`. Both the plain bench dry-run
+  and the A/B dry-run now go through the same helper, so the printed argv (including `-p`, `-n`,
+  `-ub`, `-ncmoe` and `--extra`) is the one that would be executed `[code]`.
 
-Also from the same audit: **I2** is a comment correction and **I5** fixes undefined behaviour in
-`tolower` by passing `unsigned char`-cast input. These carry no performance claim.
+Also from the same audit: **I2** is a comment correction, and **I5** fixes undefined behaviour in
+`mmq.cu`'s `GGML_CUDA_MMQ_PREC` parser — `std::tolower(c)` on a possibly-negative `char` is UB, so
+the cast to `unsigned char` is what makes a non-ASCII value in that env var merely ignored instead of
+undefined. Neither carries a performance claim `[code]`.
 
 ---
 
@@ -311,6 +345,10 @@ scripts/bench-exclusive.sh
 - Fork-vs-upstream sweep: `scripts/bench-fork-vs-upstream.sh`.
 - Paired A/B statistics: `scripts/gfx1030.py bench --ab`, `--ab-stats "d1,d2,..."`,
   `--min-detectable <ms>` for the pair count needed at a given effect size.
+- Two-build-dir A/B: `--a-bindir DIR --b-bindir DIR` (per-arm `LD_LIBRARY_PATH`); env-only A/B:
+  `--a-env K=V --b-env K=V`. `--pairs` defaults to 3 and warns below the documented five-pair gate;
+  `--gate <t/s>` turns the comparison into PASS/FAIL; `--out` writes the result JSON (including
+  sha256 provenance of each arm's `llama-bench` and `libggml*.so`).
 - Upstream reference build for comparison: `/tmp/opencode/llama-upstream/build/bin/llama-bench`.
 
 `llama-server` must never be launched, stopped or health-checked for a measurement on this host; all
@@ -331,8 +369,13 @@ numbers come from `llama-bench` and `test-backend-ops`.
 - **Attention path targets are not met.** Prefill sits at ~31 % of the measured dp4a ceiling; upstream
   parity is not the bar (`docs/gfx1030-directive.md`).
 - **RDNA2 switches are compile-time.** No runtime tuning; a wrong value costs a rebuild.
-- **Nothing here is upstreamed.** The fork's own policy (see `AGENTS.md`) is that agents produce
-  analysis and diffs and a human lands everything.
+- **The KLONG guard is per-process, not per-device.** `ggml_cuda_klong_disabled` is a single global
+  `std::atomic<bool>`; with several CUDA/HIP devices in one process, one context's MTP graph would
+  suppress KLONG for the others for the duration of that `process_ubatch` call. Not a correctness
+  problem while KLONG defaults to off, but it is the shape to fix if KLONG is re-enabled.
+- **Nothing here is upstreamed.** The repo's AI policy (see `AGENTS.md`) requires that any submitted
+  code be fully understood, debuggable and defensible, and forbids AI-written PR descriptions,
+  commit messages and reviewer responses.
 
 ---
 
@@ -342,7 +385,7 @@ numbers come from `llama-bench` and `test-backend-ops`.
 |---|---|
 | `docs/gfx1030-changes-summary.md` | this file — what changed and what it measured |
 | `docs/gfx1030-benchmarking.md` | host measurement rules, A/B statistics, resolving power |
-| `docs/rdna2-optimization-guide.md` | RDNA 2 kernel optimization playbook |
+| `docs/rdna2-optimization-guide.md` | RDNA 2 kernel optimization playbook (mandatory reading for optimization agents, per `AGENTS.md`) |
 | `docs/gfx1030-directive.md` | campaign state, work packages, closed lanes |
 | `docs/gfx1030-isa-report.md` | the LDS/VGPR measurement that closed the occupancy lane |
 | `docs/gfx1030-optimization-plan.md` | the optimization work plan |
